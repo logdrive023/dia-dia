@@ -162,6 +162,8 @@ export interface CashRecord {
   openingCashInCents?: number | null;
   countedBalanceInCents?: number | null;
   status: DayStatus;
+  /** A diária automática já foi conferida neste dia (se for tirada no ✕, não volta). */
+  dailyPayDone?: boolean;
 }
 
 /**

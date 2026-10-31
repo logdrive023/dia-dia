@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
+import { ensureDailyPay } from './services/cash';
 import { db } from './db/db';
 import type { DailyRecord } from './db/types';
 import { todayStr, uid } from './lib/util';
@@ -36,6 +37,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [cartId, setCartId] = useState(uid());
   const day = useLiveQuery(async () => (await db.dailyRecords.where('date').equals(date).first()) ?? null, [date]);
   const settings = useLiveQuery(getAllSettings, []) ?? DEFAULT_SETTINGS;
+  // dia aberto sem a diária (ex.: iniciado antes desta versão): lança uma vez só
+  useEffect(() => {
+    if (day && day.status === 'open') ensureDailyPay(day.id).catch(() => undefined);
+  }, [day?.id, day?.status]);
 
   const setDate = useCallback((d: string) => { setDateRaw(d); setCart([]); setCartId(uid()); }, []);
 

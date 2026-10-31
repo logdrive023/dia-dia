@@ -21,7 +21,10 @@ export default function CloseDaySheet({ open, onClose }: { open: boolean; onClos
   const s = useLiveQuery(async () => (day && open ? daySummary(day.id, day.date) : null), [day?.id, open]);
   if (!open || !day) return null;
   const opts = { symbol: settings.currencySymbol, title: settings.reportTitle };
-  const generated = s ? (fmt === 'whats' ? whatsappReport(day.date, s, opts) : notebookReport(day.date, s, opts)) : '';
+  // o que for digitado em "Dinheiro vivo contado" já aparece no relatório (antes de encerrar)
+  const typed = counted.trim() ? toCents(counted) : null;
+  const view = s && typed !== null ? { ...s, cash: { ...s.cash, counted: typed, difference: typed - s.cash.cashOnHand } } : s;
+  const generated = view ? (fmt === 'whats' ? whatsappReport(day.date, view, opts) : notebookReport(day.date, view, opts)) : '';
   const text = editing && draft !== null ? draft : generated;
   const pickFmt = (f: 'whats' | 'caderno') => { setFmt(f); setDraft(null); setEditing(false); };
   const closed = day.status === 'closed';
@@ -63,7 +66,7 @@ export default function CloseDaySheet({ open, onClose }: { open: boolean; onClos
             ))}
           </div>
           <Card className="p-3 mt-2 flex items-center justify-between gap-3">
-            <span className="min-w-0 text-sm text-slate-600 break-words">Saldo final (ontem {money(s.cash.opening)} + hoje {money(s.cash.todayNet)}{s.cash.retiradas ? ` − retirada ${money(s.cash.retiradas)}` : ''}{s.cash.pagamentos ? ` − pagamento ${money(s.cash.pagamentos)}` : ''})</span>
+            <span className="min-w-0 text-sm text-slate-600 break-words">✅ Total (ontem {money(s.cash.opening)} {s.cash.dayResult < 0 ? '−' : '+'} hoje {money(Math.abs(s.cash.dayResult))})</span>
             <span className="shrink-0 text-xl font-extrabold tabular-nums">{money(s.cash.accumulated)}</span>
           </Card>
           {!closed && (

@@ -474,19 +474,30 @@ describe('dados iniciais oficiais (caderno 30/10 e 31/10)', () => {
     expect(caixa).toBe([
       '🧮 *Caixa*',
       '📅 Ontem: 1.474,80 (💵 645 · 🏦 829,80)',
-      '➕ Vendas: 935 (💵 935 · ⚡ 0 · 💳 0 · 🏧 0)',
-      '➖ Dei a Chico: 50',
-      '➖ Pagamento da diária de 30/10: 150',
-      '➖ Pagamento da diária de 31/10: 150',
+      '➕ 💵 Vendas no Dinheiro: 935',
+      '➕ ⚡ Vendas no Pix: 0',
+      '➕ 💳 Vendas no Crédito: 0',
+      '➕ 🏧 Vendas no Débito: 0',
+      '➖ 🤝 Dei a Chico: 50',
+      '➖ 💼 Pagamento da diária de 30/10: 150',
+      '➖ 💼 Pagamento da diária de 31/10: 150',
       '*= Hoje: +585*',
       '✅ *Total: 2.059,80* (ontem 1.474,80 + hoje 585)',
-      '💵 Na mão: 1.230 · 🏦 No banco: 829,80', '', '',
+      '💵 Na mão: 1.230',
+      '🏦 No banco: 829,80', '', '',
     ].join('\n'));
     // somando as linhas de hoje dá o "Hoje"; ontem + hoje dá o total
     const { cashStatement } = await import('../services/summary');
     const st = cashStatement(c);
     expect(st.reduce((n, x) => n + (x.sign === '+' ? x.cents : -x.cents), 0)).toBe(c.dayResult);
     expect(c.opening + c.dayResult).toBe(c.accumulated);
+    // contado na mão aparece no relatório: faltam / sobram / bateu
+    await setCountedBalance(d1.id, 120000);
+    expect(whatsappReport('2026-10-31', await daySummary(d1.id, d1.date))).toContain('🔎 Contado na mão: 1.200 — faltam 30 ⚠️');
+    await setCountedBalance(d1.id, 123000);
+    expect(whatsappReport('2026-10-31', await daySummary(d1.id, d1.date))).toContain('🔎 Contado na mão: 1.230 — bateu ✅');
+    expect(notebookReport('2026-10-31', await daySummary(d1.id, d1.date))).toContain('Contado na mão: 1.230 — bateu ✅');
+    await setCountedBalance(d1.id, null);
     const n = notebookReport('2026-10-31', await daySummary(d1.id, d1.date));
     expect(n).toContain('Pagamento: 300 (2 diárias de 150)');
     // o dia seguinte continua do 1.230 em dinheiro
@@ -545,6 +556,28 @@ describe('dados iniciais oficiais (caderno 30/10 e 31/10)', () => {
     c = await computeCash(d3.id);
     expect(c.pagamentos).toBe(0);
     expect((await runDiagnostics()).findings.filter((f) => f.level === 'erro')).toEqual([]);
+  });
+  it('diária em dia já aberto (iniciado antes da versão nova): entra uma vez; tirou no ✕, não volta', async () => {
+    const { ensureDailyPay, removeCashMovement } = await import('../services/cash');
+    useDatabase(new AppDB(`aberto-${Math.random()}`));
+    await seedIfNeeded();
+    await db.settings.where('key').equals('initialOpening').delete();
+    const d = await startDay('2026-11-05'); // como na versão antiga: sem diária
+    const v = (await db.variants.toArray()).find((x) => x.forSale !== false && x.startQuantity >= 1)!;
+    await createOrder({ orderId: uid(), dailyRecordId: d.id, paymentMethod: 'dinheiro', lines: [{ variantId: v.id, quantity: 1, unitPriceInCents: 35000 }] });
+    expect((await computeCash(d.id)).pagamentos).toBe(0);
+    const m = await ensureDailyPay(d.id); // o app abre nesse dia
+    let c = await computeCash(d.id);
+    expect([c.pagamentos, c.dayResult, c.cashOnHand]).toEqual([15000, 20000, 20000]);
+    expect(await ensureDailyPay(d.id)).toBeNull(); // abrir de novo não duplica
+    await removeCashMovement(m!.id); // não recebeu nesse dia
+    expect(await ensureDailyPay(d.id)).toBeNull(); // e não volta
+    c = await computeCash(d.id);
+    expect(c.pagamentos).toBe(0);
+    // dia encerrado não recebe diária
+    const d2 = await startDay('2026-11-06');
+    await closeDay(d2.id);
+    expect(await ensureDailyPay(d2.id)).toBeNull();
   });
   it('dia antes do caderno começa zerado e não cria os dias do caderno', async () => {
     useDatabase(new AppDB(`caderno2-${Math.random()}`));

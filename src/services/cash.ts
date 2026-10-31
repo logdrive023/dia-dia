@@ -63,8 +63,13 @@ export async function ensureDailyPay(dailyRecordId: string) {
   if (!(await getSetting('autoDailyPay'))) return null;
   const cents = await getSetting('dailyPayInCents');
   if (!isCents(cents) || cents <= 0) return null;
-  return db.transaction('rw', db.dailyRecords, db.cashMovements, async () => {
-    const day = await assertOpen(dailyRecordId);
+  return db.transaction('rw', db.dailyRecords, db.cashMovements, db.cashRecords, async () => {
+    const day = await db.dailyRecords.get(dailyRecordId);
+    if (!day || day.status !== 'open') return null;
+    // cada dia é conferido uma vez só: se a diária foi tirada no ✕, não volta
+    const rec = await db.cashRecords.where('dailyRecordId').equals(day.id).first();
+    if (!rec || rec.dailyPayDone) return null;
+    await db.cashRecords.update(rec.id, { dailyPayDone: true });
     const [, mm, dd] = day.date.split('-');
     const description = `diária de ${dd}/${mm}`;
     const has = (await db.cashMovements.where('dailyRecordId').equals(day.id).toArray()).some((m) => m.type === 'pagamento' && m.description === description);

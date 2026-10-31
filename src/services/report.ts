@@ -33,6 +33,12 @@ export function orderLine(lines: { quantity: number; unitPriceInCents: number | 
   return `${parts.join(' + ')} = ${money(total)} ${how}`;
 }
 
+/** "bateu ✅" · "faltam 50" · "sobram 20" (contado − o que deveria ter em dinheiro vivo). */
+function countedText(c: DaySummary['cash']) {
+  const d = c.difference ?? 0;
+  return d === 0 ? 'bateu ✅' : d < 0 ? `faltam ${money(-d)} ⚠️` : `sobram ${money(d)}`;
+}
+
 /** " (2 diárias de 150)" quando der para dividir certinho. */
 function payDays(c: DaySummary['cash']) {
   const n = c.pagamentoDias;
@@ -73,6 +79,7 @@ export function notebookReport(date: string, s: DaySummary, opts: Opts = {}) {
   if (s.cash.entradas) L.push(`Entradas: ${money(s.cash.entradas)}`);
   L.push('──────────');
   L.push(...cashLines(s));
+  if (s.cash.counted !== null) L.push(`Contado na mão: ${money(s.cash.counted)} — ${countedText(s.cash)}`);
   return L.join('\n');
 }
 
@@ -112,15 +119,14 @@ export function whatsappReport(date: string, s: DaySummary, opts: Opts = {}) {
   // caixa: ontem separado, a conta de hoje linha por linha, e o total no fim
   section('🧮 *Caixa*');
   L.push(`📅 Ontem: ${$(c.opening)} (💵 ${money(c.openingCash)} · 🏦 ${money(c.opening - c.openingCash)})`);
-  const st = cashStatement(c);
-  const sales = st.filter((x) => x.label.startsWith('Vendas no'));
-  L.push(`➕ Vendas: ${$(c.salesTotal)} (${sales.map((x) => `${x.icon} ${money(x.cents)}`).join(' · ')})`);
-  for (const x of st.filter((y) => !y.label.startsWith('Vendas no'))) L.push(`${x.sign === '+' ? '➕' : '➖'} ${x.label}: ${$(x.cents)}`);
+  // uma linha por forma de venda e por saída: dá para ver de onde veio cada valor
+  for (const x of cashStatement(c)) L.push(`${x.sign === '+' ? '➕' : '➖'} ${x.icon} ${x.label}: ${$(x.cents)}`);
   L.push(`*= Hoje: ${c.dayResult >= 0 ? '+' : '−'}${$(Math.abs(c.dayResult))}*`);
   L.push(`✅ *Total: ${$(c.accumulated)}* (ontem ${money(c.opening)} ${c.dayResult >= 0 ? '+' : '−'} hoje ${money(Math.abs(c.dayResult))})`);
-  L.push(`💵 Na mão: ${$(c.cashOnHand)} · 🏦 No banco: ${$(c.otherBalance)}`);
+  L.push(`💵 Na mão: ${$(c.cashOnHand)}`);
+  L.push(`🏦 No banco: ${$(c.otherBalance)}`);
   if (c.counted !== null)
-    L.push(c.difference === 0 ? `🔎 Contado: ${$(c.counted)} — bateu ✅` : `🔎 Contado: ${$(c.counted)} — diferença ${c.difference! > 0 ? '+' : ''}${$(c.difference!)}`);
+    L.push(`🔎 Contado na mão: ${$(c.counted)} — ${countedText(c)}`);
 
   // peças que saíram (vendidas)
   section(`🛍️ *O que saiu (${plural(s.soldUnits, 'peça', 'peças')})*`);
