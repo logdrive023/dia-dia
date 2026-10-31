@@ -1,0 +1,269 @@
+import { db } from '../db/db';
+import type { CashMovement, DailyStockItem, Group, MovementType, Order, PaymentMethod, Sale, StockMovement, Variant } from '../db/types';
+import { todayStr } from '../lib/util';
+import { getSetting } from './settings';
+
+export interface CashSummary {
+  opening: number;
+  salesByMethod: Record<PaymentMethod, number>;
+  salesTotal: number;
+  entradas: number;
+  dar: CashMovement[];
+  darTotal: number;
+  despesas: number;
+  retiradas: number;
+  /** Vendas + entradas - dei - despesas ("935 - 50 = 885") */
+  todayNet: number;
+  /** Ontem + hoje */
+  subtotal: number;
+  /** Ontem + hoje - retiradas ("1530 - 300 = 1230"). É também o saldo esperado. */
+  accumulated: number;
+  counted: number | null;
+  difference: number | null;
+  /** true quando o "Ontem" foi digitado à mão em vez de vir do dia anterior */
+  openingManual: boolean;
+  movements: CashMovement[];
+}
+
+/**
+ * Caixa de todos os dias até `uptoDate`, em ordem: o "Ontem" de cada dia é o saldo final do dia
+ * registrado anterior (a menos que tenha sido digitado à mão). Assim, corrigir um dia passado
+ * atualiza a conta dos dias seguintes.
+ */
+export async function cashChain(uptoDate?: string): Promise<Map<string, CashSummary>> {
+  const days = uptoDate
+    ? await db.dailyRecords.where('date').belowOrEqual(uptoDate).sortBy('date')
+    : await db.dailyRecords.orderBy('date').toArray();
+  const ids = days.map((d) => d.id);
+  const [recs, moves] = await Promise.all([
+    db.cashRecords.where('dailyRecordId').anyOf(ids).toArray(),
+    db.cashMovements.where('dailyRecordId').anyOf(ids).toArray(),
+  ]);
+  const recBy = new Map(recs.map((r) => [r.dailyRecordId, r]));
+  const movesBy = new Map<string, CashMovement[]>();
+  for (const m of moves.sort((a, b) => a.createdAt.localeCompare(b.createdAt)))
+    movesBy.set(m.dailyRecordId, [...(movesBy.get(m.dailyRecordId) ?? []), m]);
+  const out = new Map<string, CashSummary>();
+  let prev = 0;
+  for (const d of days) {
+    const rec = recBy.get(d.id);
+    const manual = !!rec?.openingManual;
+    const s = summarizeCash(manual ? rec!.openingBalanceInCents : prev, manual, rec?.countedBalanceInCents ?? null, movesBy.get(d.id) ?? []);
+    out.set(d.id, s);
+    prev = s.accumulated;
+  }
+  return out;
+}
+
+export async function computeCash(dailyRecordId: string): Promise<CashSummary> {
+  const day = await db.dailyRecords.get(dailyRecordId);
+  const s = day && (await cashChain(day.date)).get(day.id);
+  return s ?? summarizeCash(0, false, null, []);
+}
+
+function summarizeCash(opening: number, openingManual: boolean, counted: number | null, movements: CashMovement[]): CashSummary {
+  const salesByMethod: Record<PaymentMethod, number> = { dinheiro: 0, pix: 0, cartao: 0, outro: 0 };
+  let entradas = 0, darTotal = 0, despesas = 0, retiradas = 0;
+  const dar: CashMovement[] = [];
+  for (const m of movements) {
+    switch (m.type) {
+      case 'venda': salesByMethod[m.paymentMethod] += m.amountInCents; break;
+      case 'estorno': salesByMethod[m.paymentMethod] -= m.amountInCents; break;
+      case 'entrada': entradas += m.amountInCents; break;
+      case 'dar': darTotal += m.amountInCents; dar.push(m); break;
+      case 'despesa': despesas += m.amountInCents; break;
+      case 'retirada': retiradas += m.amountInCents; break;
+    }
+  }
+  const salesTotal = Object.values(salesByMethod).reduce((a, b) => a + b, 0);
+  const todayNet = salesTotal + entradas - darTotal - despesas;
+  const subtotal = opening + todayNet;
+  const accumulated = subtotal - retiradas;
+  return {
+    opening, salesByMethod, salesTotal, entradas, dar, darTotal, despesas, retiradas, todayNet, subtotal,
+    accumulated, counted, difference: counted === null ? null : counted - accumulated, openingManual, movements,
+  };
+}
+
+export interface StockRow {
+  item: DailyStockItem;
+  variant: Variant;
+  group: Group;
+  reserved: number;
+  available: number;
+  min: number;
+  low: boolean;
+  out: boolean;
+}
+
+export async function loadStockRows(dailyRecordId: string, date: string): Promise<StockRow[]> {
+  const [items, variants, groups, lowDefault, res] = await Promise.all([
+    db.dailyStockItems.where('dailyRecordId').equals(dailyRecordId).toArray(),
+    db.variants.toArray(),
+    db.groups.toArray(),
+    getSetting('lowStockDefault'),
+    db.reservations.where('status').equals('active').toArray(),
+  ]);
+  const vMap = new Map(variants.map((v) => [v.id, v]));
+  const gMap = new Map(groups.map((g) => [g.id, g]));
+  const reserved = new Map<string, number>();
+  for (const r of res) if (r.date <= date) reserved.set(r.variantId, (reserved.get(r.variantId) ?? 0) + r.quantity);
+  // variações cadastradas depois que o dia começou aparecem com 0 (o registro é criado na primeira mudança)
+  const has = new Set(items.map((i) => i.variantId));
+  const all = [...items];
+  for (const v of variants)
+    if (!has.has(v.id) && !v.archivedAt && todayStr(new Date(v.createdAt)) <= date)
+      all.push({ id: `virtual-${v.id}`, dailyRecordId, variantId: v.id, initialQuantity: 0, currentQuantity: 0 });
+  const rows: StockRow[] = [];
+  for (const item of all) {
+    const variant = vMap.get(item.variantId);
+    const group = variant && gMap.get(variant.groupId);
+    if (!variant || !group) continue;
+    const r = reserved.get(variant.id) ?? 0;
+    const min = variant.minimumStock ?? lowDefault;
+    const available = item.currentQuantity - r;
+    rows.push({ item, variant, group, reserved: r, available, min, out: available <= 0, low: available > 0 && available <= min });
+  }
+  rows.sort((a, b) => a.group.displayOrder - b.group.displayOrder || a.variant.displayOrder - b.variant.displayOrder);
+  return rows;
+}
+
+export interface DaySummary {
+  totalUnits: number;
+  initialUnits: number;
+  soldUnits: number;
+  enteredUnits: number;
+  outUnits: number;
+  adjustUnits: number;
+  orders: Order[];
+  sales: Sale[];
+  soldByVariant: { variant: Variant; group: Group; qty: number }[];
+  enteredByVariant: { variant: Variant; group: Group; qty: number }[];
+  restock: StockRow[];
+  cash: CashSummary;
+}
+
+export async function daySummary(dailyRecordId: string, date: string): Promise<DaySummary> {
+  const [rows, movements, orders, sales, cash] = await Promise.all([
+    loadStockRows(dailyRecordId, date),
+    db.stockMovements.where('dailyRecordId').equals(dailyRecordId).toArray(),
+    db.orders.where('dailyRecordId').equals(dailyRecordId).sortBy('createdAt'),
+    db.sales.where('dailyRecordId').equals(dailyRecordId).toArray(),
+    computeCash(dailyRecordId),
+  ]);
+  const byVariant = new Map(rows.map((r) => [r.variant.id, r]));
+  const okOrders = orders.filter((o) => o.status === 'ok');
+  const okSales = sales.filter((s) => s.status === 'ok');
+  const sold = new Map<string, number>();
+  for (const s of okSales) sold.set(s.variantId, (sold.get(s.variantId) ?? 0) + s.quantity);
+  const entered = new Map<string, number>();
+  let enteredUnits = 0, outUnits = 0, adjustUnits = 0;
+  for (const m of effectiveMovements(movements)) {
+    if (m.type === 'entrada') { enteredUnits += m.quantity; entered.set(m.variantId, (entered.get(m.variantId) ?? 0) + m.quantity); }
+    if (m.type === 'saida' || m.type === 'perda') outUnits += -m.quantity;
+    if (m.type === 'ajuste' || m.type === 'correcao') adjustUnits += m.quantity;
+  }
+  const toList = (m: Map<string, number>) =>
+    [...m.entries()].filter(([, q]) => q).map(([id, qty]) => ({ ...byVariant.get(id)!, qty }))
+      .filter((x) => x.variant)
+      .sort((a, b) => a.group.displayOrder - b.group.displayOrder || a.variant.displayOrder - b.variant.displayOrder)
+      .map(({ variant, group, qty }) => ({ variant, group, qty }));
+  return {
+    totalUnits: rows.reduce((s, r) => s + r.item.currentQuantity, 0),
+    initialUnits: rows.reduce((s, r) => s + r.item.initialQuantity, 0),
+    soldUnits: okSales.reduce((s, x) => s + x.quantity, 0),
+    enteredUnits, outUnits, adjustUnits,
+    orders: okOrders, sales: okSales,
+    soldByVariant: toList(sold),
+    enteredByVariant: toList(entered),
+    restock: rows.filter((r) => !r.variant.archivedAt && r.variant.active && !r.group.archivedAt && r.group.active && (r.out || r.low)),
+    cash,
+  };
+}
+
+/** Tira do resumo os movimentos desfeitos e os estornos deles (uma entrada desfeita não “entrou”). */
+export function effectiveMovements(moves: StockMovement[]) {
+  const undone = new Set(moves.map((m) => m.reversedMovementId).filter(Boolean));
+  return moves.filter((m) => !m.reversedMovementId && !undone.has(m.id));
+}
+
+// ---------------- dia anterior alterado ----------------
+
+export interface SyncGap {
+  prevDate: string;
+  diffs: { variantId: string; expected: number; initial: number }[];
+  units: number;
+}
+
+/**
+ * Dias são independentes: o estoque inicial é uma cópia feita quando o dia começou.
+ * Se o dia anterior foi corrigido depois, isto mostra a diferença para a usuária decidir.
+ */
+export async function syncGap(dailyRecordId: string): Promise<SyncGap | null> {
+  const day = await db.dailyRecords.get(dailyRecordId);
+  if (!day || !day.sourceDate) return null; // criado em branco: não compara
+  const prev = await db.dailyRecords.where('date').below(day.date).last();
+  if (!prev) return null;
+  const [prevItems, items] = await Promise.all([
+    db.dailyStockItems.where('dailyRecordId').equals(prev.id).toArray(),
+    db.dailyStockItems.where('dailyRecordId').equals(day.id).toArray(),
+  ]);
+  const expected = new Map(prevItems.map((i) => [i.variantId, i.currentQuantity]));
+  const initial = new Map(items.map((i) => [i.variantId, i.initialQuantity]));
+  const diffs: SyncGap['diffs'] = [];
+  for (const id of new Set([...expected.keys(), ...initial.keys()])) {
+    const e = expected.get(id) ?? 0, i = initial.get(id) ?? 0;
+    if (e !== i) diffs.push({ variantId: id, expected: e, initial: i });
+  }
+  if (!diffs.length) return null;
+  return { prevDate: prev.date, diffs, units: diffs.reduce((s, d) => s + Math.abs(d.expected - d.initial), 0) };
+}
+
+// ---------------- comparação entre dias ----------------
+
+export interface CompareRow {
+  variant: Variant;
+  group: Group;
+  a: number;
+  b: number;
+  diff: number;
+  byType: Partial<Record<MovementType, number>>;
+  explained: number;
+  unexplained: number;
+}
+
+/** Compara saldo final de A com o de B e explica a diferença pelas movimentações registradas entre as datas. */
+export async function compareDays(dateA: string, dateB: string): Promise<CompareRow[]> {
+  const [from, to] = dateA <= dateB ? [dateA, dateB] : [dateB, dateA];
+  const days = await db.dailyRecords.where('date').between(from, to, true, true).toArray();
+  const dayA = days.find((d) => d.date === from);
+  const dayB = days.find((d) => d.date === to);
+  if (!dayA || !dayB) return [];
+  const between = new Set(days.filter((d) => d.date > from).map((d) => d.id));
+  const [itemsA, itemsB, variants, groups, movements] = await Promise.all([
+    db.dailyStockItems.where('dailyRecordId').equals(dayA.id).toArray(),
+    db.dailyStockItems.where('dailyRecordId').equals(dayB.id).toArray(),
+    db.variants.toArray(), db.groups.toArray(),
+    db.stockMovements.where('dailyRecordId').anyOf([...between]).toArray(),
+  ]);
+  const gMap = new Map(groups.map((g) => [g.id, g]));
+  const a = new Map(itemsA.map((i) => [i.variantId, i.currentQuantity]));
+  const b = new Map(itemsB.map((i) => [i.variantId, i.currentQuantity]));
+  const effective = effectiveMovements(movements);
+  const rows: CompareRow[] = [];
+  for (const v of variants) {
+    if (!a.has(v.id) && !b.has(v.id)) continue;
+    const g = gMap.get(v.groupId);
+    if (!g) continue;
+    const byType: Partial<Record<MovementType, number>> = {};
+    let explained = 0;
+    for (const m of effective) if (m.variantId === v.id && m.quantity) {
+      byType[m.type] = (byType[m.type] ?? 0) + m.quantity;
+      explained += m.quantity;
+    }
+    const qa = a.get(v.id) ?? 0, qb = b.get(v.id) ?? 0;
+    rows.push({ variant: v, group: g, a: qa, b: qb, diff: qb - qa, byType, explained, unexplained: qb - qa - explained });
+  }
+  rows.sort((x, y) => x.group.displayOrder - y.group.displayOrder || x.variant.displayOrder - y.variant.displayOrder);
+  return rows;
+}

@@ -1,0 +1,179 @@
+export type ID = string;
+
+export type PaymentMethod = 'dinheiro' | 'pix' | 'cartao' | 'outro';
+
+export interface Group {
+  id: ID;
+  name: string;
+  description?: string;
+  icon?: string;
+  color: string;
+  displayOrder: number;
+  active: boolean;
+  archivedAt?: string | null;
+  categoryIds?: ID[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface Variant {
+  id: ID;
+  groupId: ID;
+  name: string;
+  description?: string;
+  color?: string;
+  displayOrder: number;
+  active: boolean;
+  archivedAt?: string | null;
+  /** null = usa o padrão das configurações */
+  minimumStock: number | null;
+  /** Quantidade usada quando a variação entra num dia sem histórico anterior. */
+  startQuantity: number;
+  optionalPriceInCents?: number | null;
+  notes?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface Category {
+  id: ID;
+  name: string;
+  color: string;
+  displayOrder: number;
+}
+
+export type DayStatus = 'open' | 'closed';
+
+export interface DailyRecord {
+  id: ID;
+  date: string; // YYYY-MM-DD
+  sourceDate?: string | null;
+  status: DayStatus;
+  notes?: string;
+  closedAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface DailyStockItem {
+  id: ID;
+  dailyRecordId: ID;
+  variantId: ID;
+  initialQuantity: number;
+  currentQuantity: number;
+}
+
+export type MovementType =
+  | 'venda'
+  | 'entrada'
+  | 'saida'
+  | 'perda'
+  | 'ajuste'
+  | 'correcao'
+  | 'reserva'
+  | 'cancelamento';
+
+export interface StockMovement {
+  id: ID;
+  dailyRecordId: ID;
+  variantId: ID;
+  type: MovementType;
+  /** Delta aplicado ao estoque físico (negativo = saiu). Reservas usam 0. */
+  quantity: number;
+  previousBalance: number;
+  newBalance: number;
+  createdAt: string;
+  description?: string;
+  reversedMovementId?: ID | null;
+  orderId?: ID | null;
+}
+
+/** Uma venda para uma pessoa (pode ter várias peças/linhas). */
+export interface Order {
+  id: ID;
+  dailyRecordId: ID;
+  customer?: string;
+  paymentMethod: PaymentMethod;
+  totalInCents: number;
+  itemCount: number;
+  status: 'ok' | 'cancelled';
+  cashMovementId?: ID | null;
+  createdAt: string;
+  notes?: string;
+}
+
+export interface Sale {
+  id: ID;
+  orderId: ID;
+  dailyRecordId: ID;
+  variantId: ID;
+  quantity: number;
+  unitPriceInCents: number | null;
+  totalInCents: number;
+  paymentMethod: PaymentMethod;
+  createdAt: string;
+  notes?: string;
+  cashMovementId?: ID | null;
+  status: 'ok' | 'cancelled';
+}
+
+export type ReservationStatus = 'active' | 'cancelled' | 'converted';
+
+export interface Reservation {
+  id: ID;
+  dailyRecordId: ID;
+  /** Data de criação; reservas ativas reduzem a disponibilidade deste dia em diante. */
+  date: string;
+  variantId: ID;
+  quantity: number;
+  customer?: string;
+  notes?: string;
+  status: ReservationStatus;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CashRecord {
+  id: ID;
+  dailyRecordId: ID;
+  /** "Ontem" digitado à mão; só vale quando openingManual = true (senão vem do dia anterior). */
+  openingBalanceInCents: number;
+  openingManual?: boolean;
+  countedBalanceInCents?: number | null;
+  status: DayStatus;
+}
+
+/**
+ * venda: recebimento de venda | entrada: outro dinheiro que entrou
+ * dar: dinheiro dado a alguém (ex.: "Chico 50 — eu dei") | despesa: gasto do dia
+ * retirada: tirado do acumulado (ex.: "- 300" depois do "Ontem + hoje")
+ */
+export type CashType = 'venda' | 'entrada' | 'dar' | 'despesa' | 'retirada' | 'estorno';
+
+export interface CashMovement {
+  id: ID;
+  dailyRecordId: ID;
+  type: CashType;
+  description?: string;
+  person?: string;
+  amountInCents: number; // sempre positivo; o tipo define o sinal
+  paymentMethod: PaymentMethod;
+  relatedOrderId?: ID | null;
+  createdAt: string;
+}
+
+export interface Setting {
+  id: ID;
+  key: string;
+  value: unknown;
+}
+
+export interface AuditLog {
+  id: ID;
+  entityType: string;
+  entityId: ID;
+  action: string;
+  oldValue?: unknown;
+  newValue?: unknown;
+  createdAt: string;
+}
