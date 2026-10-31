@@ -213,12 +213,12 @@ function GroupCard({ icon, name, color, total, start, count, ideal, alerts, forS
   { icon?: string; name: string; color: string; total: number; start?: number; count: number; ideal: number; alerts: number; forSale: boolean; onClick: () => void }) {
   const pct = ideal > 0 ? Math.min(100, Math.round((total / ideal) * 100)) : 100;
   return (
-    <button onClick={onClick} className="bg-white rounded-2xl border border-slate-200 p-3 text-left active:bg-slate-50 active:scale-[0.98] transition relative overflow-hidden">
+    <button onClick={onClick} className="min-w-0 bg-white rounded-2xl border border-slate-200 p-3 text-left active:bg-slate-50 active:scale-[0.98] transition relative overflow-hidden">
       <span className="absolute left-0 top-0 bottom-0 w-1.5" style={{ background: color }} />
       <div className="flex items-center gap-2 pl-1">
         <span className="text-xl">{icon || '📦'}</span>
-        <span className="font-bold text-slate-800 break-words flex-1">{name}</span>
-        <span className="text-slate-300">›</span>
+        <span className="font-bold text-slate-800 break-words flex-1 min-w-0">{name}</span>
+        <span className="shrink-0 text-slate-300">›</span>
       </div>
       <div className="pl-1 mt-1">
         {forSale
@@ -307,7 +307,7 @@ function SalesCard({ isToday, sym, orders, pieces, cash, methods, onCash }: {
             <span className="block text-[12px] text-slate-500 leading-snug">💵 na mão <b className="text-slate-700 tabular-nums">{money(cash.cashOnHand)}</b></span>
           </span>
           <span className="shrink-0 text-[22px] font-extrabold tabular-nums text-emerald-700">{money(cash.accumulated, sym)}</span>
-          <span className="text-slate-300 text-xl">›</span>
+          <span className="shrink-0 text-slate-300 text-xl">›</span>
         </button>
       </div>
     </div>

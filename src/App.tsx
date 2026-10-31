@@ -204,13 +204,13 @@ function MenuSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
             <div className="text-[12px] font-bold uppercase tracking-wide text-slate-400 mb-1.5 px-1">{sec.label}</div>
             <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden divide-y divide-slate-100">
               {sec.items.map((it) => (
-                <button key={it.title} onClick={it.go} className="w-full flex items-center gap-3 px-3.5 py-3 text-left active:bg-slate-50">
+                <button key={it.title} onClick={it.go} className="w-full min-w-0 flex items-center gap-3 px-3.5 py-3 text-left active:bg-slate-50">
                   <span className={`w-11 h-11 rounded-xl flex items-center justify-center text-[22px] shrink-0 ${it.tint}`}>{it.icon}</span>
                   <span className="flex-1 min-w-0">
-                    <span className="block font-bold text-slate-800 text-[16px] leading-tight">{it.title}</span>
+                    <span className="block font-bold text-slate-800 text-[16px] leading-tight break-words">{it.title}</span>
                     <span className="block text-[13px] text-slate-500 leading-tight mt-0.5 break-words">{it.desc}</span>
                   </span>
-                  <span className="text-slate-300 text-xl">›</span>
+                  <span className="shrink-0 text-slate-300 text-xl">›</span>
                 </button>
               ))}
             </div>

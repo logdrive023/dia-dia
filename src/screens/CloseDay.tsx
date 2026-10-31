@@ -54,17 +54,17 @@ export default function CloseDaySheet({ open, onClose }: { open: boolean; onClos
             <Card className="p-2.5"><div className="text-[11px] text-slate-500">Entrou</div><div className="text-xl font-extrabold text-blue-600 tabular-nums">{s.enteredUnits}</div><div className="text-[11px] text-slate-500">peças</div></Card>
             <Card className="p-2.5"><div className="text-[11px] text-slate-500">Repor</div><div className="text-xl font-extrabold text-orange-600 tabular-nums">{s.restockUnits}</div><div className="text-[11px] text-slate-500">peças</div></Card>
           </div>
-          <div className="grid grid-flow-col auto-cols-fr gap-1.5 mt-2">
+          <div className="grid grid-cols-2 gap-1.5 mt-2">
             {PAYMENTS.filter((p) => settings.paymentMethods.includes(p) || s.cash.salesByMethod[p]).map((p) => (
-              <div key={p} className="bg-white rounded-lg border border-slate-200 py-1.5 text-center">
-                <div className="text-[11px] text-slate-500">{PAYMENT_EMOJI[p]} {PAYMENT_LABEL[p]}</div>
-                <div className="font-bold text-sm tabular-nums">{money(s.cash.salesByMethod[p])}</div>
+              <div key={p} className="min-w-0 bg-white rounded-lg border border-slate-200 px-2.5 py-1.5 flex items-center justify-between gap-2">
+                <span className="min-w-0 text-[12px] text-slate-500 break-words">{PAYMENT_EMOJI[p]} {PAYMENT_LABEL[p]}</span>
+                <span className="shrink-0 font-bold text-sm tabular-nums">{money(s.cash.salesByMethod[p])}</span>
               </div>
             ))}
           </div>
-          <Card className="p-3 mt-2 flex items-center justify-between">
-            <span className="text-sm text-slate-600">Saldo final (ontem {money(s.cash.opening)} + hoje {money(s.cash.todayNet)}{s.cash.retiradas ? ` − ${money(s.cash.retiradas)}` : ''})</span>
-            <span className="text-xl font-extrabold tabular-nums">{money(s.cash.accumulated)}</span>
+          <Card className="p-3 mt-2 flex items-center justify-between gap-3">
+            <span className="min-w-0 text-sm text-slate-600 break-words">Saldo final (ontem {money(s.cash.opening)} + hoje {money(s.cash.todayNet)}{s.cash.retiradas ? ` − ${money(s.cash.retiradas)}` : ''})</span>
+            <span className="shrink-0 text-xl font-extrabold tabular-nums">{money(s.cash.accumulated)}</span>
           </Card>
           {!closed && (
             <div className="mt-3">

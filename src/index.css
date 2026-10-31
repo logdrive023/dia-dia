@@ -3,6 +3,12 @@
 @tailwind utilities;
 
 html, body, #root { min-height: 100%; }
+/* nada pode alargar a página: no celular com letra grande isso deixava a tela "arrastando" para o lado */
+html, body { overflow-x: hidden; max-width: 100%; }
+#root { overflow-x: clip; }
+/* janelas (Sheet): altura limitada à tela; vh antes como reserva para Android sem dvh */
+.sheet-max { max-height: 92vh; max-height: 92dvh; }
+.sheet-tall { height: 92vh; height: 92dvh; }
 html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
 button { -webkit-user-select: none; user-select: none; }
 input, textarea, select { font-size: max(16px, 1em); }

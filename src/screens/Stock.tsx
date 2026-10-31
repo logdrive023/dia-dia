@@ -371,7 +371,7 @@ function MoveList({ moves, locked, pieces }: { moves: StockMovement[]; locked: b
                 <span className="flex items-center gap-1.5 min-w-0 flex-1">
                   <span>{pc.icon}</span>
                   <span className="text-[13px] font-bold shrink-0" style={{ color: pc.groupColor }}>{pc.group}</span>
-                  <span className="text-slate-300">›</span>
+                  <span className="shrink-0 text-slate-300">›</span>
                   <Swatch color={pc.color} size={14} />
                   <span className="text-[14px] font-semibold text-slate-800 break-words">{pc.name}</span>
                 </span>

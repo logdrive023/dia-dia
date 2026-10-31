@@ -154,12 +154,12 @@ export function Sheet({ open, onClose, title, children, footer, tall }:
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center">
       <div className="absolute inset-0 bg-slate-900/40 animate-fade" onClick={onClose} />
-      <div className={`relative w-full max-w-lg bg-slate-50 rounded-t-3xl shadow-2xl flex flex-col animate-up ${tall ? 'h-[92dvh]' : 'max-h-[92dvh]'}`}>
+      <div className={`relative w-full max-w-lg min-w-0 overflow-hidden bg-slate-50 rounded-t-3xl shadow-2xl flex flex-col animate-up ${tall ? 'sheet-tall' : 'sheet-max'}`}>
         <div className="flex items-center justify-between px-5 pt-3 pb-2">
           <div className="text-lg font-bold text-slate-800 break-words">{title}</div>
           <button onClick={onClose} className="w-9 h-9 rounded-full bg-slate-200/70 text-slate-600 text-lg" aria-label="Fechar">✕</button>
         </div>
-        <div className="overflow-y-auto px-5 pb-4 flex-1 overscroll-contain">{children}</div>
+        <div className="overflow-y-auto overflow-x-hidden px-5 pb-4 flex-1 min-h-0 overscroll-contain min-w-0 [-webkit-overflow-scrolling:touch] [touch-action:pan-y]">{children}</div>
         {footer && <div className="px-5 pt-3 pb-[max(env(safe-area-inset-bottom),12px)] border-t border-slate-200 bg-white rounded-b-none">{footer}</div>}
       </div>
     </div>

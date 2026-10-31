@@ -282,7 +282,7 @@ export default function Cash() {
                           <div key={l.id} className="flex items-center gap-2 px-2.5 py-2">
                             <span className="text-base">{pc?.icon}</span>
                             <span className="text-[13px] font-bold" style={{ color: pc?.groupColor }}>{pc?.group}</span>
-                            <span className="text-slate-300">›</span>
+                            <span className="shrink-0 text-slate-300">›</span>
                             <Swatch color={pc?.color} size={14} />
                             <span className="flex-1 min-w-0 break-words text-[14px] font-semibold text-slate-800">{pc?.name}</span>
                             <span className="text-[13px] font-extrabold text-slate-700 tabular-nums">×{l.quantity}</span>
