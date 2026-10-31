@@ -469,10 +469,30 @@ describe('dados iniciais oficiais (caderno 30/10 e 31/10)', () => {
     expect((await runDiagnostics()).findings.filter((f) => f.level === 'erro')).toEqual([]);
     // WhatsApp deixa o pagamento claro e a conta do dinheiro igual ao caderno
     const w = whatsappReport('2026-10-31', await daySummary(d1.id, d1.date));
-    expect(w).toContain('Pagamento da diária: -300*');
-    expect(w).toContain('(2 diárias de 150)');
-    expect(w).toContain('Dei a Chico: 50');
-    expect(w).toContain('ontem 645 + hoje 885 = 1.530 - 300 (pagamento) = 1.230');
+    // a conta do caixa: ontem separado, hoje linha por linha (inclusive o Chico e a diária) e o total
+    const caixa = w.slice(w.indexOf('🧮 *Caixa*'), w.indexOf('🛍️'));
+    expect(caixa).toBe([
+      '🧮 *Caixa*', '',
+      '📅 *Ontem: 1.474,80*',
+      '   💵 645 em dinheiro · 🏦 829,80 no banco', '',
+      '☀️ *Caixa de hoje*',
+      '➕ 💵 Vendas no Dinheiro: 935',
+      '➕ ⚡ Vendas no Pix: 0',
+      '➕ 💳 Vendas no Crédito: 0',
+      '➕ 🏧 Vendas no Débito: 0',
+      '➖ 🤝 Dei a Chico: 50',
+      '➖ 💼 Pagamento da diária (2 dias × 150): 300',
+      '*= Hoje: +585*', '',
+      '✅ *Total: 2.059,80*',
+      '   ontem 1.474,80 + hoje 585',
+      '💵 Na mão: 1.230',
+      '🏦 No banco (Pix/cartão): 829,80', '', '',
+    ].join('\n'));
+    // somando as linhas de hoje dá o "Hoje"; ontem + hoje dá o total
+    const { cashStatement } = await import('../services/summary');
+    const st = cashStatement(c);
+    expect(st.reduce((n, x) => n + (x.sign === '+' ? x.cents : -x.cents), 0)).toBe(c.dayResult);
+    expect(c.opening + c.dayResult).toBe(c.accumulated);
     const n = notebookReport('2026-10-31', await daySummary(d1.id, d1.date));
     expect(n).toContain('Pagamento: 300 (2 diárias de 150)');
     // o dia seguinte continua do 1.230 em dinheiro

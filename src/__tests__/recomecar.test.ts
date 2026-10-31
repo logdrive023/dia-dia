@@ -20,7 +20,7 @@ import { runDiagnostics } from '../services/diagnostics';
 function rng(seed: number) {
   return () => { seed |= 0; seed = (seed + 0x6d2b79f5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
 }
-const CYCLES = Number((globalThis as { process?: { env: Record<string, string | undefined> } }).process?.env.RECOMECAR ?? 150);
+const CYCLES = Number((globalThis as { process?: { env: Record<string, string | undefined> } }).process?.env.RECOMECAR ?? 80);
 const VARIANTS = SEED_DATA.reduce((n, g) => n + g.variants.length, 0);
 
 /** O app abrindo de novo (depois do botão a página recarrega e roda o carregamento inicial). */

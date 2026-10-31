@@ -1,6 +1,6 @@
 import type { PaymentMethod } from '../db/types';
-import { fmtDate, money, PAYMENT_EMOJI, PAYMENT_LABEL, PAYMENTS } from '../lib/util';
-import type { DaySummary } from './summary';
+import { fmtDate, money, PAYMENT_LABEL } from '../lib/util';
+import { cashStatement, type DaySummary } from './summary';
 
 type Opts = { symbol?: string; title?: string };
 
@@ -105,41 +105,26 @@ export function whatsappReport(date: string, s: DaySummary, opts: Opts = {}) {
 
   L.push(`📒 *Fechamento — ${WEEK_LONG[new Date(y, m - 1, d).getDay()]}, ${String(d).padStart(2, '0')}/${String(m).padStart(2, '0')}*`);
 
-  // vendas
+  // vendas (o valor por forma está na conta do caixa)
   section('💰 *Vendas*');
-  L.push(`• Vendeu: *${$(c.salesTotal)}*`);
-  L.push(`• ${plural(s.salesCount, 'venda', 'vendas')} · ${plural(s.soldUnits, 'peça', 'peças')}`);
-  for (const p of PAYMENTS) if (p !== 'outro' || c.salesByMethod[p]) L.push(`• ${PAYMENT_EMOJI[p]} ${PAYMENT_LABEL[p]}: ${$(c.salesByMethod[p])}`);
+  L.push(`• Vendeu: *${$(c.salesTotal)}* · ${plural(s.salesCount, 'venda', 'vendas')} · ${plural(s.soldUnits, 'peça', 'peças')}`);
 
-  // dinheiro que saiu/entrou fora das vendas
-  if (c.dar.length || c.despesas || c.entradas) {
-    section('🤝 *Outros lançamentos*');
-    for (const x of c.dar) L.push(`• Dei a ${x.person || x.description || 'alguém'}: ${$(x.amountInCents)}`);
-    if (c.despesas) L.push(`• Despesas: ${$(c.despesas)}`);
-    if (c.entradas) L.push(`• Outras entradas: +${$(c.entradas)}`);
-  }
-
-  // caixa
+  // caixa: ontem separado, a conta de hoje linha por linha, e o total no fim
   section('🧮 *Caixa*');
-  L.push(`• Ontem: ${$(c.opening)}`);
-  const minus = c.darTotal + c.despesas;
-  const how = minus || c.entradas
-    ? ` (vendas ${money(c.salesTotal)}${c.entradas ? ` + ${money(c.entradas)}` : ''}${minus ? ` - ${money(minus)}` : ''})` : '';
-  L.push(`• Hoje: ${c.todayNet >= 0 ? '+' : ''}${$(c.todayNet)}${how}`);
-  if (c.pagamentos) L.push(`• 💼 *Pagamento da diária: -${$(c.pagamentos)}*${payDays(c)}`);
-  if (c.retiradas) L.push(`• Retirada: -${$(c.retiradas)}`);
-  L.push(`• ✅ *Saldo: ${$(c.accumulated)}*`);
-  L.push(`• 💵 Na mão: ${$(c.cashOnHand)}`);
-  // a conta do dinheiro vivo igual ao caderno: "Ontem 645 + 885 = 1530 - 300 = 1230"
-  {
-    const out = c.retiradas + c.pagamentos;
-    let conta = `   ↳ ontem ${money(c.openingCash)} + hoje ${money(c.cashToday)} = ${money(c.openingCash + c.cashToday)}`;
-    if (out) conta += ` - ${money(out)}${c.pagamentos && !c.retiradas ? ' (pagamento)' : ''} = ${money(c.cashOnHand)}`;
-    L.push(conta);
-  }
-  L.push(`• 🏦 No banco (Pix/cartão): ${$(c.otherBalance)}`);
+  L.push('');
+  L.push(`📅 *Ontem: ${$(c.opening)}*`);
+  L.push(`   💵 ${money(c.openingCash)} em dinheiro · 🏦 ${money(c.opening - c.openingCash)} no banco`);
+  L.push('');
+  L.push(`☀️ *Caixa de hoje*`);
+  for (const x of cashStatement(c)) L.push(`${x.sign === '+' ? '➕' : '➖'} ${x.icon} ${x.label}: ${$(x.cents)}`);
+  L.push(`*= Hoje: ${c.dayResult >= 0 ? '+' : '−'}${$(Math.abs(c.dayResult))}*`);
+  L.push('');
+  L.push(`✅ *Total: ${$(c.accumulated)}*`);
+  L.push(`   ontem ${money(c.opening)} ${c.dayResult >= 0 ? '+' : '−'} hoje ${money(Math.abs(c.dayResult))}`);
+  L.push(`💵 Na mão: ${$(c.cashOnHand)}`);
+  L.push(`🏦 No banco (Pix/cartão): ${$(c.otherBalance)}`);
   if (c.counted !== null)
-    L.push(c.difference === 0 ? `• 🔎 Contado: ${$(c.counted)} — bateu ✅` : `• 🔎 Contado: ${$(c.counted)} — diferença ${c.difference! > 0 ? '+' : ''}${$(c.difference!)}`);
+    L.push(c.difference === 0 ? `🔎 Contado: ${$(c.counted)} — bateu ✅` : `🔎 Contado: ${$(c.counted)} — diferença ${c.difference! > 0 ? '+' : ''}${$(c.difference!)}`);
 
   // peças que saíram (vendidas)
   section(`🛍️ *O que saiu (${plural(s.soldUnits, 'peça', 'peças')})*`);

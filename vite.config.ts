@@ -30,5 +30,6 @@ export default defineConfig({
       workbox: { globPatterns: ['**/*.{js,css,html,svg,png,ico,webmanifest}'] },
     }),
   ],
-  test: { environment: 'node', setupFiles: ['./src/__tests__/setup.ts'], testTimeout: 60_000, hookTimeout: 30_000 },
+  // um arquivo de teste por vez: os backtests pesados não roubam CPU dos testes de tela (no GitHub há poucos núcleos)
+  test: { environment: 'node', setupFiles: ['./src/__tests__/setup.ts'], testTimeout: 60_000, hookTimeout: 30_000, fileParallelism: false },
 });

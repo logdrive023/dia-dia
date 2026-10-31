@@ -1,6 +1,6 @@
 import { db } from '../db/db';
 import type { CashMovement, DailyStockItem, Group, MovementType, Order, PaymentMethod, Sale, StockMovement, Variant } from '../db/types';
-import { todayStr } from '../lib/util';
+import { money, todayStr } from '../lib/util';
 
 export interface CashSummary {
   opening: number;
@@ -33,6 +33,8 @@ export interface CashSummary {
   /** Vendas copiadas do caderno (sem peça): quantas e quantas peças. */
   notebookCount: number;
   notebookUnits: number;
+  /** Resultado do dia com todas as saídas (vendas + entradas − dei − despesas − pagamento − retirada) = saldo − ontem. */
+  dayResult: number;
   /** Contado - dinheiro em mãos */
   difference: number | null;
   /** true quando o "Ontem" foi digitado à mão em vez de vir do dia anterior */
@@ -113,6 +115,7 @@ function summarizeCash(opening: number, openingCash: number, openingManual: bool
     opening, salesByMethod, salesTotal, entradas, dar, darTotal, despesas, retiradas, pagamentos, pagamentoDias, cashToday, todayNet, subtotal,
     accumulated, cashOnHand, openingCash, otherBalance: accumulated - cashOnHand,
     counted, difference: counted === null ? null : counted - cashOnHand, openingManual, movements,
+    dayResult: accumulated - opening,
     notebookCount: notebook.length, notebookUnits: notebook.reduce((n, m) => n + (m.quantity ?? 1), 0),
   };
 }
@@ -312,4 +315,36 @@ export async function compareDays(dateA: string, dateB: string): Promise<Compare
   }
   rows.sort((x, y) => x.group.displayOrder - y.group.displayOrder || x.variant.displayOrder - y.variant.displayOrder);
   return rows;
+}
+
+// ---------------- conta do caixa (mesmo padrão na tela e no WhatsApp) ----------------
+
+export interface StatementLine { sign: '+' | '-'; icon: string; label: string; cents: number }
+
+/**
+ * A conta do dia, linha por linha, sempre na mesma ordem:
+ * vendas por forma (Dinheiro, Pix, Crédito, Débito), entradas, dei, despesas, pagamento da diária, retiradas.
+ * Somando tudo dá `dayResult`; ontem + dayResult = saldo.
+ */
+export function cashStatement(c: CashSummary): StatementLine[] {
+  const L: StatementLine[] = [];
+  const MAIN: PaymentMethod[] = ['dinheiro', 'pix', 'cartao', 'debito'];
+  const LABEL: Record<PaymentMethod, string> = { dinheiro: 'Dinheiro', pix: 'Pix', cartao: 'Crédito', debito: 'Débito', outro: 'Outro' };
+  const EMOJI: Record<PaymentMethod, string> = { dinheiro: '💵', pix: '⚡', cartao: '💳', debito: '🏧', outro: '🔹' };
+  for (const m of [...MAIN, 'outro' as const]) {
+    if (m === 'outro' && !c.salesByMethod.outro) continue;
+    L.push({ sign: '+', icon: EMOJI[m], label: `Vendas no ${LABEL[m]}`, cents: c.salesByMethod[m] });
+  }
+  const of = (t: CashMovement['type']) => c.movements.filter((m) => m.type === t);
+  const extra = (m: CashMovement) => (m.description && m.description !== 'caderno' ? ` (${m.description})` : '');
+  for (const m of of('entrada')) L.push({ sign: '+', icon: '➕', label: `Entrada${extra(m)}`, cents: m.amountInCents });
+  for (const m of of('dar')) L.push({ sign: '-', icon: '🤝', label: `Dei a ${m.person || m.description || 'alguém'}`, cents: m.amountInCents });
+  for (const m of of('despesa')) L.push({ sign: '-', icon: '🧾', label: `Despesa${extra(m)}`, cents: m.amountInCents });
+  for (const m of of('pagamento')) {
+    const n = m.quantity ?? 0;
+    const days = n > 1 && m.amountInCents % n === 0 ? ` (${n} dias × ${money(m.amountInCents / n)})` : n === 1 ? ' (1 dia)' : n > 1 ? ` (${n} dias)` : '';
+    L.push({ sign: '-', icon: '💼', label: `Pagamento da diária${days}`, cents: m.amountInCents });
+  }
+  for (const m of of('retirada')) L.push({ sign: '-', icon: '🏦', label: `Retirada${extra(m)}`, cents: m.amountInCents });
+  return L;
 }

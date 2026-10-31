@@ -76,7 +76,8 @@ describe('dia de trabalho completo pela tela', () => {
     const url = decodeURIComponent((window.open as unknown as ReturnType<typeof vi.fn>).mock.calls.slice(-1)[0][0] as string);
     expect(url).toContain('Vendeu: *140*');
     expect(url).toContain('Dei a Chico: 50');
-    expect(url).toContain('Hoje: +90 (vendas 140 - 50)');
+    expect(url).toContain('➖ 🤝 Dei a Chico: 50');
+    expect(url).toContain('*= Hoje: +90*');
   }, 20000);
 
   it('“Início” sempre volta para hoje e só a aba atual fica destacada', async () => {

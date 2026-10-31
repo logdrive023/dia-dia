@@ -58,9 +58,9 @@ async function tryOp(name: string, f: () => Promise<unknown>, log: string[]) {
   }
 }
 
-// 20.000 ações no total: 5 sorteios diferentes × 4.000 ações (mude MACACO_ACOES para rodar mais ou menos)
+// 5 sorteios × 1.500 ações na suíte normal (rápida no GitHub); para o teste pesado: MACACO_ACOES=4000 (20.000 ações)
 const SEEDS = [777, 4242, 9001, 13, 31337];
-const PER_SEED = Number((globalThis as { process?: { env: Record<string, string | undefined> } }).process?.env.MACACO_ACOES ?? 4000);
+const PER_SEED = Number((globalThis as { process?: { env: Record<string, string | undefined> } }).process?.env.MACACO_ACOES ?? 1500);
 
 describe(`A) macaco: ${SEEDS.length * PER_SEED} ações aleatórias`, () => {
   it.each(SEEDS)('sorteio %i: nunca erro técnico, nunca dado inconsistente', async (seed) => {

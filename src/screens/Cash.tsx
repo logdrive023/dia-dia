@@ -5,7 +5,7 @@ import type { CashMovement, CashType, PaymentMethod, Sale } from '../db/types';
 import { money, PAYMENT_EMOJI, PAYMENT_LABEL, PAYMENTS, toCents, todayStr } from '../lib/util';
 import { addCashMovement, CASH_IN, CASH_LABEL, removeCashMovement, setCountedBalance, setOpeningBalance, updateNotebookSale } from '../services/cash';
 import { activeReservedByVariant, cancelOrder, correctOrderPrices, reservationsOfOrder, swapSaleItem } from '../services/sales';
-import { daySummary, loadStockRows } from '../services/summary';
+import { cashStatement, daySummary, loadStockRows } from '../services/summary';
 import { useApp } from '../state';
 import { DayNotices, DayBar, StartDayCard } from '../components/day';
 import { Button, Card, Empty, Field, Input, InfoTip, Sheet, Swatch, useBusy, useUi } from '../components/ui';
@@ -95,22 +95,10 @@ export default function Cash() {
                   <b className="block text-white text-[16px] tabular-nums leading-tight break-words">{money(c.opening)}</b>
                 </span>
                 <span className="self-center text-emerald-100 font-bold">+</span>
-                <span className={`flex-1 min-w-0 rounded-xl px-2.5 py-1.5 ${c.todayNet >= 0 ? 'bg-white text-emerald-800' : 'bg-red-100 text-red-700'}`}>
+                <span className={`flex-1 min-w-0 rounded-xl px-2.5 py-1.5 ${c.dayResult >= 0 ? 'bg-white text-emerald-800' : 'bg-red-100 text-red-700'}`}>
                   <span className="block text-[11px] font-semibold break-words">☀️ {isTodayLabel(day.date) === 'de hoje' ? 'Hoje' : 'No dia'}</span>
-                  <b className="block text-[16px] tabular-nums leading-tight break-words">{c.todayNet >= 0 ? '+' : '−'}{money(Math.abs(c.todayNet))}</b>
+                  <b className="block text-[16px] tabular-nums leading-tight break-words">{c.dayResult >= 0 ? '+' : '−'}{money(Math.abs(c.dayResult))}</b>
                 </span>
-                {c.pagamentos > 0 && (
-                  <span className="flex-1 min-w-0 rounded-xl bg-white/20 px-2.5 py-1.5">
-                    <span className="block text-[11px] font-semibold text-emerald-50 break-words">💼 Pagamento</span>
-                    <b className="block text-white text-[16px] tabular-nums leading-tight break-words">− {money(c.pagamentos)}</b>
-                  </span>
-                )}
-                {c.retiradas > 0 && (
-                  <span className="flex-1 min-w-0 rounded-xl bg-white/20 px-2.5 py-1.5">
-                    <span className="block text-[11px] font-semibold text-emerald-50 break-words">🏦 Retirado</span>
-                    <b className="block text-white text-[16px] tabular-nums leading-tight break-words">− {money(c.retiradas)}</b>
-                  </span>
-                )}
               </div>
               <div className="grid grid-cols-2 gap-2 mt-3">
                 <div className="bg-white rounded-xl px-3 py-2 text-slate-800">
@@ -167,13 +155,13 @@ export default function Cash() {
 
             {/* conta do dia: normal (lista clara) ou caderno (manuscrito) */}
             <BlockHeader icon="🧮" tint="bg-blue-100" title="Conta do dia" subtitle="Como se chega no saldo" right={<InfoTip title="Conta do dia" example={[
-              ['💰', 'Vendas 935'],
-              ['🤝', 'Chico − 50 → Hoje 885'],
-              ['📅', 'Ontem 645 + 885 = 1.530'],
-              ['🏦', 'Retirada − 300'],
-              ['✅', <b>Saldo 1.230</b>],
+              ['📅', 'Ontem: 1.474,80 (645 em dinheiro + 829,80 no banco)'],
+              ['➕', 'Vendas no Dinheiro 935'],
+              ['➖', 'Dei a Chico 50 · Pagamento da diária (2 dias × 150) 300'],
+              ['☀️', <>= Hoje <b>+585</b></>],
+              ['✅', <>Total = ontem 1.474,80 + hoje 585 = <b>2.059,80</b> (na mão 1.230)</>],
             ]}>
-              É a mesma conta do caderno, em duas formas de ver. “Ontem” vem sozinho do último dia; toque nele para corrigir.</InfoTip>} />
+              Ontem fica separado. Hoje mostra cada entrada e cada saída. No fim, o total. “Ontem” vem sozinho do último dia; toque em corrigir se precisar.</InfoTip>} />
             <div className="grid grid-cols-2 bg-slate-200/70 rounded-xl p-1 mb-2">
               {(['normal', 'caderno'] as const).map((v) => (
                 <button key={v} onClick={() => setView(v)} className={`h-11 rounded-lg text-sm font-semibold ${view === v ? 'bg-white shadow text-slate-800' : 'text-slate-500'}`}>
@@ -183,38 +171,46 @@ export default function Cash() {
             </div>
             {view === 'normal' ? (
               <div className="space-y-2">
-                {/* bloco 1: o que aconteceu hoje */}
+                {/* 1) ontem, separado */}
                 <Card className="overflow-hidden">
-                  <div className="flex items-center gap-2 px-4 pt-3 pb-1 text-[13px] font-bold text-slate-500 uppercase tracking-wide">☀️ {isTodayLabel(day.date) === 'de hoje' ? 'Hoje' : 'No dia'}</div>
-                  <ContaLine icon="💰" tint="bg-emerald-100" label="Vendas" value={c.salesTotal} sign="+"
-                    sub={methods.filter((m) => c.salesByMethod[m]).map((m) => `${PAYMENT_EMOJI[m]} ${money(c.salesByMethod[m])}`).join('  ·  ') || undefined} />
-                  {c.entradas > 0 && <ContaLine icon="➕" tint="bg-emerald-100" label="Outras entradas" value={c.entradas} sign="+" />}
-                  {c.dar.map((d) => <ContaLine key={d.id} icon="🤝" tint="bg-orange-100" label={`Dei a ${d.person || d.description || 'alguém'}`} value={d.amountInCents} sign="−" />)}
-                  {c.despesas > 0 && <ContaLine icon="🧾" tint="bg-red-100" label="Despesas" value={c.despesas} sign="−" />}
-                  <div className="flex items-center justify-between mx-3 mb-3 mt-1 rounded-xl bg-slate-100 px-3 py-2.5">
-                    <span className="font-bold text-slate-700">= Resultado {isTodayLabel(day.date) === 'de hoje' ? 'de hoje' : 'do dia'}</span>
-                    <span className={`text-[18px] font-extrabold tabular-nums ${c.todayNet < 0 ? 'text-red-600' : 'text-slate-800'}`}>{c.todayNet < 0 ? '−' : ''}{money(Math.abs(c.todayNet))}</span>
-                  </div>
-                </Card>
-                {/* bloco 2: como chega no saldo */}
-                <Card className="overflow-hidden">
-                  <div className="flex items-center gap-2 px-4 pt-3 pb-1 text-[13px] font-bold text-slate-500 uppercase tracking-wide">🧮 Saldo</div>
-                  <div className="flex items-center gap-3 px-4 py-2">
-                    <span className="w-9 h-9 rounded-full bg-indigo-100 flex items-center justify-center">📅</span>
-                    <span className="flex-1">
-                      <span className="block text-[15px] text-slate-700">Veio de ontem{c.openingManual ? ' (digitado)' : ''}</span>
-                      {!locked && <button onClick={() => setEditOpening(true)} className="text-[12px] font-semibold text-blue-600 py-1 -my-1">✏️ corrigir</button>}
+                  <div className="flex items-center gap-3 px-4 py-3">
+                    <span className="w-9 h-9 rounded-full bg-indigo-100 flex items-center justify-center shrink-0">📅</span>
+                    <span className="flex-1 min-w-0">
+                      <span className="block text-[15px] font-bold text-slate-800">Ontem{c.openingManual ? ' (digitado)' : ''}</span>
+                      <span className="block text-[12px] text-slate-500 break-words">💵 {money(c.openingCash)} em dinheiro · 🏦 {money(c.opening - c.openingCash)} no banco</span>
+                      {!locked && <button onClick={() => setEditOpening(true)} className="text-[12px] font-semibold text-blue-600 py-1">✏️ corrigir</button>}
                     </span>
-                    <span className="font-bold tabular-nums text-slate-800">{money(c.opening)}</span>
-                  </div>
-                  <ContaLine icon="☀️" tint="bg-amber-100" label={isTodayLabel(day.date) === 'de hoje' ? 'Resultado de hoje' : 'Resultado do dia'} value={Math.abs(c.todayNet)} sign={c.todayNet < 0 ? '−' : '+'} />
-                  {c.pagamentos > 0 && <ContaLine icon="💼" tint="bg-violet-100" label="Pagamento (diária)" value={c.pagamentos} sign="−" sub={payDaysText(c.pagamentos, c.pagamentoDias)} />}
-                  {c.retiradas > 0 && <ContaLine icon="🏦" tint="bg-slate-200" label="Retiradas" value={c.retiradas} sign="−" />}
-                  <div className="flex items-center justify-between mx-3 mb-3 mt-1 rounded-xl bg-emerald-600 text-white px-3 py-3">
-                    <span className="font-bold">= Saldo final</span>
-                    <span className="text-[24px] font-extrabold tabular-nums">{money(c.accumulated, sym)}</span>
+                    <span className="shrink-0 text-[18px] font-extrabold tabular-nums text-slate-800">{money(c.opening)}</span>
                   </div>
                 </Card>
+                {/* 2) caixa de hoje: de onde veio e para onde foi, linha por linha */}
+                <Card className="overflow-hidden">
+                  <div className="flex items-center gap-2 px-4 pt-3 pb-1 text-[13px] font-bold text-slate-500 uppercase tracking-wide">☀️ Caixa {isTodayLabel(day.date) === 'de hoje' ? 'de hoje' : 'do dia'}</div>
+                  {cashStatement(c).map((x, i) => (
+                    <div key={i} className={`flex items-center gap-3 px-4 py-1.5 ${x.cents === 0 ? 'opacity-45' : ''}`}>
+                      <span className={`w-6 text-center font-extrabold ${x.sign === '+' ? 'text-emerald-600' : 'text-red-600'}`}>{x.sign === '+' ? '+' : '−'}</span>
+                      <span className="text-lg shrink-0">{x.icon}</span>
+                      <span className="flex-1 min-w-0 text-[14px] text-slate-700 break-words">{x.label}</span>
+                      <span className={`shrink-0 font-bold tabular-nums ${x.sign === '+' ? 'text-emerald-700' : 'text-red-600'}`}>{money(x.cents)}</span>
+                    </div>
+                  ))}
+                  <div className="flex items-center justify-between mx-3 mb-3 mt-2 rounded-xl bg-slate-100 px-3 py-2.5">
+                    <span className="font-bold text-slate-700">= {isTodayLabel(day.date) === 'de hoje' ? 'Hoje' : 'No dia'}</span>
+                    <span className={`text-[18px] font-extrabold tabular-nums ${c.dayResult < 0 ? 'text-red-600' : 'text-slate-800'}`}>{c.dayResult < 0 ? '−' : '+'}{money(Math.abs(c.dayResult))}</span>
+                  </div>
+                </Card>
+                {/* 3) total */}
+                <div className="rounded-2xl bg-emerald-600 text-white px-4 py-3">
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-[16px]">✅ Total</span>
+                    <span className="text-[26px] font-extrabold tabular-nums">{money(c.accumulated, sym)}</span>
+                  </div>
+                  <div className="text-[13px] text-emerald-50 tabular-nums">ontem {money(c.opening)} {c.dayResult < 0 ? '−' : '+'} hoje {money(Math.abs(c.dayResult))}</div>
+                  <div className="grid grid-cols-2 gap-2 mt-2">
+                    <div className="rounded-xl bg-white/15 px-3 py-1.5"><div className="text-[11px] text-emerald-50">💵 Na mão</div><div className="font-extrabold tabular-nums">{money(c.cashOnHand)}</div></div>
+                    <div className="rounded-xl bg-white/15 px-3 py-1.5"><div className="text-[11px] text-emerald-50">🏦 No banco</div><div className="font-extrabold tabular-nums">{money(c.otherBalance)}</div></div>
+                  </div>
+                </div>
               </div>
             ) : (
               <Card className="px-4 notebook !bg-sky-50 text-[17px]">
@@ -407,20 +403,6 @@ function BlockHeader({ icon, tint, title, subtitle, right, children }: {
     </div>
   );
 }
-
-function ContaLine({ icon, tint, label, value, sign, sub }: { icon: string; tint: string; label: string; value: number; sign: '+' | '−'; sub?: string }) {
-  return (
-    <div className="flex items-center gap-3 px-4 py-2">
-      <span className={`w-9 h-9 rounded-full flex items-center justify-center shrink-0 ${tint}`}>{icon}</span>
-      <span className="flex-1 min-w-0">
-        <span className="block text-[15px] text-slate-700 break-words">{label}</span>
-        {sub && <span className="block text-[12px] text-slate-500 break-words">{sub}</span>}
-      </span>
-      <span className={`font-bold tabular-nums ${sign === '+' ? 'text-emerald-600' : 'text-red-600'}`}>{sign} {money(value)}</span>
-    </div>
-  );
-}
-
 
 const METHOD_COLOR: Record<PaymentMethod, string> = { dinheiro: 'bg-emerald-400', pix: 'bg-amber-400', cartao: 'bg-sky-400', debito: 'bg-violet-400', outro: 'bg-slate-400' };
 
