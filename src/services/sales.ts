@@ -267,3 +267,43 @@ export async function convertReservation(p: {
     lines: [{ variantId: r.variantId, quantity: r.quantity, unitPriceInCents: p.unitPriceInCents, reservationId: r.id }],
   });
 }
+
+/**
+ * Troca a peça de uma venda já feita (vendeu Branco, mas era Vermelho): a peça errada volta ao estoque
+ * e a certa sai. `quantity` menor que a linha troca só parte dela. Preço e caixa não mudam.
+ */
+export async function swapSaleItem(saleId: string, newVariantId: string, quantity?: number) {
+  return db.transaction('rw', SALE_TABLES(), async () => {
+    const s = await db.sales.get(saleId);
+    if (!s || s.status !== 'ok') throw new UserError('Venda não encontrada.');
+    const order = await db.orders.get(s.orderId);
+    if (!order || order.status !== 'ok') throw new UserError('Venda cancelada não pode ser trocada.');
+    const day = await assertOpen(s.dailyRecordId);
+    const qty = quantity ?? s.quantity;
+    if (!Number.isInteger(qty) || qty < 1 || qty > s.quantity) throw new UserError('Quantidade inválida para trocar.');
+    if (newVariantId === s.variantId) throw new UserError('Escolha uma peça diferente.');
+    const v = await db.variants.get(newVariantId);
+    if (!v || v.archivedAt) throw new UserError('Essa peça não existe mais no cadastro.');
+    const item = await ensureItem(day.id, newVariantId);
+    const available = item.currentQuantity - ((await activeReservedByVariant(day.date)).get(newVariantId) ?? 0);
+    if (qty > available) throw new UserError(`Só há ${Math.max(0, available)} disponível de ${v.name}.`);
+
+    const old = await db.variants.get(s.variantId);
+    const note = `Troca: era ${old?.name ?? 'outra peça'}, foi ${v.name}`;
+    await applyStockDelta(day.id, s.variantId, qty, 'venda', { orderId: order.id, description: note });
+    await applyStockDelta(day.id, newVariantId, -qty, 'venda', { orderId: order.id, description: note });
+
+    // a linha da peça errada diminui (ou some); a da certa aumenta (junta com uma igual, se houver)
+    const lines = await db.sales.where('orderId').equals(order.id).toArray();
+    const same = lines.find((l) => l.id !== s.id && l.status === 'ok' && l.variantId === newVariantId && l.unitPriceInCents === s.unitPriceInCents);
+    const total = (n: number) => (s.unitPriceInCents ?? 0) * n;
+    if (qty === s.quantity && !same) await db.sales.update(s.id, { variantId: newVariantId });
+    else {
+      if (qty === s.quantity) await db.sales.delete(s.id);
+      else await db.sales.update(s.id, { quantity: s.quantity - qty, totalInCents: total(s.quantity - qty) });
+      if (same) await db.sales.update(same.id, { quantity: same.quantity + qty, totalInCents: total(same.quantity + qty) });
+      else await db.sales.add({ ...s, id: uid(), variantId: newVariantId, quantity: qty, totalInCents: total(qty) });
+    }
+    await audit('order', order.id, 'swapItem', { saleId, variantId: s.variantId, quantity: qty }, { variantId: newVariantId });
+  });
+}

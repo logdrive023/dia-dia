@@ -49,6 +49,21 @@ export async function removeCashMovement(id: string) {
   });
 }
 
+/** Corrige uma venda do caderno (sem peça): valor, forma de pagamento e quantas peças. Fica na auditoria. */
+export async function updateNotebookSale(id: string, p: { amountInCents: number; paymentMethod: PaymentMethod; quantity: number }) {
+  if (!isCents(p.amountInCents) || p.amountInCents <= 0) throw new UserError('Informe um valor maior que zero.');
+  if (!PAYMENTS.includes(p.paymentMethod)) throw new UserError('Forma de pagamento inválida.');
+  if (!Number.isInteger(p.quantity) || p.quantity < 1 || p.quantity > 9999) throw new UserError('Quantidade inválida.');
+  await db.transaction('rw', db.dailyRecords, db.cashMovements, db.auditLogs, async () => {
+    const m = await db.cashMovements.get(id);
+    if (!m || m.type !== 'venda' || m.relatedOrderId) throw new UserError('Venda não encontrada.');
+    await assertOpen(m.dailyRecordId);
+    const next = { amountInCents: p.amountInCents, paymentMethod: p.paymentMethod, quantity: p.quantity, description: 'caderno' };
+    await db.cashMovements.update(id, next);
+    await audit('cashMovement', id, 'update', m, { ...m, ...next });
+  });
+}
+
 /** Digita o "Ontem" à mão (e quanto dele é dinheiro vivo). `null` volta a calcular a partir do dia anterior. */
 export async function setOpeningBalance(dailyRecordId: string, cents: number | null, cashCents: number | null = null) {
   if ((cents !== null && !isCents(cents)) || (cashCents !== null && !isCents(cashCents))) throw new UserError('Valor inválido.');

@@ -465,6 +465,20 @@ describe('dados iniciais oficiais (caderno de 30/10)', () => {
     expect((await computeCash(d2.id)).openingCash).toBe(41500);
     expect((await computeCash(d2.id)).notebookCount).toBe(0);
   });
+  it('venda do caderno: corrige valor/forma/peças e cancela', async () => {
+    const { updateNotebookSale, removeCashMovement } = await import('../services/cash');
+    useDatabase(new AppDB(`caderno3-${Math.random()}`));
+    await seedIfNeeded();
+    const d = await startDay('2026-10-31');
+    const credit = (await db.cashMovements.toArray()).find((m) => m.paymentMethod === 'cartao')!;
+    await updateNotebookSale(credit.id, { amountInCents: 73000, paymentMethod: 'pix', quantity: 10 });
+    let c = await computeCash(d.id);
+    expect([c.salesByMethod.cartao, c.salesByMethod.pix, c.accumulated]).toEqual([0, 73000, 147480 - 75375 + 73000]);
+    await expect(updateNotebookSale(credit.id, { amountInCents: 0, paymentMethod: 'pix', quantity: 1 })).rejects.toThrow();
+    await removeCashMovement(credit.id);
+    c = await computeCash(d.id);
+    expect([c.notebookCount, c.notebookUnits, c.cashOnHand]).toEqual([8, 10, 64500]);
+  });
   it('outro dia que não o do caderno começa zerado', async () => {
     useDatabase(new AppDB(`caderno2-${Math.random()}`));
     await seedIfNeeded();

@@ -1,11 +1,11 @@
 import { useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../db/db';
-import type { CashType, PaymentMethod } from '../db/types';
+import type { CashMovement, CashType, PaymentMethod, Sale } from '../db/types';
 import { money, PAYMENT_EMOJI, PAYMENT_LABEL, PAYMENTS, toCents, todayStr } from '../lib/util';
-import { addCashMovement, CASH_IN, CASH_LABEL, removeCashMovement, setCountedBalance, setOpeningBalance } from '../services/cash';
-import { cancelOrder, correctOrderPrices, reservationsOfOrder } from '../services/sales';
-import { daySummary } from '../services/summary';
+import { addCashMovement, CASH_IN, CASH_LABEL, removeCashMovement, setCountedBalance, setOpeningBalance, updateNotebookSale } from '../services/cash';
+import { activeReservedByVariant, cancelOrder, correctOrderPrices, reservationsOfOrder, swapSaleItem } from '../services/sales';
+import { daySummary, loadStockRows } from '../services/summary';
 import { useApp } from '../state';
 import { DayNotices, DayBar, StartDayCard } from '../components/day';
 import { Button, Card, Empty, Field, Input, InfoTip, Sheet, Swatch, useBusy, useUi } from '../components/ui';
@@ -24,6 +24,8 @@ export default function Cash() {
   const [add, setAdd] = useState<ManualType | null>(null);
   const [editOpening, setEditOpening] = useState(false);
   const [fix, setFix] = useState<string | null>(null);
+  const [fixNote, setFixNote] = useState<CashMovement | null>(null);
+  const [swap, setSwap] = useState<Sale | null>(null);
   const [showCount, setShowCount] = useState(false);
   const [view, setViewRaw] = useState<'normal' | 'caderno'>(() => { try { return localStorage.getItem('contaView') === 'caderno' ? 'caderno' : 'normal'; } catch { return 'normal'; } });
   const setView = (v: 'normal' | 'caderno') => { setViewRaw(v); try { localStorage.setItem('contaView', v); } catch { /* ok */ } };
@@ -235,12 +237,6 @@ export default function Cash() {
             </button>
             {showCount && <div className="mt-2"><CountedCard dayId={day.id} expected={c.cashOnHand} counted={c.counted} diff={c.difference} locked={locked} /></div>}
 
-            {/* divisão: daqui para baixo, tudo o que foi movimentado no dia */}
-            <div className="flex items-center gap-3 mt-7 -mb-2 px-1" aria-hidden>
-              <span className="flex-1 h-px bg-gradient-to-r from-transparent via-slate-300 to-slate-300" />
-              <span className="text-[11px] tracking-[0.3em] text-slate-300">• • •</span>
-              <span className="flex-1 h-px bg-gradient-to-l from-transparent via-slate-300 to-slate-300" />
-            </div>
             <BlockHeader icon="🧾" tint="bg-slate-200" title={`Movimentado ${isTodayLabel(day.date) === 'de hoje' ? 'hoje' : 'no dia'}`}
               subtitle={`${timeline.length} ${timeline.length === 1 ? 'registro' : 'registros'} · do mais novo para o mais antigo`}
               right={<InfoTip title="Movimentado hoje" example={[
@@ -291,6 +287,10 @@ export default function Cash() {
                             <span className="flex-1 min-w-0 break-words text-[14px] font-semibold text-slate-800">{pc?.name}</span>
                             <span className="text-[13px] font-extrabold text-slate-700 tabular-nums">×{l.quantity}</span>
                             <span className="w-14 text-right text-[12px] text-slate-500 tabular-nums">{l.unitPriceInCents === null ? 'sem preço' : money(l.totalInCents)}</span>
+                            {!cancelled && !locked && (
+                              <button aria-label={`Trocar peça ${pc?.name ?? ''}`} onClick={() => setSwap(l)}
+                                className="shrink-0 h-9 px-2 rounded-lg bg-white border border-slate-200 text-[12px] font-bold text-slate-700 active:bg-slate-100">🔄 Trocar</button>
+                            )}
                           </div>
                         );
                       })}
@@ -303,11 +303,39 @@ export default function Cash() {
                     ) : <div className="h-3" />}
                   </Card>
                 );
-              })() : (
+              })() : t.m.type === 'venda' ? (
+                <Card key={t.m.id} className="overflow-hidden">
+                  <div className="flex items-center gap-2 px-3 pt-3">
+                    <span className="text-lg">🛍️</span>
+                    <span className="text-[13px] font-bold text-slate-700">Venda</span>
+                    <span className="text-[12px] text-slate-400 tabular-nums">🕒 {hhmm(t.m.createdAt)}</span>
+                    <span className="flex-1" />
+                    <span className="text-[20px] font-extrabold tabular-nums text-emerald-600">+{money(t.m.amountInCents)}</span>
+                  </div>
+                  <div className="flex flex-wrap gap-1 px-3 mt-1">
+                    <span className="rounded-full bg-blue-50 text-blue-800 px-2 py-0.5 text-[12px] font-bold">{PAYMENT_EMOJI[t.m.paymentMethod]} {PAYMENT_LABEL[t.m.paymentMethod]}</span>
+                  </div>
+                  <div className="mx-3 mt-2 rounded-xl bg-amber-50 border border-amber-100 flex items-center gap-2 px-2.5 py-2">
+                    <span className="text-base">📒</span>
+                    <span className="flex-1 min-w-0 text-[14px] font-semibold text-slate-800">Do caderno <span className="text-[12px] font-normal text-slate-500">· peça não anotada</span></span>
+                    <span className="text-[13px] font-extrabold text-slate-700 tabular-nums">×{t.m.quantity ?? 1}</span>
+                    <span className="w-14 text-right text-[12px] text-slate-500 tabular-nums">{money(t.m.amountInCents)}</span>
+                  </div>
+                  {!locked ? (
+                    <div className="grid grid-cols-2 gap-2 p-3">
+                      <button className="h-10 rounded-lg bg-slate-100 text-[13px] font-semibold text-slate-700 active:bg-slate-200" onClick={() => setFixNote(t.m)}>✏️ Corrigir valor</button>
+                      <button className="h-10 rounded-lg bg-red-50 text-[13px] font-semibold text-red-600 active:bg-red-100" onClick={async () => {
+                        if (await confirm({ title: 'Cancelar esta venda?', message: `${money(t.m.amountInCents)} no ${PAYMENT_LABEL[t.m.paymentMethod]} sai do caixa. Fica registrado no histórico.`, confirm: 'Cancelar venda', tone: 'danger' }))
+                          run(() => removeCashMovement(t.m.id), 'Venda cancelada');
+                      }}>✖️ Cancelar venda</button>
+                    </div>
+                  ) : <div className="h-3" />}
+                </Card>
+              ) : (
                 <Card key={t.m.id} className="p-3 flex items-center gap-3">
-                  <span className="w-10 h-10 shrink-0 rounded-xl bg-slate-50 flex items-center justify-center text-lg">{t.m.type === 'venda' ? '📒' : MANUAL.find((x) => x.type === t.m.type)?.icon ?? '•'}</span>
+                  <span className="w-10 h-10 shrink-0 rounded-xl bg-slate-50 flex items-center justify-center text-lg">{MANUAL.find((x) => x.type === t.m.type)?.icon ?? '•'}</span>
                   <span className="flex-1 min-w-0">
-                    <span className="block font-semibold text-slate-800">{t.m.type === 'venda' ? `Venda · ${t.m.quantity ?? 1} ${(t.m.quantity ?? 1) === 1 ? 'peça' : 'peças'}` : CASH_LABEL[t.m.type]}{t.m.person ? ` · ${t.m.person}` : ''}</span>
+                    <span className="block font-semibold text-slate-800">{CASH_LABEL[t.m.type]}{t.m.person ? ` · ${t.m.person}` : ''}</span>
                     <span className="block text-xs text-slate-500">{hhmm(t.m.createdAt)} · {PAYMENT_EMOJI[t.m.paymentMethod]} {PAYMENT_LABEL[t.m.paymentMethod]}{t.m.description ? ` · ${t.m.description}` : ''}</span>
                   </span>
                   <span className={`font-bold tabular-nums ${CASH_IN.includes(t.m.type) ? 'text-emerald-600' : 'text-red-600'}`}>
@@ -325,6 +353,8 @@ export default function Cash() {
             <AddCashSheet type={add} onClose={() => setAdd(null)} cashOnHand={c.cashOnHand} />
             <OpeningSheet open={editOpening} onClose={() => setEditOpening(false)} current={c.opening} currentCash={c.openingCash} manual={c.openingManual} />
             <FixPriceSheet orderId={fix} onClose={() => setFix(null)} names={data.names} />
+            <FixNotebookSheet sale={fixNote} onClose={() => setFixNote(null)} />
+            <SwapSheet sale={swap} onClose={() => setSwap(null)} />
           </>
         );
       })()}
@@ -333,11 +363,15 @@ export default function Cash() {
 }
 
 /** Cabeçalho padrão das seções do Caixa: ícone colorido, título, explicação curta e ⓘ/resumo. */
+const ACCENT: Record<string, string> = { 'bg-amber-100': '#f59e0b', 'bg-blue-100': '#2563eb', 'bg-slate-200': '#64748b' };
+
 function BlockHeader({ icon, tint, title, subtitle, right, children }: {
   icon: string; tint: string; title: string; subtitle?: string; right?: React.ReactNode; children?: React.ReactNode;
 }) {
+  // mesmo visual do cabeçalho de grupo no Vender: cartão com faixa colorida no topo
+  const accent = ACCENT[tint] ?? '#64748b';
   return (
-    <div className="mt-6 mb-2.5">
+    <div className="mt-6 mb-2.5 rounded-2xl bg-white border border-slate-200 border-t-4 shadow-sm px-3.5 py-3" style={{ borderTopColor: accent }}>
       <div className="flex items-center gap-3">
         <span className={`w-10 h-10 rounded-xl flex items-center justify-center text-xl shrink-0 ${tint}`}>{icon}</span>
         <span className="flex-1 min-w-0">
@@ -394,6 +428,142 @@ function FixPriceSheet({ orderId, onClose, names }: { orderId: string | null; on
             onChange={(e) => setVals({ ...vals, [x.id]: e.target.value })} />
         </Field>
       ))}
+    </Sheet>
+  );
+}
+
+/**
+ * Trocar a peça vendida: escolhe a cor certa com um toque. A errada volta ao estoque e a certa sai.
+ * Mostra antes como fica (Branco 1 → 2 · Vermelho 2 → 1).
+ */
+function SwapSheet({ sale, onClose }: { sale: Sale | null; onClose: () => void }) {
+  const { day } = useApp();
+  const { run } = useUi();
+  const [busy, wrap] = useBusy();
+  const [groupId, setGroupId] = useState<string | null>(null);
+  const [pick, setPick] = useState<string | null>(null);
+  const [qty, setQty] = useState<number | null>(null);
+  const data = useLiveQuery(async () => {
+    if (!sale || !day) return null;
+    const [rows, reserved] = await Promise.all([loadStockRows(day.id, day.date), activeReservedByVariant(day.date)]);
+    const live = rows.filter((r) => !r.variant.archivedAt && !r.group.archivedAt && r.group.active && r.variant.active);
+    return { live, reserved, cur: rows.find((r) => r.variant.id === sale.variantId) };
+  }, [sale?.id, day?.id]);
+  if (!sale || !data) return null;
+  const close = () => { setGroupId(null); setPick(null); setQty(null); onClose(); };
+  const gid = groupId ?? data.cur?.group.id ?? data.live[0]?.group.id;
+  const groups = [...new Map(data.live.map((r) => [r.group.id, r.group])).values()].sort((a, b) => a.displayOrder - b.displayOrder);
+  const colors = data.live.filter((r) => r.group.id === gid).sort((a, b) => a.variant.displayOrder - b.variant.displayOrder);
+  const n = qty ?? sale.quantity;
+  const free = (r: (typeof data.live)[number]) => r.item.currentQuantity - (data.reserved.get(r.variant.id) ?? 0);
+  const target = data.live.find((r) => r.variant.id === pick);
+  const curName = data.cur ? `${data.cur.group.name} ${data.cur.variant.name}` : 'peça vendida';
+  return (
+    <Sheet open onClose={close} title="🔄 Trocar a peça vendida" tall
+      footer={<Button size="lg" className="w-full" disabled={!target || busy} onClick={() => wrap(async () => {
+        const r = await run(() => swapSaleItem(sale.id, pick!, n), `Trocado: ${target!.group.name} ${target!.variant.name}`);
+        if (r !== undefined) close();
+      })}>{target ? `Trocar para ${target.group.name} ${target.variant.name}` : 'Escolha a peça certa'}</Button>}>
+      {/* o que foi vendido */}
+      <div className="flex items-center gap-3 rounded-2xl bg-red-50 border border-red-200 px-3 py-2.5 mb-3">
+        <Swatch color={data.cur?.variant.color} size={28} />
+        <span className="flex-1 min-w-0 leading-snug">
+          <span className="block text-[12px] font-semibold text-red-700">Foi lançada (errada)</span>
+          <span className="block text-[15px] font-extrabold text-slate-800">{data.cur?.group.icon} {curName} ×{sale.quantity}</span>
+        </span>
+      </div>
+      {sale.quantity > 1 && (
+        <div className="flex items-center justify-between rounded-xl bg-white border border-slate-200 px-3 py-2 mb-3">
+          <span className="text-sm font-semibold text-slate-700">Quantas trocar</span>
+          <span className="flex items-center gap-2">
+            <button aria-label="Trocar uma a menos" className="w-11 h-11 rounded-lg bg-slate-100 text-xl font-bold" onClick={() => setQty(Math.max(1, n - 1))}>−</button>
+            <span className="w-8 text-center text-lg font-extrabold tabular-nums">{n}</span>
+            <button aria-label="Trocar uma a mais" className="w-11 h-11 rounded-lg bg-slate-100 text-xl font-bold" onClick={() => setQty(Math.min(sale.quantity, n + 1))}>+</button>
+          </span>
+        </div>
+      )}
+      <div className="text-sm font-bold text-slate-700 mb-1.5">Qual era a peça certa?</div>
+      <div className="flex gap-1.5 overflow-x-auto no-scrollbar -mx-4 px-4 pb-2">
+        {groups.map((g) => (
+          <button key={g.id} onClick={() => { setGroupId(g.id); setPick(null); }}
+            className={`shrink-0 h-10 px-3 rounded-full text-[13px] font-bold ${g.id === gid ? 'bg-slate-800 text-white' : 'bg-slate-100 text-slate-700'}`}>{g.icon} {g.name}</button>
+        ))}
+      </div>
+      <div className="grid grid-cols-2 gap-2 mt-1">
+        {colors.map((r) => {
+          const same = r.variant.id === sale.variantId;
+          const off = same || free(r) < n;
+          const on = pick === r.variant.id;
+          return (
+            <button key={r.variant.id} disabled={off} onClick={() => setPick(r.variant.id)} aria-pressed={on}
+              className={`min-h-14 rounded-xl border-2 px-2.5 py-2 flex items-center gap-2 text-left ${on ? 'border-emerald-500 bg-emerald-50' : 'border-slate-200 bg-white'} ${off ? 'opacity-40' : 'active:bg-slate-50'}`}>
+              <Swatch color={r.variant.color} size={24} />
+              <span className="flex-1 min-w-0 leading-tight">
+                <span className="block text-[14px] font-bold text-slate-800 break-words">{r.variant.name}</span>
+                <span className="block text-[11px] text-slate-500">{same ? 'é a lançada' : `${free(r)} disponível`}</span>
+              </span>
+              {on && <span className="text-emerald-600 text-lg">✓</span>}
+            </button>
+          );
+        })}
+      </div>
+      {/* como fica o estoque */}
+      {target && data.cur && (
+        <div className="mt-4 rounded-2xl bg-slate-50 border border-slate-200 p-3 text-[14px] space-y-1.5">
+          <div className="text-[12px] font-bold text-slate-500">Como fica o estoque</div>
+          <div className="flex items-center gap-2"><Swatch color={data.cur.variant.color} size={16} /><span className="flex-1">{data.cur.variant.name} <span className="text-slate-400">volta</span></span>
+            <b className="tabular-nums">{data.cur.item.currentQuantity} → <span className="text-emerald-700">{data.cur.item.currentQuantity + n}</span></b></div>
+          <div className="flex items-center gap-2"><Swatch color={target.variant.color} size={16} /><span className="flex-1">{target.variant.name} <span className="text-slate-400">sai</span></span>
+            <b className="tabular-nums">{target.item.currentQuantity} → <span className="text-red-600">{target.item.currentQuantity - n}</span></b></div>
+          <div className="text-[12px] text-slate-500">O valor da venda e o caixa não mudam.</div>
+        </div>
+      )}
+    </Sheet>
+  );
+}
+
+/** Corrigir venda do caderno: valor, forma de pagamento e quantas peças. */
+function FixNotebookSheet({ sale, onClose }: { sale: CashMovement | null; onClose: () => void }) {
+  const { settings } = useApp();
+  const { run } = useUi();
+  const [busy, wrap] = useBusy();
+  const [text, setText] = useState<string | null>(null);
+  const [method, setMethod] = useState<PaymentMethod | null>(null);
+  const [qty, setQty] = useState<number | null>(null);
+  if (!sale) return null;
+  const close = () => { setText(null); setMethod(null); setQty(null); onClose(); };
+  const value = text ?? money(sale.amountInCents);
+  const cents = toCents(value);
+  const m = method ?? sale.paymentMethod;
+  const q = qty ?? sale.quantity ?? 1;
+  const methods = PAYMENTS.filter((p) => settings.paymentMethods.includes(p) || p === sale.paymentMethod);
+  return (
+    <Sheet open onClose={close} title="✏️ Corrigir venda"
+      footer={<Button size="lg" className="w-full" disabled={!cents || busy} onClick={() => wrap(async () => {
+        const r = await run(() => updateNotebookSale(sale.id, { amountInCents: cents!, paymentMethod: m, quantity: q }), 'Venda corrigida');
+        if (r !== undefined) close();
+      })}>Salvar · {money(cents ?? 0)} no {PAYMENT_LABEL[m]}</Button>}>
+      <p className="text-sm text-slate-500 mb-3">Venda copiada do caderno. Corrija o valor, a forma de pagamento ou quantas peças foram.</p>
+      <Field label="Valor total da venda">
+        <Input inputMode="decimal" value={value} onChange={(e) => setText(e.target.value)} />
+      </Field>
+      <div className="text-sm font-semibold text-slate-700 mb-1.5">Como pagou</div>
+      <div className="grid grid-cols-2 gap-2 mb-4">
+        {methods.map((p) => (
+          <button key={p} onClick={() => setMethod(p)}
+            className={`h-12 rounded-xl border-2 text-[14px] font-bold ${m === p ? 'border-blue-600 bg-blue-50 text-blue-800' : 'border-slate-200 bg-white text-slate-700'}`}>
+            {PAYMENT_EMOJI[p]} {PAYMENT_LABEL[p]}
+          </button>
+        ))}
+      </div>
+      <div className="flex items-center justify-between bg-white rounded-xl border border-slate-200 px-3 py-2">
+        <span className="text-sm font-semibold text-slate-700">Quantas peças</span>
+        <span className="flex items-center gap-2">
+          <button aria-label="Menos uma peça" className="w-11 h-11 rounded-lg bg-slate-100 text-xl font-bold" onClick={() => setQty(Math.max(1, q - 1))}>−</button>
+          <span className="w-8 text-center text-lg font-extrabold tabular-nums">{q}</span>
+          <button aria-label="Mais uma peça" className="w-11 h-11 rounded-lg bg-slate-100 text-xl font-bold" onClick={() => setQty(q + 1)}>+</button>
+        </span>
+      </div>
     </Sheet>
   );
 }
