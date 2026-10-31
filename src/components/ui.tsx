@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
+import { colorName, NAMED_COLORS } from '../lib/util';
 
 // ---------------- botões e blocos ----------------
 
@@ -56,6 +57,34 @@ export function Swatch({ color, size = 18 }: { color?: string; size?: number }) 
           backgroundImage: 'radial-gradient(#111 22%, transparent 24%)', backgroundSize: `${size / 3}px ${size / 3}px` }} />
     );
   return <span className="inline-block rounded-full border border-black/10 shrink-0" style={{ width: size, height: size, background: color || '#cbd5e1' }} />;
+}
+
+/**
+ * Escolha de cor: o nome da cor escolhida aparece ao lado do título (“Cor · Azul”).
+ * `colors` padrão = paleta com nomes (inclui Poá e Branco).
+ */
+export function ColorField({ value, onChange, label = 'Cor', colors }: {
+  value?: string | null; onChange: (c: string) => void; label?: ReactNode; colors?: string[];
+}) {
+  const list = colors ?? NAMED_COLORS.map(([c]) => c);
+  return (
+    <div className="mb-4">
+      <div className="flex items-center gap-2 mb-1.5 text-sm font-semibold text-slate-700">
+        <span>{label}</span>
+        {value && (
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-white border border-slate-200 pl-1 pr-2.5 py-0.5 text-[13px] font-bold text-slate-800">
+            <Swatch color={value} size={16} />{colorName(value)}
+          </span>
+        )}
+      </div>
+      <div className="flex flex-wrap gap-2">
+        {list.map((c) => (
+          <button key={c} type="button" onClick={() => onChange(c)} aria-label={`Cor ${colorName(c)}`} aria-pressed={value === c} title={colorName(c)}
+            className={`rounded-full p-0.5 ${value === c ? 'ring-2 ring-offset-1 ring-blue-500' : ''}`}><Swatch color={c} size={32} /></button>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 export function SectionTitle({ children, right }: { children: ReactNode; right?: ReactNode }) {

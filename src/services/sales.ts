@@ -10,6 +10,8 @@ export interface CartLine {
   quantity: number;
   unitPriceInCents: number | null;
   reservationId?: string;
+  /** Forma de pagamento só desta peça (ex.: uma no Pix, outra no dinheiro). Vazio = a da venda. */
+  paymentMethod?: PaymentMethod;
 }
 
 /** Soma das reservas ativas que pesam sobre uma data (criadas nesta data ou antes). */
@@ -29,6 +31,17 @@ const SALE_TABLES = () => [
 function validateLine(l: CartLine) {
   if (!isQty(l.quantity)) throw new UserError(`Quantidade inválida (de 1 a ${MAX_QTY}).`);
   if (l.unitPriceInCents !== null && !isCents(l.unitPriceInCents)) throw new UserError('Preço inválido.');
+  if (l.paymentMethod !== undefined && !PAYMENTS.includes(l.paymentMethod)) throw new UserError('Forma de pagamento inválida.');
+}
+
+/** Soma por forma quando cada peça tem a sua (só peças com preço entram no caixa). */
+function paymentsByLine(lines: CartLine[], fallback: PaymentMethod): Payment[] {
+  const sum = new Map<PaymentMethod, number>();
+  for (const l of lines) {
+    const m = l.paymentMethod ?? fallback;
+    sum.set(m, (sum.get(m) ?? 0) + (l.unitPriceInCents ?? 0) * l.quantity);
+  }
+  return [...sum.entries()].filter(([, v]) => v > 0).map(([method, amountInCents]) => ({ method, amountInCents }));
 }
 
 /** Confere e normaliza o pagamento: uma forma só, ou dividido somando exatamente o total. */
@@ -60,7 +73,11 @@ export async function createOrder(params: {
   lines.forEach(validateLine);
   const total = lines.reduce((s, l) => s + (l.unitPriceInCents ?? 0) * l.quantity, 0);
   if (!isCents(total)) throw new UserError('Total da venda inválido.');
-  const pays = normalizePayments(total, params.paymentMethod, params.payments);
+  // cada peça com a sua forma: o pagamento é a soma por forma (o dividido manual não se aplica)
+  const byLine = lines.some((l) => l.paymentMethod && l.paymentMethod !== params.paymentMethod);
+  const pays = byLine
+    ? normalizePayments(total, params.paymentMethod, paymentsByLine(lines, params.paymentMethod))
+    : normalizePayments(total, params.paymentMethod, params.payments);
   return db.transaction('rw', SALE_TABLES(), async () => {
     const dup = await db.orders.get(params.orderId);
     if (dup) return dup;
@@ -91,7 +108,7 @@ export async function createOrder(params: {
     const main = pays.slice().sort((a, b) => b.amountInCents - a.amountInCents)[0]?.method ?? params.paymentMethod;
     const order: Order = {
       id: params.orderId, dailyRecordId: day.id, customer: params.customer?.trim().slice(0, 80) || undefined,
-      paymentMethod: main, payments: pays.length > 1 ? pays : undefined, totalInCents: total,
+      paymentMethod: main, payments: pays.length > 1 ? pays : undefined, totalInCents: total, ...(byLine ? { payByLine: true } : {}),
       itemCount: lines.reduce((s, l) => s + l.quantity, 0), status: 'ok', cashMovementId: null,
       createdAt: now, notes: params.notes,
     };
@@ -108,7 +125,7 @@ export async function createOrder(params: {
     const sales: Sale[] = lines.map((l) => ({
       id: uid(), orderId: order.id, dailyRecordId: day.id, variantId: l.variantId, quantity: l.quantity,
       unitPriceInCents: l.unitPriceInCents, totalInCents: (l.unitPriceInCents ?? 0) * l.quantity,
-      paymentMethod: main, createdAt: now, cashMovementId: order.cashMovementId, status: 'ok',
+      paymentMethod: byLine ? l.paymentMethod ?? params.paymentMethod : main, createdAt: now, cashMovementId: order.cashMovementId, status: 'ok',
     }));
     await db.sales.bulkAdd(sales);
     for (const l of lines)
@@ -195,6 +212,21 @@ export async function correctOrderPrices(orderId: string, prices: Record<string,
       id: uid(), dailyRecordId: order.dailyRecordId, type, amountInCents: amount, paymentMethod: method,
       relatedOrderId: orderId, createdAt: now, description: 'Correção de valor',
     });
+    if (order.payByLine) {
+      // cada forma tem que ficar com a soma das suas peças
+      const want = new Map<PaymentMethod, number>();
+      for (const x of await db.sales.where('orderId').equals(orderId).toArray())
+        want.set(x.paymentMethod, (want.get(x.paymentMethod) ?? 0) + x.totalInCents);
+      for (const m of PAYMENTS) {
+        const d = (want.get(m) ?? 0) - (net.get(m) ?? 0);
+        if (d > 0) await add('venda', d, m);
+        if (d < 0) await add('estorno', -d, m);
+      }
+      const pays = [...want.entries()].filter(([, v]) => v > 0).map(([method, amountInCents]) => ({ method, amountInCents }));
+      await db.orders.update(orderId, { totalInCents: total, payments: pays.length > 1 ? pays : undefined });
+      await audit('order', orderId, 'correct_prices', order.totalInCents, { total, changes });
+      return { ...order, totalInCents: total };
+    }
     if (diff > 0) await add('venda', diff, order.paymentMethod);
     // devolução: tira primeiro da forma principal, depois das outras, sem deixar nenhuma negativa
     const order_ = [order.paymentMethod, ...PAYMENTS.filter((m) => m !== order.paymentMethod)];
@@ -295,7 +327,7 @@ export async function swapSaleItem(saleId: string, newVariantId: string, quantit
 
     // a linha da peça errada diminui (ou some); a da certa aumenta (junta com uma igual, se houver)
     const lines = await db.sales.where('orderId').equals(order.id).toArray();
-    const same = lines.find((l) => l.id !== s.id && l.status === 'ok' && l.variantId === newVariantId && l.unitPriceInCents === s.unitPriceInCents);
+    const same = lines.find((l) => l.id !== s.id && l.status === 'ok' && l.variantId === newVariantId && l.unitPriceInCents === s.unitPriceInCents && l.paymentMethod === s.paymentMethod);
     const total = (n: number) => (s.unitPriceInCents ?? 0) * n;
     if (qty === s.quantity && !same) await db.sales.update(s.id, { variantId: newVariantId });
     else {

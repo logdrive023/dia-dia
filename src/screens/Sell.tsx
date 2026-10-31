@@ -4,7 +4,7 @@ import { db } from '../db/db';
 import type { PaymentMethod, Reservation } from '../db/types';
 import { money, normalize, PAYMENT_EMOJI, PAYMENT_LABEL, PAYMENTS, toCents, uid } from '../lib/util';
 import { setForSale } from '../services/catalog';
-import { cancelReservation, convertReservation, createOrder, createReservation } from '../services/sales';
+import { cancelReservation, convertReservation, createOrder, createReservation, type CartLine } from '../services/sales';
 import { orderLine } from '../services/report';
 import { setSetting, type SellEntry } from '../services/settings';
 import { loadStockRows, type StockRow } from '../services/summary';
@@ -406,9 +406,9 @@ export function CheckoutSheet({ open, onClose }: { open: boolean; onClose: () =>
   const { run, toast, confirm: ask } = useUi();
   const [busy, wrap] = useBusy();
   const [payment, setPayment] = useState<PaymentMethod>(settings.defaultPayment);
-  // pagamento dividido: a primeira forma recebe o valor digitado, a segunda o que falta
-  const [split, setSplit] = useState<{ method: PaymentMethod; text: string; other: PaymentMethod } | null>(null);
   const [customer, setCustomer] = useState('');
+  // cada peça com a sua forma de pagamento (ex.: uma no Pix, outra no dinheiro)
+  const [perLine, setPerLine] = useState(false);
   const quick = useRecentPrices();
   useEffect(() => { if (open) setPayment(settings.defaultPayment); }, [open, settings.defaultPayment]);
   const info = useLiveQuery(async () => {
@@ -419,23 +419,35 @@ export function CheckoutSheet({ open, onClose }: { open: boolean; onClose: () =>
   if (!open || !day) return null;
   const total = cart.reduce((s, l) => s + (l.unitPriceInCents ?? 0) * l.quantity, 0);
   const pieces = cart.reduce((s, l) => s + l.quantity, 0);
-  const splitFirst = split ? toCents(split.text) : null;
-  const splitRest = split && splitFirst !== null ? total - splitFirst : null;
-  const splitError = !split ? '' : split.method === split.other ? 'Escolha duas formas diferentes.'
-    : splitFirst === null ? 'Digite quanto foi na primeira forma.' : splitRest! <= 0 ? `O valor precisa ser menor que o total (${money(total)}).` : '';
-  const payments = split && !splitError ? [{ method: split.method, amountInCents: splitFirst! }, { method: split.other, amountInCents: splitRest! }] : null;
+  // linhas que vão para a venda: com a forma de cada peça (ou sem, quando é tudo igual)
+  const lines: CartLine[] = perLine ? cart.map((l) => ({ ...l, paymentMethod: l.paymentMethod ?? payment })) : cart.map(({ paymentMethod: _m, ...l }) => l);
   const missingPrice = cart.some((l) => l.unitPriceInCents === null);
   const firstPrice = cart.find((l) => l.unitPriceInCents !== null)?.unitPriceInCents ?? null;
+  const setMode = (each: boolean) => {
+    if (each) {
+      // uma linha por peça (2 Branco viram 2 linhas de 1), cada uma com a forma escolhida até agora
+      setCart(cart.flatMap((l) => Array.from({ length: l.quantity }, () => ({ ...l, quantity: 1, paymentMethod: l.paymentMethod ?? payment }))));
+    } else {
+      // volta a juntar as peças iguais (mesma cor, preço e reserva) e tira a forma de cada uma
+      const merged: CartLine[] = [];
+      for (const { paymentMethod: _m, ...l } of cart) {
+        const same = merged.find((x) => x.variantId === l.variantId && x.unitPriceInCents === l.unitPriceInCents && x.reservationId === l.reservationId);
+        if (same) same.quantity += l.quantity; else merged.push({ ...l });
+      }
+      setCart(merged);
+    }
+    setPerLine(each);
+  };
   const update = (i: number, patch: Partial<(typeof cart)[number]>) =>
     setCart(cart.map((l, j) => (j === i ? { ...l, ...patch } : l)).filter((l) => l.quantity > 0));
 
   const confirm = () => wrap(async () => {
     if (missingPrice && !(await ask({ title: 'Vender sem preço?', tone: 'warning', confirm: 'Vender sem preço',
       message: 'As peças sem preço saem do estoque, mas não entram no caixa nem no relatório de vendas.' }))) return;
-    const o = await run(() => createOrder({ orderId: cartId, dailyRecordId: day.id, lines: cart, paymentMethod: payment, payments: payments ?? undefined, customer }));
+    const o = await run(() => createOrder({ orderId: cartId, dailyRecordId: day.id, lines, paymentMethod: payment, customer }));
     if (o) {
-      toast(`Venda: ${orderLine(cart, o.totalInCents, o.paymentMethod, o.payments)}`);
-      setSplit(null);
+      toast(`Venda: ${orderLine(lines, o.totalInCents, o.paymentMethod, o.payments)}`);
+      setPerLine(false);
       resetCart(); setCustomer(''); onClose();
     }
   });
@@ -443,7 +455,7 @@ export function CheckoutSheet({ open, onClose }: { open: boolean; onClose: () =>
   return (
     <Sheet open onClose={onClose} title="Fechar venda" tall
       footer={
-        <Button variant="success" size="lg" className="w-full text-lg" disabled={!cart.length || busy || !!splitError} onClick={confirm}>
+        <Button variant="success" size="lg" className="w-full text-lg" disabled={!cart.length || busy} onClick={confirm}>
           ✔ Confirmar · {pieces} {pieces === 1 ? 'peça' : 'peças'} · {money(total, settings.currencySymbol)}
         </Button>
       }>
@@ -459,6 +471,22 @@ export function CheckoutSheet({ open, onClose }: { open: boolean; onClose: () =>
                   <div className="font-bold text-slate-800 break-words">{r?.group.name} · {r?.variant.name}</div>
                   <div className="text-xs text-slate-500">disponível {r?.available ?? '–'}</div>
                   <div className="mt-2"><Stepper value={l.quantity} onChange={(v) => update(i, { quantity: v })} min={0} max={r?.available} /></div>
+                  {perLine && (
+                    <div className="mt-2">
+                      <div className="text-[12px] font-semibold text-slate-500 mb-1">Esta peça foi paga no:</div>
+                      <div className="flex flex-wrap gap-1.5">
+                        {settings.paymentMethods.map((m) => {
+                          const on = (l.paymentMethod ?? payment) === m;
+                          return (
+                            <button key={m} type="button" aria-pressed={on} aria-label={`${r?.variant.name ?? 'Peça'} paga no ${PAYMENT_LABEL[m]}`} onClick={() => update(i, { paymentMethod: m })}
+                              className={`min-h-10 px-2.5 rounded-xl border-2 text-[13px] font-bold ${on ? 'border-blue-600 bg-blue-50 text-blue-800' : 'border-slate-200 bg-white text-slate-600'}`}>
+                              {PAYMENT_EMOJI[m]} {PAYMENT_LABEL[m]}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
                 </div>
                 <PriceInput cents={l.unitPriceInCents} onChange={(c) => update(i, { unitPriceInCents: c })} quick={quick}
                   autoFocus={l.unitPriceInCents === null && cart.findIndex((x) => x.unitPriceInCents === null) === i} />
@@ -475,40 +503,25 @@ export function CheckoutSheet({ open, onClose }: { open: boolean; onClose: () =>
       {missingPrice && <p className="text-xs text-orange-600 mt-2">Peças sem preço contam no estoque, mas não somam no caixa.</p>}
 
       <div className="mt-4 mb-2 font-semibold text-slate-700">Como pagou?</div>
-      {!split ? (
-        <>
-          <PaymentPicker value={payment} onChange={setPayment} />
-          {total > 0 && settings.paymentMethods.length > 1 && (
-            <button className="text-sm text-blue-600 font-semibold mt-2"
-              onClick={() => setSplit({ method: payment, text: '', other: settings.paymentMethods.find((m) => m !== payment)! })}>
-              ➗ Dividir pagamento (ex.: parte Pix, parte dinheiro)
-            </button>
-          )}
-        </>
-      ) : (
-        <Card className="p-3">
-          <div className="flex items-center gap-2">
-            <select value={split.method} onChange={(e) => setSplit({ ...split, method: e.target.value as PaymentMethod })}
-              className="h-11 rounded-xl border border-slate-300 bg-white px-2 font-semibold">
-              {settings.paymentMethods.map((m) => <option key={m} value={m}>{PAYMENT_EMOJI[m]} {PAYMENT_LABEL[m]}</option>)}
-            </select>
-            <Input inputMode="decimal" value={split.text} onChange={(e) => setSplit({ ...split, text: e.target.value })} placeholder="quanto?" autoFocus />
-          </div>
-          <div className="flex items-center gap-2 mt-2">
-            <select value={split.other} onChange={(e) => setSplit({ ...split, other: e.target.value as PaymentMethod })}
-              className="h-11 rounded-xl border border-slate-300 bg-white px-2 font-semibold">
-              {settings.paymentMethods.map((m) => <option key={m} value={m}>{PAYMENT_EMOJI[m]} {PAYMENT_LABEL[m]}</option>)}
-            </select>
-            <span className="flex-1 text-right text-lg font-bold tabular-nums">{splitRest === null ? '—' : money(splitRest)}</span>
-          </div>
-          {splitError && <p className="text-xs text-red-600 mt-1">{splitError}</p>}
-          <button className="text-sm text-slate-500 font-semibold mt-2" onClick={() => setSplit(null)}>✕ Não dividir</button>
+      {pieces > 1 && settings.paymentMethods.length > 1 && (
+        <Card className="px-3 mb-2">
+          <Toggle checked={!perLine} onChange={(one) => setMode(!one)} label="Pagou tudo numa forma só" />
         </Card>
       )}
+      {perLine ? (
+        <p className="text-[13px] text-slate-600 px-1">👆 Escolha a forma em cada peça acima. O resumo abaixo soma por forma.</p>
+      ) : (
+        <PaymentPicker value={payment} onChange={setPayment} />
+      )}
       <div className="mt-4"><Field label="Cliente (opcional)"><Input value={customer} onChange={(e) => setCustomer(e.target.value)} placeholder="Nome" /></Field></div>
-      <Card className="p-4 text-center notebook !bg-sky-50">
-        <div className="text-lg">{cart.length ? orderLine(cart, total, payment, payments ?? undefined) : '—'}</div>
-      </Card>
+      {cart.length > 0 && (
+        <SaleSummary total={total} pieces={pieces}
+          rows={PAYMENTS.map((m) => {
+              const ls = lines.filter((l) => (l.paymentMethod ?? payment) === m && l.unitPriceInCents !== null);
+              return { method: m, pieces: ls.reduce((n, l) => n + l.quantity, 0), amount: ls.reduce((n, l) => n + l.unitPriceInCents! * l.quantity, 0) };
+            }).filter((r) => r.pieces > 0)}
+          noPrice={cart.filter((l) => l.unitPriceInCents === null).reduce((n, l) => n + l.quantity, 0)} />
+      )}
     </Sheet>
   );
 }
@@ -642,6 +655,41 @@ function PutForSaleSheet({ open, onClose }: { open: boolean; onClose: () => void
         ))}
       </div>
     </Sheet>
+  );
+}
+
+/** Resumo da venda: quanto em cada forma de pagamento e o total. */
+function SaleSummary({ rows, total, pieces, noPrice }: {
+  rows: { method: PaymentMethod; pieces: number | null; amount: number }[]; total: number; pieces: number; noPrice: number;
+}) {
+  const plural = (n: number) => `${n} ${n === 1 ? 'peça' : 'peças'}`;
+  return (
+    <div className="mt-4 rounded-2xl bg-white border border-slate-200 overflow-hidden">
+      <div className="px-4 pt-3 pb-1 text-[12px] font-bold uppercase tracking-wide text-slate-500">🧾 Resumo da venda</div>
+      <div className="divide-y divide-slate-100">
+        {rows.map((r) => (
+          <div key={r.method} className="flex items-center gap-3 px-4 py-2.5">
+            <span className="w-9 h-9 rounded-xl bg-slate-50 flex items-center justify-center text-lg shrink-0">{PAYMENT_EMOJI[r.method]}</span>
+            <span className="flex-1 min-w-0">
+              <span className="block text-[15px] font-semibold text-slate-800">{PAYMENT_LABEL[r.method]}</span>
+              {r.pieces !== null && <span className="block text-[12px] text-slate-500">{plural(r.pieces)}</span>}
+            </span>
+            <span className="text-[17px] font-bold tabular-nums text-slate-800">{money(r.amount)}</span>
+          </div>
+        ))}
+        {noPrice > 0 && (
+          <div className="flex items-center gap-3 px-4 py-2.5 bg-orange-50">
+            <span className="w-9 h-9 rounded-xl bg-orange-100 flex items-center justify-center text-lg shrink-0">⚠️</span>
+            <span className="flex-1 min-w-0 text-[14px] font-semibold text-orange-800">{plural(noPrice)} sem preço</span>
+            <span className="text-[15px] font-bold tabular-nums text-orange-700">—</span>
+          </div>
+        )}
+      </div>
+      <div className="flex items-center justify-between px-4 py-3 bg-emerald-600 text-white">
+        <span className="font-bold">Total · {plural(pieces)}</span>
+        <span className="text-[22px] font-extrabold tabular-nums">{money(total)}</span>
+      </div>
+    </div>
   );
 }
 

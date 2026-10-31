@@ -5,8 +5,21 @@ import type { DaySummary } from './summary';
 type Opts = { symbol?: string; title?: string };
 
 /** Linha do caderno para uma venda: "2x70 = 140 Dinheiro" ou "1x70 + 1x85 = 155 Pix". */
-export function orderLine(lines: { quantity: number; unitPriceInCents: number | null }[], total: number, method: PaymentMethod,
+export function orderLine(lines: { quantity: number; unitPriceInCents: number | null; paymentMethod?: PaymentMethod }[], total: number, method: PaymentMethod,
   payments?: { method: PaymentMethod; amountInCents: number }[]) {
+  // cada peça com a sua forma: "1x70 Dinheiro + 1x70 Pix = 140"
+  if (new Set(lines.map((l) => l.paymentMethod ?? method)).size > 1) {
+    const by = new Map<string, number>();
+    for (const l of lines) {
+      const k = `${l.unitPriceInCents ?? -1}|${l.paymentMethod ?? method}`;
+      by.set(k, (by.get(k) ?? 0) + l.quantity);
+    }
+    const parts = [...by.entries()].map(([k, q]) => {
+      const [p, m] = k.split('|');
+      return `${q}x${Number(p) < 0 ? '?' : money(Number(p))} ${PAYMENT_LABEL[m as PaymentMethod]}`;
+    });
+    return `${parts.join(' + ')} = ${money(total)}`;
+  }
   const byPrice = new Map<number, number>();
   for (const l of lines) {
     const k = l.unitPriceInCents ?? -1;

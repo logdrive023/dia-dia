@@ -291,17 +291,28 @@ export default function Cash() {
                       {lines.map((l) => {
                         const pc = data.pieces.get(l.variantId);
                         return (
-                          <div key={l.id} className="flex items-center gap-2 px-2.5 py-2">
-                            <span className="text-base">{pc?.icon}</span>
-                            <span className="text-[13px] font-bold" style={{ color: pc?.groupColor }}>{pc?.group}</span>
-                            <span className="shrink-0 text-slate-300">›</span>
-                            <Swatch color={pc?.color} size={14} />
-                            <span className="flex-1 min-w-0 break-words text-[14px] font-semibold text-slate-800">{pc?.name}</span>
-                            <span className="text-[13px] font-extrabold text-slate-700 tabular-nums">×{l.quantity}</span>
-                            <span className="w-14 text-right text-[12px] text-slate-500 tabular-nums">{l.unitPriceInCents === null ? 'sem preço' : money(l.totalInCents)}</span>
-                            {!cancelled && !locked && (
-                              <button aria-label={`Trocar peça ${pc?.name ?? ''}`} onClick={() => setSwap(l)}
-                                className="shrink-0 h-9 px-2 rounded-lg bg-white border border-slate-200 text-[12px] font-bold text-slate-700 active:bg-slate-100">🔄 Trocar</button>
+                          <div key={l.id} className="px-2.5 py-2">
+                            {/* linha 1: de onde veio a peça, quantidade e valor */}
+                            <div className="flex items-center gap-2">
+                              <span className="text-base shrink-0">{pc?.icon}</span>
+                              <span className="flex-1 min-w-0 flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
+                                <span className="text-[13px] font-bold" style={{ color: pc?.groupColor }}>{pc?.group}</span>
+                                <span className="text-slate-300">›</span>
+                                <span className="inline-flex items-center gap-1.5 text-[14px] font-semibold text-slate-800"><Swatch color={pc?.color} size={14} />{pc?.name}</span>
+                              </span>
+                              <span className="shrink-0 text-[13px] font-extrabold text-slate-700 tabular-nums">×{l.quantity}</span>
+                              <span className="shrink-0 min-w-12 text-right text-[13px] font-semibold text-slate-600 tabular-nums">{l.unitPriceInCents === null ? 'sem preço' : money(l.totalInCents)}</span>
+                            </div>
+                            {/* linha 2: forma de pagamento desta peça e trocar */}
+                            {(o.payByLine || (!cancelled && !locked)) && (
+                              <div className="flex items-center gap-2 mt-1.5 pl-7">
+                                {o.payByLine && <span className="rounded-full bg-blue-50 text-blue-800 px-2 py-0.5 text-[12px] font-bold">{PAYMENT_EMOJI[l.paymentMethod]} {PAYMENT_LABEL[l.paymentMethod]}</span>}
+                                <span className="flex-1" />
+                                {!cancelled && !locked && (
+                                  <button aria-label={`Trocar peça ${pc?.name ?? ''}`} onClick={() => setSwap(l)}
+                                    className="shrink-0 h-9 px-2.5 rounded-lg bg-white border border-slate-200 text-[12px] font-bold text-slate-700 active:bg-slate-100">🔄 Trocar peça</button>
+                                )}
+                              </div>
                             )}
                           </div>
                         );

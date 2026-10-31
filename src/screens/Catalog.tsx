@@ -2,17 +2,16 @@ import { useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../db/db';
 import type { Group, Variant } from '../db/types';
-import { COLORS, money, normalize, toCents } from '../lib/util';
+import { colorName, COLORS, money, NAMED_COLORS, normalize, toCents } from '../lib/util';
 import {
   archiveGroup, archiveVariant, createCategory, createGroup, createVariant, deleteCategory, deleteGroup, deleteVariant,
   groupHasHistory, moveVariant, reorderGroups, reorderVariants, setGroupActive, setVariantActive, transferVariants,
   updateGroup, updateVariant, variantHasHistory,
 } from '../services/catalog';
 import { useApp } from '../state';
-import { Badge, Button, Card, Field, InfoTip, Input, Sheet, Swatch, Toggle, useBusy, useUi } from '../components/ui';
+import { Badge, Button, Card, ColorField, Field, InfoTip, Input, Sheet, Swatch, Toggle, useBusy, useUi } from '../components/ui';
 
 const ICONS = ['📦', '🎀', '💜', '📌', '📍', '👕', '🧡', '✨', '💙', '👑', '💎', '🌸', '⭐', '🔥', '🆕', '🎁', '👜', '🧢', '🧦', '💍', '🌈', '🍀', '❤️', '🖤'];
-const VCOLORS = ['poa', '#f8fafc', '#111827', ...COLORS.filter((c) => c !== '#111827')];
 
 export default function CatalogSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { run } = useUi();
@@ -163,11 +162,7 @@ function QuickAdd({ kind, onClose, groups, onCreatedGroup }: { kind: 'group' | '
         <Swatch color={color} size={44} />
         <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Ex.: Verde" autoFocus onKeyDown={(e) => e.key === 'Enter' && name.trim() && save()} />
       </div>
-      <div className="flex flex-wrap gap-2 mb-4">
-        {VCOLORS.map((c) => (
-          <button key={c} onClick={() => setColor(c)} aria-label={`Cor ${c}`} className={`rounded-full p-0.5 ${color === c ? 'ring-2 ring-blue-500' : ''}`}><Swatch color={c} size={30} /></button>
-        ))}
-      </div>
+      <ColorField value={color} onChange={(c) => { if (!name.trim() || name.trim() === colorName(color)) setName(colorName(c) === 'Poá' ? 'Poa' : colorName(c)); setColor(c); }} />
 
       <div className="text-sm font-semibold text-slate-700 mb-1.5">3. Quantidade agora <span className="font-normal text-slate-500">(opcional)</span></div>
       <div className="flex items-center justify-between bg-white rounded-xl border border-slate-200 px-3 py-2">
@@ -220,13 +215,7 @@ function GroupEditor({ id, onClose }: { id: string | null; onClose: () => void }
           ))}
         </div>
       </Field>
-      <Field label="Cor">
-        <div className="flex flex-wrap gap-2">
-          {COLORS.map((c) => (
-            <button key={c} onClick={() => run(() => updateGroup(g.id, { color: c }))} className={`w-9 h-9 rounded-full ${g.color === c ? 'ring-2 ring-offset-2 ring-blue-500' : ''}`} style={{ background: c }} />
-          ))}
-        </div>
-      </Field>
+      <ColorField value={g.color} colors={NAMED_COLORS.map(([c]) => c).filter((c) => c !== 'poa')} onChange={(c) => run(() => updateGroup(g.id, { color: c }))} />
       <NameField key={'d' + g.id} label="Descrição (opcional)" value={g.description ?? ''} allowEmpty onSave={(description) => run(() => updateGroup(g.id, { description }), 'Salvo')} />
       {data.categories.length > 0 && (
         <Field label="Etiquetas">
@@ -332,13 +321,7 @@ function VariantEditor({ id, onClose }: { id: string | null; onClose: () => void
   return (
     <Sheet open onClose={onClose} title={<span className="flex items-center gap-2"><Swatch color={v.color} />{group?.name} · {v.name}</span>} tall>
       <NameField key={v.id + v.name} value={v.name} onSave={(name) => run(() => updateVariant(v.id, { name }), 'Nome alterado')} />
-      <Field label="Cor">
-        <div className="flex flex-wrap gap-2">
-          {VCOLORS.map((c) => (
-            <button key={c} onClick={() => run(() => updateVariant(v.id, { color: c }))} className={`rounded-full ${v.color === c ? 'ring-2 ring-offset-2 ring-blue-500' : ''}`}><Swatch color={c} size={34} /></button>
-          ))}
-        </div>
-      </Field>
+      <ColorField value={v.color} onChange={(c) => run(() => updateVariant(v.id, { color: c }))} />
       <NumberField key={'i' + v.id + v.idealStock} label="Estoque ideal"
         hint={`Quantas peças você quer ter. “Repor” = ideal − o que tem. Ex.: ideal 15, vendeu 1 → repor 1. Vazio = usa a quantidade do cadastro (${v.startQuantity}).`}
         value={v.idealStock === null || v.idealStock === undefined ? '' : String(v.idealStock)}

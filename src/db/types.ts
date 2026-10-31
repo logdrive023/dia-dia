@@ -108,6 +108,8 @@ export interface Order {
   cashMovementId?: ID | null;
   /** Pagamento dividido (ex.: 100 Pix + 55 Dinheiro). Vazio = tudo em paymentMethod. */
   payments?: Payment[];
+  /** Cada peça tem a sua forma de pagamento (Sale.paymentMethod); `payments` é a soma por forma. */
+  payByLine?: boolean;
   createdAt: string;
   notes?: string;
 }

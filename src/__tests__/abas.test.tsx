@@ -101,16 +101,13 @@ describe('Aba Vender', () => {
     await screen.findByText('Vender sem preço?');
     click(lastBtn(/^Voltar$/));
     type(screen.getByPlaceholderText('Preço'), '80');
-    // dividido inválido bloqueia; válido passa
-    click(screen.getByRole('button', { name: /Dividir pagamento/ }));
-    type(screen.getByPlaceholderText('quanto?'), '500');
-    await screen.findByText(/precisa ser menor/);
-    expect((screen.getByRole('button', { name: /Confirmar ·/ }) as HTMLButtonElement).disabled).toBe(true);
-    type(screen.getByPlaceholderText('quanto?'), '30');
+    // uma peça só: não aparece a opção de várias formas
+    expect(screen.queryByRole('switch', { name: /Pagou tudo numa forma só/ })).toBeNull();
+    await waitFor(() => expect((screen.getByRole('button', { name: /Confirmar ·/ }) as HTMLButtonElement).disabled).toBe(false));
     click(screen.getByRole('button', { name: /Confirmar ·/ }));
     await waitFor(async () => expect(await db.orders.count()).toBe(1));
     const cash = await db.cashMovements.toArray();
-    expect(cash.map((c) => c.amountInCents).sort()).toEqual([3000, 5000]);
+    expect(cash.map((c) => c.amountInCents)).toEqual([8000]);
     // agora Rosa esgotou: botão Vender some e aparece "sem peça"
     await waitFor(() => expect(screen.queryAllByRole('button', { name: /^Vender Rosa$/ }).length).toBeLessThan(2));
     // reservar com nome e vender depois
@@ -173,6 +170,40 @@ describe('Aba Estoque', () => {
     await screen.findByText(/já está salvo no sistema/);
     for (const f of [/Vendidas/, /Entraram/, /Saíram/, /Ajustes/, /Todos/]) click(screen.getAllByRole('button', { name: f }).slice(-1)[0]);
     expect(await db.dailyStockItems.toArray().then((x) => x.every((i) => i.currentQuantity >= 0))).toBe(true);
+  }, 30000);
+});
+
+describe('Pagamento por peça (pela tela)', () => {
+  it('2 peças: desliga "tudo numa forma só", uma no Pix e outra no Dinheiro; religar junta de novo', async () => {
+    await openAndStart();
+    click(nav('Vender'));
+    // 2 da mesma peça: "+ Vender" e depois o "+" dela
+    const add = async () => {
+      click((await screen.findAllByRole('button', { name: /^Vender Branco$/ }))[0]);
+      click((await screen.findAllByRole('button', { name: /^Mais 1 Branco$/ }))[0]);
+    };
+    await add();
+    click(await screen.findByRole('button', { name: /Fechar venda/ }));
+    const sw = await screen.findByRole('switch', { name: /Pagou tudo numa forma só/ });
+    expect(sw.getAttribute('aria-checked')).toBe('true');
+    click(sw); // desliga: cada peça vira uma linha com a sua forma
+    await waitFor(() => expect(screen.getAllByPlaceholderText('Preço').length).toBe(2));
+    screen.getAllByPlaceholderText('Preço').forEach((p) => type(p, '70'));
+    click(screen.getAllByRole('button', { name: /paga no Pix$/ })[0]);
+    // resumo soma por forma
+    await screen.findByText('Resumo da venda', { exact: false });
+    click(screen.getByRole('button', { name: /Confirmar · 2 peças/ }));
+    await waitFor(async () => expect(await db.orders.count()).toBe(1));
+    const cash = await db.cashMovements.toArray();
+    expect(cash.map((c) => [c.paymentMethod, c.amountInCents]).sort()).toEqual([['dinheiro', 7000], ['pix', 7000]]);
+    expect((await db.orders.toArray())[0].payByLine).toBe(true);
+    // de novo: desliga e religa → volta a uma linha com 2 peças
+    await add();
+    click(await screen.findByRole('button', { name: /Fechar venda/ }));
+    click(await screen.findByRole('switch', { name: /Pagou tudo numa forma só/ }));
+    await waitFor(() => expect(screen.getAllByPlaceholderText('Preço').length).toBe(2));
+    click(screen.getByRole('switch', { name: /Pagou tudo numa forma só/ }));
+    await waitFor(() => expect(screen.getAllByPlaceholderText('Preço').length).toBe(1));
   }, 30000);
 });
 

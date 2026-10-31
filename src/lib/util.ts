@@ -84,6 +84,26 @@ export const COLORS = [
   '#3b82f6', '#6366f1', '#a855f7', '#ec4899', '#78716c', '#64748b', '#111827',
 ];
 
+/** Cores com nome (para peças e grupos). Inclui as da lista oficial, para o nome bater. */
+export const NAMED_COLORS: [string, string][] = [
+  ['poa', 'Poá'], ['#f8fafc', 'Branco'], ['#fef3c7', 'Creme'], ['#e7d3b0', 'Bege'], ['#cbd5e1', 'Prata'],
+  ['#94a3b8', 'Cinza'], ['#64748b', 'Chumbo'], ['#374151', 'Grafite'], ['#111827', 'Preto'],
+  ['#7f1d1d', 'Vinho'], ['#b91c1c', 'Vermelho escuro'], ['#ef4444', 'Vermelho'], ['#fb7185', 'Coral'],
+  ['#f97316', 'Laranja'], ['#fdba74', 'Pêssego'], ['#f59e0b', 'Âmbar'], ['#ca8a04', 'Dourado'], ['#d4a017', 'Mostarda'],
+  ['#facc15', 'Amarelo'], ['#fde68a', 'Amarelo claro'], ['#a3e635', 'Verde limão'], ['#22c55e', 'Verde'],
+  ['#15803d', 'Verde escuro'], ['#65a30d', 'Verde oliva'], ['#86efac', 'Verde menta'], ['#2dd4bf', 'Verde Piscina'],
+  ['#14b8a6', 'Turquesa'], ['#06b6d4', 'Ciano'], ['#7dd3fc', 'Celeste'], ['#3b82f6', 'Azul'], ['#1d4ed8', 'Azul royal'],
+  ['#1e3a8a', 'Azul marinho'], ['#6366f1', 'Índigo'], ['#c4b5fd', 'Lilás'], ['#a855f7', 'Roxo'], ['#6b21a8', 'Roxo escuro'],
+  ['#f9a8d4', 'Rosa claro'], ['#f472b6', 'Rosa'], ['#ec4899', 'Pink'], ['#be185d', 'Magenta'],
+  ['#92400e', 'Café'], ['#78350f', 'Marrom'], ['#78716c', 'Taupe'], ['#a16207', 'Caramelo'],
+];
+
+/** Nome da cor ("Azul"); cor fora da paleta → "Personalizada". */
+export function colorName(c?: string | null) {
+  if (!c) return '';
+  return NAMED_COLORS.find(([hex]) => hex.toLowerCase() === c.toLowerCase())?.[1] ?? 'Personalizada';
+}
+
 export function normalize(s: string) {
   return s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim();
 }
