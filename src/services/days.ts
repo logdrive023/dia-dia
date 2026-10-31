@@ -95,24 +95,45 @@ export async function applyStockDelta(
   return mv;
 }
 
-const STOCK_TABLES = () => [db.dailyRecords, db.dailyStockItems, db.stockMovements, db.variants];
+const STOCK_TABLES = () => [db.dailyRecords, db.dailyStockItems, db.stockMovements, db.variants, db.reservations];
 
-export async function moveStock(dailyRecordId: string, variantId: string, delta: number, type: MovementType, description?: string) {
+/** Redução que deixaria menos peças físicas do que as reservadas: a tela pergunta antes de seguir. */
+export class ReservedError extends UserError {
+  constructor(public reserved: number, public customers: string[]) {
+    super(`${reserved} ${reserved === 1 ? 'peça está reservada' : 'peças estão reservadas'}${customers.length ? ` para ${customers.join(', ')}` : ''}.`);
+  }
+}
+
+async function checkReserved(date: string, variantId: string, newBalance: number) {
+  const res = (await db.reservations.where('variantId').equals(variantId).toArray())
+    .filter((r) => r.status === 'active' && r.date <= date);
+  const reserved = res.reduce((s, r) => s + r.quantity, 0);
+  if (newBalance < reserved) throw new ReservedError(reserved, res.map((r) => r.customer).filter(Boolean) as string[]);
+}
+
+export interface StockOpts { allowBelowReserved?: boolean }
+
+export async function moveStock(dailyRecordId: string, variantId: string, delta: number, type: MovementType, description?: string, opts: StockOpts = {}) {
   if (!Number.isInteger(delta) || delta === 0) throw new UserError('Quantidade inválida.');
   return db.transaction('rw', STOCK_TABLES(), async () => {
-    await assertOpen(dailyRecordId);
+    const day = await assertOpen(dailyRecordId);
+    if (delta < 0 && !opts.allowBelowReserved) {
+      const item = await ensureItem(dailyRecordId, variantId);
+      await checkReserved(day.date, variantId, item.currentQuantity + delta);
+    }
     return applyStockDelta(dailyRecordId, variantId, delta, type, { description });
   });
 }
 
 /** Edição direta da quantidade: gera um ajuste com a diferença (ajuste não é venda). */
-export async function setStock(dailyRecordId: string, variantId: string, quantity: number, description = 'Ajuste manual') {
+export async function setStock(dailyRecordId: string, variantId: string, quantity: number, description = 'Ajuste manual', opts: StockOpts = {}) {
   if (!Number.isInteger(quantity) || quantity < 0) throw new UserError('Quantidade inválida.');
   return db.transaction('rw', STOCK_TABLES(), async () => {
-    await assertOpen(dailyRecordId);
+    const day = await assertOpen(dailyRecordId);
     const item = await ensureItem(dailyRecordId, variantId);
     const delta = quantity - item.currentQuantity;
     if (delta === 0) return null;
+    if (delta < 0 && !opts.allowBelowReserved) await checkReserved(day.date, variantId, quantity);
     return applyStockDelta(dailyRecordId, variantId, delta, 'ajuste', { description });
   });
 }

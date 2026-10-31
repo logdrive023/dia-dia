@@ -67,7 +67,8 @@ export function whatsappReport(date: string, s: DaySummary, opts: Opts = {}) {
   L.push('🧮 *Caixa*');
   L.push(...cashLines(s).map((x) => '  ' + x));
   L.push(`  ✅ *Saldo: ${sym}${money(c.accumulated)}*`);
-  if (c.counted !== null) L.push(`  Contado: ${sym}${money(c.counted)} (dif. ${money(c.difference)})`);
+  L.push(`  💵 Em dinheiro: ${sym}${money(c.cashOnHand)} · ⚡💳 Pix/Cartão: ${sym}${money(c.otherBalance)}`);
+  if (c.counted !== null) L.push(`  Contado em dinheiro: ${sym}${money(c.counted)} (dif. ${money(c.difference)})`);
 
   if (s.soldByVariant.length) {
     L.push('');

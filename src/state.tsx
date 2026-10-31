@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from './db/db';
 import type { DailyRecord } from './db/types';
@@ -7,7 +7,7 @@ import { DEFAULT_SETTINGS, getAllSettings, type AppSettings } from './services/s
 import type { CartLine } from './services/sales';
 
 export type Tab = 'inicio' | 'estoque' | 'vender' | 'caixa' | 'historico';
-export type Overlay = null | 'cadastro' | 'backup' | 'config' | 'fechar' | 'checkout' | 'comparar';
+export type Overlay = null | 'menu' | 'cadastro' | 'backup' | 'config' | 'fechar' | 'checkout' | 'comparar';
 
 interface Ctx {
   date: string;
@@ -38,6 +38,23 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const settings = useLiveQuery(getAllSettings, []) ?? DEFAULT_SETTINGS;
 
   const setDate = useCallback((d: string) => { setDateRaw(d); setCart([]); setCartId(uid()); }, []);
+
+  // se estava em "hoje" e virou o dia (app aberto de um dia para o outro), segue para o novo hoje
+  const lastToday = useRef(todayStr());
+  const dateRef = useRef(date);
+  dateRef.current = date;
+  useEffect(() => {
+    const check = () => {
+      const now = todayStr();
+      if (now === lastToday.current) return;
+      if (dateRef.current === lastToday.current) setDate(now);
+      lastToday.current = now;
+    };
+    const id = setInterval(check, 60_000);
+    document.addEventListener('visibilitychange', check);
+    window.addEventListener('focus', check);
+    return () => { clearInterval(id); document.removeEventListener('visibilitychange', check); window.removeEventListener('focus', check); };
+  }, [setDate]);
   const setTab = useCallback((t: Tab) => { setTabRaw(t); window.scrollTo({ top: 0 }); }, []);
   const addToCart = useCallback((variantId: string, price: number | null = null) => {
     setCart((c) => {

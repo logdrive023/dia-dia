@@ -139,6 +139,8 @@ export interface CashRecord {
   /** "Ontem" digitado à mão; só vale quando openingManual = true (senão vem do dia anterior). */
   openingBalanceInCents: number;
   openingManual?: boolean;
+  /** Quanto do "Ontem" manual é dinheiro vivo (vazio = tudo). */
+  openingCashInCents?: number | null;
   countedBalanceInCents?: number | null;
   status: DayStatus;
 }

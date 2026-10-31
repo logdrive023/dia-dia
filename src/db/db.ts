@@ -49,6 +49,11 @@ export class AppDB extends Dexie {
 
 export let db = new AppDB();
 
+// Outra aba/versão do app precisa atualizar o banco: fecha esta conexão em vez de travar as duas.
+if (typeof window !== 'undefined') {
+  db.on('versionchange', () => { db.close(); window.location.reload(); return false; });
+}
+
 /** Usado nos testes para trocar por um banco limpo. */
 export function useDatabase(instance: AppDB) {
   db = instance;

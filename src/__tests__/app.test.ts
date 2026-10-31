@@ -5,7 +5,7 @@ import {
   archiveGroup, createGroup, createVariant, deleteGroup, deleteVariant, moveVariant, registerPendingSellGroup,
   reorderGroups, updateGroup, updateVariant,
 } from '../services/catalog';
-import { closeDay, getDayByDate, moveStock, reopenDay, resyncFromPrevious, setStock, startDay, undoMovement } from '../services/days';
+import { closeDay, getDayByDate, moveStock, reopenDay, ReservedError, resyncFromPrevious, setStock, startDay, undoMovement } from '../services/days';
 import { cancelOrder, cancelReservation, convertReservation, createOrder, createReservation } from '../services/sales';
 import { addCashMovement, setCountedBalance, setOpeningBalance } from '../services/cash';
 import { compareDays, computeCash, daySummary, loadStockRows, syncGap } from '../services/summary';
@@ -187,6 +187,13 @@ describe('caixa e relatório do caderno', () => {
   it('dinheiro em centavos', () => {
     expect(toCents('70')).toBe(7000);
     expect(toCents('1.230,50')).toBe(123050);
+    expect(toCents('1.230')).toBe(123000);
+    expect(toCents('1.230.000')).toBe(123000000);
+    expect(toCents('1.230,00')).toBe(123000);
+    expect(toCents('12.5')).toBe(1250);
+    expect(toCents('70,50')).toBe(7050);
+    expect(toCents('1.2345')).toBe(123);
+    expect(toCents('abc')).toBeNull();
     expect(money(123000)).toBe('1.230');
     expect(money(7050)).toBe('70,50');
   });
@@ -358,5 +365,43 @@ describe('gaps corrigidos', () => {
     const errs = (await runDiagnostics()).findings.filter((f) => f.level === 'erro').map((f) => f.title);
     expect(errs.some((t) => t.startsWith('Estoque não bate'))).toBe(true);
     expect(errs.some((t) => t.includes('recebimentos no caixa'))).toBe(true);
+  });
+});
+
+describe('melhorias 1–3', () => {
+  it('conferência compara só com o dinheiro vivo (Pix/Cartão ficam fora)', async () => {
+    const d1 = await startDay('2026-10-30');
+    await setOpeningBalance(d1.id, 10000);
+    const v = await variantId('Broche', 'Branco');
+    await createOrder({ orderId: uid(), dailyRecordId: d1.id, paymentMethod: 'dinheiro', lines: [{ variantId: v, quantity: 1, unitPriceInCents: 7000 }] });
+    await createOrder({ orderId: uid(), dailyRecordId: d1.id, paymentMethod: 'pix', lines: [{ variantId: v, quantity: 1, unitPriceInCents: 8500 }] });
+    await addCashMovement({ dailyRecordId: d1.id, type: 'dar', amountInCents: 2000, person: 'Chico' });
+    let c = await computeCash(d1.id);
+    expect([c.accumulated, c.cashOnHand, c.otherBalance]).toEqual([23500, 15000, 8500]);
+    await setCountedBalance(d1.id, 15000);
+    expect((await computeCash(d1.id)).difference).toBe(0);
+    // dinheiro vivo passa para o dia seguinte
+    const d2 = await startDay('2026-10-31');
+    c = await computeCash(d2.id);
+    expect([c.opening, c.openingCash]).toEqual([23500, 15000]);
+    // "Ontem" manual com parte em dinheiro
+    await setOpeningBalance(d2.id, 30000, 12000);
+    c = await computeCash(d2.id);
+    expect([c.opening, c.openingCash, c.otherBalance]).toEqual([30000, 12000, 18000]);
+    await expect(setOpeningBalance(d2.id, 100, 200)).rejects.toThrow(/maior que o total/);
+  });
+  it('saída/ajuste abaixo do reservado pede confirmação; venda segue normal', async () => {
+    const d = await startDay('2026-10-31');
+    const v = await variantId('Lila', 'Rosa'); // 5 peças
+    await createReservation({ dailyRecordId: d.id, variantId: v, quantity: 3, customer: 'Ana' });
+    await moveStock(d.id, v, -2, 'saida'); // fica 3 = reservado: ok
+    await expect(moveStock(d.id, v, -1, 'perda')).rejects.toBeInstanceOf(ReservedError);
+    await expect(setStock(d.id, v, 1)).rejects.toThrow(/reservadas para Ana/);
+    expect(await qty(d.id, v)).toBe(3);
+    await moveStock(d.id, v, -1, 'perda', undefined, { allowBelowReserved: true });
+    expect(await qty(d.id, v)).toBe(2);
+    await moveStock(d.id, v, 4, 'entrada');
+    await setStock(d.id, v, 4);
+    expect(await qty(d.id, v)).toBe(4);
   });
 });

@@ -6,7 +6,7 @@ import { useApp } from '../state';
 import { Button, Card, Field, Input, SectionTitle, Sheet, Toggle, useUi } from '../components/ui';
 
 export default function SettingsSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const { settings, setOverlay } = useApp();
+  const { settings } = useApp();
   const { run } = useUi();
   const [symbol, setSymbol] = useState(settings.currencySymbol);
   const [low, setLow] = useState(String(settings.lowStockDefault));
@@ -57,11 +57,6 @@ export default function SettingsSheet({ open, onClose }: { open: boolean; onClos
       <SectionTitle>Verificar dados</SectionTitle>
       <Diagnostics />
 
-      <SectionTitle>Atalhos</SectionTitle>
-      <div className="grid grid-cols-2 gap-2">
-        <Button variant="soft" onClick={() => setOverlay('cadastro')}>✏️ Grupos e produtos</Button>
-        <Button variant="soft" onClick={() => setOverlay('backup')}>💾 Backup</Button>
-      </div>
       <p className="text-xs text-slate-400 text-center mt-6">Dia a Dia · funciona offline · dados só neste aparelho</p>
     </Sheet>
   );

@@ -49,6 +49,16 @@ export default function Cash() {
               <div className="text-emerald-100 text-sm">Saldo do caixa (esperado)</div>
               <div className="text-4xl font-extrabold tabular-nums">{sym && <span className="text-2xl mr-1">{sym}</span>}{money(c.accumulated)}</div>
               <div className="text-emerald-100 text-sm mt-0.5">Hoje {c.todayNet >= 0 ? '+' : ''}{money(c.todayNet)} · Ontem {money(c.opening)}</div>
+              <div className="grid grid-cols-2 gap-2 mt-3">
+                <div className="bg-white/15 rounded-lg px-2.5 py-1.5">
+                  <div className="text-[11px] text-emerald-100">💵 Dinheiro em mãos</div>
+                  <div className="font-bold tabular-nums">{money(c.cashOnHand)}</div>
+                </div>
+                <div className="bg-white/15 rounded-lg px-2.5 py-1.5">
+                  <div className="text-[11px] text-emerald-100">⚡ Pix / 💳 Cartão</div>
+                  <div className="font-bold tabular-nums">{money(c.otherBalance)}</div>
+                </div>
+              </div>
             </Card>
 
             <SectionTitle>Conta do dia</SectionTitle>
@@ -86,7 +96,7 @@ export default function Cash() {
             )}
 
             <SectionTitle>Conferência</SectionTitle>
-            <CountedCard dayId={day.id} expected={c.accumulated} counted={c.counted} diff={c.difference} locked={locked} />
+            <CountedCard dayId={day.id} expected={c.cashOnHand} counted={c.counted} diff={c.difference} locked={locked} />
 
             <SectionTitle>Vendas do dia ({data.s.orders.length})</SectionTitle>
             <div className="space-y-1.5">
@@ -137,7 +147,7 @@ export default function Cash() {
               ))}
             </div>
             <AddCashSheet type={add} onClose={() => setAdd(null)} />
-            <OpeningSheet open={editOpening} onClose={() => setEditOpening(false)} current={c.opening} manual={c.openingManual} />
+            <OpeningSheet open={editOpening} onClose={() => setEditOpening(false)} current={c.opening} currentCash={c.openingCash} manual={c.openingManual} />
           </>
         );
       })()}
@@ -150,9 +160,10 @@ function CountedCard({ dayId, expected, counted, diff, locked }: { dayId: string
   const [text, setText] = useState('');
   return (
     <Card className="p-3">
+      <p className="text-xs text-slate-500 mb-2">Conte só o <b>dinheiro vivo</b>. Pix e cartão não entram na contagem.</p>
       <div className="flex items-center gap-2">
         <div className="flex-1">
-          <div className="text-xs text-slate-500">Esperado</div>
+          <div className="text-xs text-slate-500">Esperado 💵</div>
           <div className="font-bold text-lg tabular-nums">{money(expected)}</div>
         </div>
         <div className="flex-1">
@@ -168,7 +179,7 @@ function CountedCard({ dayId, expected, counted, diff, locked }: { dayId: string
       </div>
       {!locked && (
         <div className="flex gap-2 mt-2">
-          <Input inputMode="decimal" placeholder="Quanto tem contado?" value={text} onChange={(e) => setText(e.target.value)} />
+          <Input inputMode="decimal" placeholder="Quanto tem em dinheiro?" value={text} onChange={(e) => setText(e.target.value)} />
           <Button className="h-12" disabled={toCents(text) === null} onClick={() => { run(() => setCountedBalance(dayId, toCents(text)), 'Contagem salva'); setText(''); }}>Salvar</Button>
         </div>
       )}
@@ -208,22 +219,26 @@ function AddCashSheet({ type, onClose }: { type: ManualType | null; onClose: () 
   );
 }
 
-function OpeningSheet({ open, onClose, current, manual }: { open: boolean; onClose: () => void; current: number; manual: boolean }) {
+function OpeningSheet({ open, onClose, current, currentCash, manual }: { open: boolean; onClose: () => void; current: number; currentCash: number; manual: boolean }) {
   const { day } = useApp();
   const { run } = useUi();
   const [v, setV] = useState('');
+  const [cash, setCash] = useState('');
   if (!open || !day) return null;
   return (
     <Sheet open onClose={onClose} title="Saldo de ontem"
       footer={<Button size="lg" className="w-full" disabled={toCents(v) === null} onClick={async () => {
-        const r = await run(() => setOpeningBalance(day.id, toCents(v)!), 'Saldo atualizado');
-        if (r !== undefined) { setV(''); onClose(); }
+        const r = await run(() => setOpeningBalance(day.id, toCents(v)!, cash.trim() ? toCents(cash) : null), 'Saldo atualizado');
+        if (r !== undefined) { setV(''); setCash(''); onClose(); }
       }}>Salvar</Button>}>
       <p className="text-sm text-slate-500 mb-3">
         {manual ? <>Digitado à mão: <b>{money(current)}</b>.</> : <>Calculado do saldo final do último dia: <b>{money(current)}</b>. Se o dia anterior mudar, este valor acompanha.</>}
         {' '}Corrija só se precisar (ex.: primeiro dia de uso).
       </p>
-      <Field label="Ontem"><Input inputMode="decimal" value={v} onChange={(e) => setV(e.target.value)} placeholder={money(current)} autoFocus /></Field>
+      <Field label="Ontem (total)"><Input inputMode="decimal" value={v} onChange={(e) => setV(e.target.value)} placeholder={money(current)} autoFocus /></Field>
+      <Field label="Quanto disso é dinheiro vivo? (opcional)" hint={`Hoje: ${money(currentCash)}. Vazio = tudo em dinheiro.`}>
+        <Input inputMode="decimal" value={cash} onChange={(e) => setCash(e.target.value)} placeholder={v || money(currentCash)} />
+      </Field>
       {manual && (
         <Button variant="soft" className="w-full" onClick={async () => {
           const r = await run(() => setOpeningBalance(day.id, null), 'Voltou ao automático');

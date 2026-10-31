@@ -3,7 +3,7 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../db/db';
 import type { MovementType, StockMovement } from '../db/types';
 import { normalize } from '../lib/util';
-import { moveStock, setStock, undoMovement } from '../services/days';
+import { moveStock, ReservedError, setStock, undoMovement, type StockOpts } from '../services/days';
 import { loadStockRows, type StockRow } from '../services/summary';
 import { useApp } from '../state';
 import { DayNotices, DayBar, StartDayCard } from '../components/day';
@@ -49,8 +49,9 @@ export default function Stock() {
     return [...map.values()];
   }, [rows, q, filter, settings.sellGroups]);
 
+  const guarded = useReserveGuard();
   const quick = async (r: StockRow, delta: number) => {
-    const mv = await run(() => moveStock(r.item.dailyRecordId, r.variant.id, delta, delta > 0 ? 'entrada' : 'saida'));
+    const mv = await guarded((o) => moveStock(r.item.dailyRecordId, r.variant.id, delta, delta > 0 ? 'entrada' : 'saida', undefined, o));
     if (mv) toast(`${delta > 0 ? 'Entrada +1' : 'Saída −1'} · ${r.variant.name}${delta < 0 ? ' (não é venda)' : ''}`, 'info',
       { label: 'Desfazer', fn: () => run(() => undoMovement(mv.id)) });
   };
@@ -129,8 +130,28 @@ export default function Stock() {
   );
 }
 
+/**
+ * Saída/perda/ajuste que deixaria menos peças do que as reservadas: pergunta antes.
+ * Venda não passa por aqui (ela já respeita as reservas).
+ */
+function useReserveGuard() {
+  const { run, confirm, toast } = useUi();
+  return async <T,>(fn: (o: StockOpts) => Promise<T>, okMsg?: string): Promise<T | undefined> => {
+    try {
+      const r = await fn({});
+      if (okMsg) toast(okMsg);
+      return r;
+    } catch (e) {
+      if (!(e instanceof ReservedError)) { toast((e as Error).message, 'err'); return undefined; }
+      const go = await confirm({ title: 'Tem peça reservada', tone: 'warning', confirm: 'Continuar mesmo assim',
+        message: `${e.message} Se continuar, vai faltar peça para a reserva. Se a reserva não vale mais, cancele ela na aba Vender.` });
+      return go ? run(() => fn({ allowBelowReserved: true }), okMsg) : undefined;
+    }
+  };
+}
+
 function VariantSheet({ row, onClose, locked }: { row: StockRow | null; onClose: () => void; locked: boolean }) {
-  const { run } = useUi();
+  const guarded = useReserveGuard();
   const [busy, wrap] = useBusy();
   const [type, setType] = useState<'entrada' | 'saida' | 'perda' | 'ajuste'>('entrada');
   const [qty, setQty] = useState('');
@@ -147,9 +168,9 @@ function VariantSheet({ row, onClose, locked }: { row: StockRow | null; onClose:
   const n = Number(qty);
   const valid = qty !== '' && Number.isInteger(n) && (type === 'ajuste' ? n >= 0 : n > 0);
   const save = () => wrap(async () => {
-    const r = await run(async () => {
-      if (type === 'ajuste') return setStock(row.item.dailyRecordId, row.variant.id, n, note || 'Ajuste manual');
-      return moveStock(row.item.dailyRecordId, row.variant.id, type === 'entrada' ? n : -n, type, note || undefined);
+    const r = await guarded(async (o) => {
+      if (type === 'ajuste') return setStock(row.item.dailyRecordId, row.variant.id, n, note || 'Ajuste manual', o);
+      return moveStock(row.item.dailyRecordId, row.variant.id, type === 'entrada' ? n : -n, type, note || undefined, o);
     }, 'Salvo');
     if (r !== undefined) { setQty(''); setNote(''); }
   });

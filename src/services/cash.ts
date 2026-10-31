@@ -46,12 +46,13 @@ export async function removeCashMovement(id: string) {
   });
 }
 
-/** Digita o "Ontem" à mão. `null` volta a calcular a partir do dia anterior. */
-export async function setOpeningBalance(dailyRecordId: string, cents: number | null) {
+/** Digita o "Ontem" à mão (e quanto dele é dinheiro vivo). `null` volta a calcular a partir do dia anterior. */
+export async function setOpeningBalance(dailyRecordId: string, cents: number | null, cashCents: number | null = null) {
+  if (cents !== null && cashCents !== null && cashCents > cents) throw new UserError('O dinheiro vivo não pode ser maior que o total.');
   await db.transaction('rw', db.dailyRecords, db.cashRecords, db.auditLogs, async () => {
     await assertOpen(dailyRecordId);
     const c = await db.cashRecords.where('dailyRecordId').equals(dailyRecordId).first();
-    const patch = { openingBalanceInCents: cents ?? 0, openingManual: cents !== null };
+    const patch = { openingBalanceInCents: cents ?? 0, openingManual: cents !== null, openingCashInCents: cents === null ? null : cashCents };
     if (!c) {
       await db.cashRecords.add({ id: uid(), dailyRecordId, countedBalanceInCents: null, status: 'open', ...patch });
       return;

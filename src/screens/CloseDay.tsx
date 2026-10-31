@@ -58,8 +58,8 @@ export default function CloseDaySheet({ open, onClose }: { open: boolean; onClos
           </Card>
           {!closed && (
             <div className="mt-3">
-              <Field label="Valor contado no caixa (opcional)" hint={s.cash.counted !== null ? `Já contado: ${money(s.cash.counted)}` : 'Se preencher, a diferença aparece no relatório.'}>
-                <Input inputMode="decimal" value={counted} onChange={(e) => setCounted(e.target.value)} placeholder={money(s.cash.accumulated)} />
+              <Field label="Dinheiro vivo contado (opcional)" hint={s.cash.counted !== null ? `Já contado: ${money(s.cash.counted)}` : 'Se preencher, a diferença aparece no relatório.'}>
+                <Input inputMode="decimal" value={counted} onChange={(e) => setCounted(e.target.value)} placeholder={money(s.cash.cashOnHand)} />
               </Field>
             </div>
           )}

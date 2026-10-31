@@ -29,6 +29,7 @@ export default function Sell() {
     if (!day) return [];
     return (await db.reservations.where('status').equals('active').toArray()).filter((r) => r.date <= day.date);
   }, [day?.id]);
+  const lastPrice = useLastPriceByGroup();
   const locked = day?.status !== 'open';
   const inCart = (vid: string) => cart.filter((l) => l.variantId === vid).reduce((s, l) => s + l.quantity, 0);
   const cartCount = cart.reduce((s, l) => s + l.quantity, 0);
@@ -73,7 +74,7 @@ export default function Sell() {
           </div>
           <div className="flex gap-2">
             <Input placeholder="🔍 Buscar..." value={q} onChange={(e) => setQ(e.target.value)} />
-            <Button variant="outline" className="h-12 shrink-0" onClick={() => setConfig(true)} aria-label="Escolher grupos">⚙️</Button>
+            <Button variant="outline" className="h-12 shrink-0 text-sm" onClick={() => setConfig(true)} aria-label="Escolher grupos">⚙️ Grupos</Button>
           </div>
           <div className="flex gap-2 overflow-x-auto no-scrollbar my-3 -mx-4 px-4">
             {FILTERS.map(([k, l]) => <Chip key={k} active={filter === k} onClick={() => setFilter(k)}>{l}</Chip>)}
@@ -128,7 +129,7 @@ export default function Sell() {
                           <>
                             <button disabled={r.available <= 0} onClick={() => setReserveRow(r)}
                               className="h-10 px-2 rounded-xl bg-purple-50 text-purple-700 text-xs font-semibold disabled:opacity-30">Reservar</button>
-                            <button disabled={left <= 0} onClick={() => addToCart(r.variant.id, r.variant.optionalPriceInCents ?? null)}
+                            <button disabled={left <= 0} onClick={() => addToCart(r.variant.id, r.variant.optionalPriceInCents ?? lastPrice?.get(r.group.id) ?? null)}
                               className="relative w-12 h-10 rounded-xl bg-blue-600 text-white text-xl font-bold disabled:opacity-30 active:scale-95 transition">
                               +
                               {c > 0 && <span className="absolute -top-1.5 -right-1.5 bg-emerald-500 text-white text-[11px] rounded-full w-5 h-5 flex items-center justify-center">{c}</span>}
@@ -224,6 +225,20 @@ function PaymentPicker({ value, onChange }: { value: PaymentMethod; onChange: (p
   );
 }
 
+/** Último preço vendido em cada grupo (para já vir preenchido na próxima venda). */
+function useLastPriceByGroup() {
+  return useLiveQuery(async () => {
+    const [sales, variants] = await Promise.all([db.sales.orderBy('createdAt').reverse().limit(300).toArray(), db.variants.toArray()]);
+    const group = new Map(variants.map((v) => [v.id, v.groupId]));
+    const out = new Map<string, number>();
+    for (const s of sales) {
+      const g = group.get(s.variantId);
+      if (g && s.status === 'ok' && s.unitPriceInCents && !out.has(g)) out.set(g, s.unitPriceInCents);
+    }
+    return out;
+  }, []);
+}
+
 function useRecentPrices() {
   return useLiveQuery(async () => {
     const sales = await db.sales.orderBy('createdAt').reverse().limit(300).toArray();
@@ -233,13 +248,13 @@ function useRecentPrices() {
   }, []) ?? [];
 }
 
-function PriceInput({ cents, onChange, quick }: { cents: number | null; onChange: (c: number | null) => void; quick: number[] }) {
+function PriceInput({ cents, onChange, quick, autoFocus }: { cents: number | null; onChange: (c: number | null) => void; quick: number[]; autoFocus?: boolean }) {
   const [text, setText] = useState(cents === null ? '' : money(cents));
   const [last, setLast] = useState(cents);
   if (cents !== last) { setLast(cents); setText(cents === null ? '' : money(cents)); }
   return (
     <div>
-      <input inputMode="decimal" placeholder="Preço" value={text}
+      <input inputMode="decimal" placeholder="Preço" value={text} autoFocus={autoFocus}
         onChange={(e) => { setText(e.target.value); const c = toCents(e.target.value); setLast(c); onChange(c); }}
         className="w-24 h-10 px-2 rounded-lg border border-slate-300 text-right font-bold text-lg tabular-nums outline-none focus:border-blue-500" />
       {quick.length > 0 && (
@@ -256,7 +271,7 @@ function PriceInput({ cents, onChange, quick }: { cents: number | null; onChange
 
 export function CheckoutSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { day, cart, setCart, resetCart, cartId, settings } = useApp();
-  const { run, toast } = useUi();
+  const { run, toast, confirm: ask } = useUi();
   const [busy, wrap] = useBusy();
   const [payment, setPayment] = useState<PaymentMethod>(settings.defaultPayment);
   const [customer, setCustomer] = useState('');
@@ -276,6 +291,8 @@ export function CheckoutSheet({ open, onClose }: { open: boolean; onClose: () =>
     setCart(cart.map((l, j) => (j === i ? { ...l, ...patch } : l)).filter((l) => l.quantity > 0));
 
   const confirm = () => wrap(async () => {
+    if (missingPrice && !(await ask({ title: 'Vender sem preço?', tone: 'warning', confirm: 'Vender sem preço',
+      message: 'As peças sem preço saem do estoque, mas não entram no caixa nem no relatório de vendas.' }))) return;
     const o = await run(() => createOrder({ orderId: cartId, dailyRecordId: day.id, lines: cart, paymentMethod: payment, customer }));
     if (o) {
       toast(`Venda: ${orderLine(cart, o.totalInCents, payment)}`);
@@ -287,7 +304,7 @@ export function CheckoutSheet({ open, onClose }: { open: boolean; onClose: () =>
     <Sheet open onClose={onClose} title="Fechar venda" tall
       footer={
         <Button variant="success" size="lg" className="w-full text-lg" disabled={!cart.length || busy} onClick={confirm}>
-          ✔ Confirmar · {pieces} {pieces === 1 ? 'peça' : 'peças'} · {settings.currencySymbol} {money(total)}
+          ✔ Confirmar · {pieces} {pieces === 1 ? 'peça' : 'peças'} · {money(total, settings.currencySymbol)}
         </Button>
       }>
       {!cart.length && <Empty icon="🛒" title="Carrinho vazio">Toque em “+” nas peças para adicionar.</Empty>}
@@ -303,7 +320,8 @@ export function CheckoutSheet({ open, onClose }: { open: boolean; onClose: () =>
                   <div className="text-xs text-slate-500">disponível {r?.available ?? '–'}</div>
                   <div className="mt-2"><Stepper value={l.quantity} onChange={(v) => update(i, { quantity: v })} min={0} max={r?.available} /></div>
                 </div>
-                <PriceInput cents={l.unitPriceInCents} onChange={(c) => update(i, { unitPriceInCents: c })} quick={quick} />
+                <PriceInput cents={l.unitPriceInCents} onChange={(c) => update(i, { unitPriceInCents: c })} quick={quick}
+                  autoFocus={l.unitPriceInCents === null && cart.findIndex((x) => x.unitPriceInCents === null) === i} />
               </div>
             </Card>
           );

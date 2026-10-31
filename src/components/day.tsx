@@ -1,34 +1,68 @@
 import { useRef } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../db/db';
-import { addDays, fmtDate, money, todayStr } from '../lib/util';
+import { addDays, fmtDate, money, parseDate, todayStr, weekday } from '../lib/util';
 import { previousDay, reopenDay, resyncFromPrevious, startDay } from '../services/days';
 import { computeCash, syncGap } from '../services/summary';
 import { useApp } from '../state';
-import { Badge, Button, Card, useBusy, useUi } from './ui';
+import { Button, Card, useBusy, useUi } from './ui';
 
+const WEEK_SHORT = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
+const MONTHS = ['janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho', 'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro'];
+
+/**
+ * Seleção de dia: faixa com 7 dias (um toque troca), bolinha de situação em cada dia
+ * e 📅 para qualquer outra data. Nada é criado só por navegar.
+ */
 export function DayBar() {
   const { date, setDate, day } = useApp();
   const ref = useRef<HTMLInputElement>(null);
   const today = todayStr();
+  // a faixa termina em hoje; se a data escolhida for mais antiga, a faixa acompanha
+  const end = date > today ? date : date < addDays(today, -6) ? addDays(date, 3) : today;
+  const days = Array.from({ length: 7 }, (_, i) => addDays(end, i - 6));
+  const status = useLiveQuery(async () => {
+    const recs = await db.dailyRecords.where('date').between(days[0], days[6], true, true).toArray();
+    return new Map(recs.map((r) => [r.date, r.status]));
+  }, [days[0], days[6]]) ?? new Map();
+  const d = parseDate(date);
+  const label = date === today ? 'Hoje' : date === addDays(today, -1) ? 'Ontem' : weekday(date);
   return (
-    <div className="flex items-center gap-1.5 mb-3">
-      <button className="w-10 h-10 rounded-xl bg-white border border-slate-200 text-slate-600 text-lg active:bg-slate-100"
-        onClick={() => setDate(addDays(date, -1))} aria-label="Dia anterior">‹</button>
-      <button className="flex-1 h-10 rounded-xl bg-white border border-slate-200 px-3 flex items-center justify-center gap-2 relative active:bg-slate-50"
-        onClick={() => ref.current?.showPicker?.() ?? ref.current?.click()}>
-        <span className="text-sm font-bold text-slate-800 whitespace-nowrap">📅 {fmtDate(date)}</span>
-        {day === null && <Badge>sem registro</Badge>}
-        {day?.status === 'open' && <Badge tone="green">aberto</Badge>}
-        {day?.status === 'closed' && <Badge tone="purple">encerrado</Badge>}
-        <input ref={ref} type="date" value={date} onChange={(e) => e.target.value && setDate(e.target.value)}
-          className="absolute inset-0 opacity-0 pointer-events-none" tabIndex={-1} />
-      </button>
-      <button className="w-10 h-10 rounded-xl bg-white border border-slate-200 text-slate-600 text-lg active:bg-slate-100"
-        onClick={() => setDate(addDays(date, 1))} aria-label="Próximo dia">›</button>
-      {date !== today && (
-        <button className="h-10 px-3 rounded-xl bg-blue-600 text-white text-sm font-semibold" onClick={() => setDate(today)}>Hoje</button>
-      )}
+    <div className="mb-3">
+      <div className="flex items-stretch gap-1 bg-white rounded-2xl border border-slate-200 p-1">
+        {days.map((x) => {
+          const sel = x === date;
+          const st = status.get(x);
+          return (
+            <button key={x} onClick={() => setDate(x)} aria-label={fmtDate(x)}
+              className={`flex-1 min-w-0 rounded-xl py-1.5 flex flex-col items-center transition
+                ${sel ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 active:bg-slate-100'}`}>
+              <span className={`text-[10px] font-semibold uppercase ${sel ? 'text-blue-100' : x === today ? 'text-blue-600' : 'text-slate-400'}`}>
+                {x === today ? 'Hoje' : WEEK_SHORT[parseDate(x).getDay()]}
+              </span>
+              <span className="text-lg font-extrabold leading-tight tabular-nums">{Number(x.slice(8))}</span>
+              <span className={`w-1.5 h-1.5 rounded-full mt-0.5 ${!st ? 'bg-transparent' : st === 'closed' ? (sel ? 'bg-purple-200' : 'bg-purple-500') : (sel ? 'bg-emerald-200' : 'bg-emerald-500')}`} />
+            </button>
+          );
+        })}
+        <button onClick={() => ref.current?.showPicker?.() ?? ref.current?.click()} aria-label="Outra data"
+          className="relative w-11 shrink-0 rounded-xl text-xl text-slate-600 active:bg-slate-100 flex items-center justify-center">
+          📅
+          <input ref={ref} type="date" value={date} onChange={(e) => e.target.value && setDate(e.target.value)}
+            className="absolute inset-0 opacity-0 pointer-events-none" tabIndex={-1} />
+        </button>
+      </div>
+      <div className="flex items-center justify-between px-1.5 mt-1.5 text-[13px]">
+        <span className="font-semibold text-slate-700">
+          {label}, {d.getDate()} de {MONTHS[d.getMonth()]}
+        </span>
+        <span className="flex items-center gap-2">
+          {day === null && <span className="text-slate-500">○ não iniciado</span>}
+          {day?.status === 'open' && <span className="text-emerald-700 font-semibold">● aberto</span>}
+          {day?.status === 'closed' && <span className="text-purple-700 font-semibold">🔒 encerrado</span>}
+          {date !== today && <button className="text-blue-600 font-semibold underline" onClick={() => setDate(today)}>ir para hoje</button>}
+        </span>
+      </div>
     </div>
   );
 }
@@ -50,6 +84,8 @@ export function StartDayCard() {
   const isToday = date === todayStr();
   const { confirm } = useUi();
   const start = (mode: 'copy' | 'blank') => wrap(async () => {
+    if (mode === 'blank' && !(await confirm({ title: 'Começar com estoque zerado?', tone: 'danger', confirm: 'Começar zerado',
+      message: 'Todas as quantidades começam em 0 e o caixa em 0. Normalmente o certo é “Iniciar o dia”, que copia o estoque de ontem.' }))) return;
     if (date > todayStr() && !(await confirm({ title: 'Iniciar um dia no futuro?', message: `${fmtDate(date)} ainda não chegou.`, confirm: 'Iniciar mesmo assim', tone: 'warning' }))) return;
     await run(() => startDay(date, mode), mode === 'copy' ? 'Dia iniciado!' : 'Dia criado em branco');
   });

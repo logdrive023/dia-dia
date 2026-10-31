@@ -16,9 +16,16 @@ export interface CashSummary {
   todayNet: number;
   /** Ontem + hoje */
   subtotal: number;
-  /** Ontem + hoje - retiradas ("1530 - 300 = 1230"). É também o saldo esperado. */
+  /** Ontem + hoje - retiradas ("1530 - 300 = 1230"), somando todas as formas de pagamento. */
   accumulated: number;
+  /** Dinheiro vivo que deveria estar em mãos (só lançamentos em dinheiro). É o que se confere contando. */
+  cashOnHand: number;
+  /** Dinheiro vivo que veio do dia anterior. */
+  openingCash: number;
+  /** Parte do saldo que não é dinheiro vivo (Pix, Cartão, Outro). */
+  otherBalance: number;
   counted: number | null;
+  /** Contado - dinheiro em mãos */
   difference: number | null;
   /** true quando o "Ontem" foi digitado à mão em vez de vir do dia anterior */
   openingManual: boolean;
@@ -44,13 +51,17 @@ export async function cashChain(uptoDate?: string): Promise<Map<string, CashSumm
   for (const m of moves.sort((a, b) => a.createdAt.localeCompare(b.createdAt)))
     movesBy.set(m.dailyRecordId, [...(movesBy.get(m.dailyRecordId) ?? []), m]);
   const out = new Map<string, CashSummary>();
-  let prev = 0;
+  let prev = 0, prevCash = 0;
   for (const d of days) {
     const rec = recBy.get(d.id);
     const manual = !!rec?.openingManual;
-    const s = summarizeCash(manual ? rec!.openingBalanceInCents : prev, manual, rec?.countedBalanceInCents ?? null, movesBy.get(d.id) ?? []);
+    const opening = manual ? rec!.openingBalanceInCents : prev;
+    // "Ontem" digitado à mão sem dizer quanto é dinheiro: considera tudo dinheiro
+    const openingCash = manual ? (rec!.openingCashInCents ?? rec!.openingBalanceInCents) : prevCash;
+    const s = summarizeCash(opening, openingCash, manual, rec?.countedBalanceInCents ?? null, movesBy.get(d.id) ?? []);
     out.set(d.id, s);
     prev = s.accumulated;
+    prevCash = s.cashOnHand;
   }
   return out;
 }
@@ -58,14 +69,16 @@ export async function cashChain(uptoDate?: string): Promise<Map<string, CashSumm
 export async function computeCash(dailyRecordId: string): Promise<CashSummary> {
   const day = await db.dailyRecords.get(dailyRecordId);
   const s = day && (await cashChain(day.date)).get(day.id);
-  return s ?? summarizeCash(0, false, null, []);
+  return s ?? summarizeCash(0, 0, false, null, []);
 }
 
-function summarizeCash(opening: number, openingManual: boolean, counted: number | null, movements: CashMovement[]): CashSummary {
+function summarizeCash(opening: number, openingCash: number, openingManual: boolean, counted: number | null, movements: CashMovement[]): CashSummary {
   const salesByMethod: Record<PaymentMethod, number> = { dinheiro: 0, pix: 0, cartao: 0, outro: 0 };
   let entradas = 0, darTotal = 0, despesas = 0, retiradas = 0;
   const dar: CashMovement[] = [];
+  let cashDelta = 0;
   for (const m of movements) {
+    if (m.paymentMethod === 'dinheiro') cashDelta += ['venda', 'entrada'].includes(m.type) ? m.amountInCents : -m.amountInCents;
     switch (m.type) {
       case 'venda': salesByMethod[m.paymentMethod] += m.amountInCents; break;
       case 'estorno': salesByMethod[m.paymentMethod] -= m.amountInCents; break;
@@ -79,9 +92,11 @@ function summarizeCash(opening: number, openingManual: boolean, counted: number 
   const todayNet = salesTotal + entradas - darTotal - despesas;
   const subtotal = opening + todayNet;
   const accumulated = subtotal - retiradas;
+  const cashOnHand = openingCash + cashDelta;
   return {
     opening, salesByMethod, salesTotal, entradas, dar, darTotal, despesas, retiradas, todayNet, subtotal,
-    accumulated, counted, difference: counted === null ? null : counted - accumulated, openingManual, movements,
+    accumulated, cashOnHand, openingCash, otherBalance: accumulated - cashOnHand,
+    counted, difference: counted === null ? null : counted - cashOnHand, openingManual, movements,
   };
 }
 

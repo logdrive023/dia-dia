@@ -34,9 +34,10 @@ export function toCents(input: string | number): number | null {
   if (typeof input === 'number') return Number.isFinite(input) ? Math.round(input * 100) : null;
   const t = input.trim().replace(/\s/g, '');
   if (!t) return null;
-  // aceita 1.230,50 | 1230,5 | 1230.50 | 70
+  // aceita 1.230,50 | 1230,5 | 1230.50 | 70 | 1.230 (ponto com 3 dígitos = milhar)
   let norm = t;
   if (t.includes(',')) norm = t.replace(/\./g, '').replace(',', '.');
+  else if (/^\d{1,3}(\.\d{3})+$/.test(t)) norm = t.replace(/\./g, '');
   const n = Number(norm);
   if (!Number.isFinite(n) || n < 0) return null;
   return Math.round(n * 100);

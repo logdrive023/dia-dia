@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../db/db';
 import { money, PAYMENT_EMOJI, PAYMENT_LABEL, PAYMENTS } from '../lib/util';
@@ -94,6 +95,7 @@ export default function Home() {
         );
       })()}
 
+      <IosInstallTip />
       {needBackup && day !== undefined && (
         <button onClick={() => setOverlay('backup')}
           className="w-full mt-3 flex items-center gap-3 bg-orange-50 border border-orange-200 rounded-xl px-3 py-2.5 text-left">
@@ -158,5 +160,23 @@ function GroupCard({ id, icon, name, color, dayId, fallbackTotal, alerts, onClic
         <span className="text-[11px] text-slate-500 text-right">{info?.count ?? 0} variações{alerts ? <><br /><span className="text-orange-600 font-semibold">{alerts} p/ repor</span></> : null}</span>
       </div>
     </button>
+  );
+}
+
+/** iPhone: o Safari pode apagar os dados de sites não instalados. Pede para instalar na tela de início. */
+function IosInstallTip() {
+  const isIos = /iphone|ipad|ipod/i.test(navigator.userAgent);
+  const standalone = window.matchMedia?.('(display-mode: standalone)').matches || (navigator as unknown as { standalone?: boolean }).standalone;
+  const [hidden, setHidden] = useState(() => { try { return localStorage.getItem('iosTipHidden') === '1'; } catch { return false; } });
+  if (!isIos || standalone || hidden) return null;
+  return (
+    <div className="mt-3 flex items-start gap-3 bg-blue-50 border border-blue-200 rounded-xl px-3 py-2.5 text-sm text-blue-900">
+      <span className="text-2xl">📲</span>
+      <span className="flex-1">
+        <b>Instale o app para não perder os dados.</b> No Safari, toque em <b>Compartilhar</b> ⬆️ e depois em <b>Adicionar à Tela de Início</b>.
+      </span>
+      <button className="text-blue-700 font-bold px-1" aria-label="Fechar aviso"
+        onClick={() => { setHidden(true); try { localStorage.setItem('iosTipHidden', '1'); } catch { /* ok */ } }}>✕</button>
+    </div>
   );
 }
