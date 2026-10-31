@@ -3,9 +3,9 @@
 @tailwind utilities;
 
 html, body, #root { min-height: 100%; }
-/* nada pode alargar a página: no celular com letra grande isso deixava a tela "arrastando" para o lado */
-html, body { overflow-x: hidden; max-width: 100%; }
-#root { overflow-x: clip; }
+/* nada pode alargar a página (letra grande no celular). Só no #root e com "clip": overflow hidden em html/body
+   transforma o body numa segunda área de rolagem e o Chrome do Android (Redmi/Xiaomi) deixa a tela grudada. */
+#root { overflow-x: clip; max-width: 100vw; }
 /* janelas (Sheet): altura limitada à tela; vh antes como reserva para Android sem dvh */
 .sheet-max { max-height: 92vh; max-height: 92dvh; }
 .sheet-tall { height: 92vh; height: 92dvh; }
