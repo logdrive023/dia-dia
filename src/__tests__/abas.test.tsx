@@ -19,6 +19,7 @@ beforeEach(async () => {
   useDatabase(new AppDB(`abas-${Math.random()}`));
   await seedIfNeeded();
   await db.settings.where('key').equals('initialOpening').delete(); // caixa começa zerado nos testes de tela
+  await db.settings.add({ id: `t-${Math.random()}`, key: 'autoDailyPay', value: false }); // diária automática tem teste próprio
 });
 // desmonta a tela e espera gravações que o último toque deixou em andamento antes do próximo teste trocar de banco
 afterEach(async () => {
@@ -204,6 +205,29 @@ describe('Pagamento por peça (pela tela)', () => {
     await waitFor(() => expect(screen.getAllByPlaceholderText('Preço').length).toBe(2));
     click(screen.getByRole('switch', { name: /Pagou tudo numa forma só/ }));
     await waitFor(() => expect(screen.getAllByPlaceholderText('Preço').length).toBe(1));
+  }, 30000);
+});
+
+describe('Diária automática (pela tela)', () => {
+  it('ao iniciar o dia entra "Pagamento da diária de hoje: 150"; desfazer o início continua funcionando', async () => {
+    await db.settings.where('key').equals('autoDailyPay').delete(); // ligada (padrão)
+    await openAndStart();
+    const day = (await db.dailyRecords.toArray())[0];
+    const [, mm, dd] = day.date.split('-');
+    const pays = (await db.cashMovements.toArray()).filter((m) => m.type === 'pagamento');
+    expect(pays.map((m) => [m.amountInCents, m.description, m.auto])).toEqual([[15000, `diária de ${dd}/${mm}`, true]]);
+    click(nav('Caixa'));
+    expect((await screen.findAllByText(`Pagamento da diária de ${dd}/${mm}`)).length).toBeGreaterThan(0);
+    // o dia ainda conta como "sem lançamento": dá para desfazer o início, e a diária sai junto
+    click(nav('Início'));
+    click(await screen.findByRole('button', { name: /^Desfazer$/ }));
+    await confirmDialog(/Desfazer e escolher de novo/);
+    await waitFor(async () => expect(await db.dailyRecords.count()).toBe(0));
+    expect(await db.cashMovements.count()).toBe(0);
+    // iniciar de novo: a diária volta uma vez só
+    click(await screen.findByRole('button', { name: /Iniciar o dia/ }));
+    await screen.findByRole('button', { name: /Nova venda/ });
+    await waitFor(async () => expect((await db.cashMovements.toArray()).filter((m) => m.type === 'pagamento').length).toBe(1));
   }, 30000);
 });
 

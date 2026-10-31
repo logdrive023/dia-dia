@@ -4,6 +4,7 @@ import { isCents, nowIso, PAYMENTS, uid } from '../lib/util';
 import { audit } from './audit';
 import { UserError } from './catalog';
 import { assertOpen } from './days';
+import { getSetting } from './settings';
 
 export const CASH_LABEL: Record<CashType, string> = {
   venda: 'Venda',
@@ -51,6 +52,27 @@ export async function removeCashMovement(id: string) {
     await assertOpen(m.dailyRecordId);
     await db.cashMovements.delete(id);
     await audit('cashMovement', id, 'delete', m, null);
+  });
+}
+
+/**
+ * Lança a diária do dia ("diária de 31/10", em dinheiro), se estiver ligado em Configurações.
+ * Não duplica: se o dia já tem a diária dele (ex.: veio do caderno), não faz nada.
+ */
+export async function ensureDailyPay(dailyRecordId: string) {
+  if (!(await getSetting('autoDailyPay'))) return null;
+  const cents = await getSetting('dailyPayInCents');
+  if (!isCents(cents) || cents <= 0) return null;
+  return db.transaction('rw', db.dailyRecords, db.cashMovements, async () => {
+    const day = await assertOpen(dailyRecordId);
+    const [, mm, dd] = day.date.split('-');
+    const description = `diária de ${dd}/${mm}`;
+    const has = (await db.cashMovements.where('dailyRecordId').equals(day.id).toArray()).some((m) => m.type === 'pagamento' && m.description === description);
+    if (has) return null;
+    const m = { id: uid(), dailyRecordId: day.id, type: 'pagamento' as const, amountInCents: cents, paymentMethod: 'dinheiro' as const,
+      quantity: 1, description, relatedOrderId: null, createdAt: nowIso(), auto: true };
+    await db.cashMovements.add(m);
+    return m;
   });
 }
 

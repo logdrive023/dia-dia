@@ -32,6 +32,7 @@ describe('dia de trabalho completo pela tela', () => {
   it('inicia, vende, lança, encerra e gera o relatório', async () => {
     await seedIfNeeded();
     await db.settings.where('key').equals('initialOpening').delete();
+    await db.settings.add({ id: `t-${Math.random()}`, key: 'autoDailyPay', value: false }); // diária automática tem teste próprio
     render(<App />);
     // abre sem travar no "Abrindo…"
     click(await screen.findByRole('button', { name: /Iniciar o dia/ }, { timeout: 5000 }));
@@ -76,7 +77,7 @@ describe('dia de trabalho completo pela tela', () => {
     const url = decodeURIComponent((window.open as unknown as ReturnType<typeof vi.fn>).mock.calls.slice(-1)[0][0] as string);
     expect(url).toContain('Vendeu: *140*');
     expect(url).toContain('Dei a Chico: 50');
-    expect(url).toContain('➖ 🤝 Dei a Chico: 50');
+    expect(url).toContain('➖ Dei a Chico: 50');
     expect(url).toContain('*= Hoje: +90*');
   }, 20000);
 

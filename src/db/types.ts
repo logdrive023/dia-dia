@@ -168,7 +168,7 @@ export interface CashRecord {
  * venda: recebimento de venda | entrada: outro dinheiro que entrou
  * dar: dinheiro dado a alguém (ex.: "Chico 50 — eu dei") | despesa: gasto do dia
  * retirada: tirado do acumulado (ex.: "- 300" depois do "Ontem + hoje")
- * pagamento: diária de quem vende (ex.: 2 dias × 150 = 300), também depois do "Ontem + hoje"
+ * pagamento: diária de quem vende (150 por dia; um lançamento por dia, ex.: "diária de 30/10")
  */
 export type CashType = 'venda' | 'entrada' | 'dar' | 'despesa' | 'retirada' | 'pagamento' | 'estorno';
 
@@ -183,6 +183,8 @@ export interface CashMovement {
   relatedOrderId?: ID | null;
   /** Venda copiada do caderno (sem peça escolhida): quantas peças foram. Pagamento: quantas diárias. */
   quantity?: number;
+  /** Lançado sozinho pelo app (diária ao iniciar o dia): não conta como “dia com lançamento” para desfazer o início. */
+  auto?: boolean;
   createdAt: string;
 }
 

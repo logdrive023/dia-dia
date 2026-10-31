@@ -5,7 +5,7 @@ import type { PaymentMethod } from '../db/types';
 import { setSetting } from '../services/settings';
 import { resetToInitialData, resetToZero } from '../services/backup';
 import { useApp } from '../state';
-import { Button, Card, InfoTip, Input, Sheet, useUi } from '../components/ui';
+import { Button, Card, InfoTip, Input, Sheet, Toggle, useUi } from '../components/ui';
 
 /** Seção em cartão: título, ⓘ com exemplo e conteúdo. */
 function Section({ icon, title, tip, children }: { icon: string; title: string; tip: React.ReactNode; children: React.ReactNode }) {
@@ -86,10 +86,13 @@ export default function SettingsSheet({ open, onClose }: { open: boolean; onClos
 
       <Section icon="💼" title="Sua diária" tip={
         <InfoTip title="Diária" example={[
-          ['💼', <>Diária <b>150</b> → em Caixa › Pagamento, “2 dias” já vem 300</>],
+          ['🌅', <>Ligado: ao <b>iniciar o dia</b>, já entra “Pagamento da diária de 01/11: 150”</>],
+          ['✖️', 'Não recebeu nesse dia? Tire no ✕ em Caixa › Movimentado hoje'],
+          ['💼', <>Pagou dias atrasados? Caixa › <b>Pagamento</b> › “2 dias” (2 diárias de 150)</>],
           ['🧮', 'O pagamento sai do saldo depois do “Ontem + hoje”, como no caderno'],
-          ['💬', 'Aparece separado no relatório do WhatsApp: “Pagamento da diária: −300 (2 diárias de 150)”'],
+          ['💬', 'Cada dia vira uma linha no WhatsApp: “➖ 💼 Pagamento da diária de 31/10: 150”'],
         ]}>Quanto você recebe por dia. Só preenche a sugestão; dá para mudar o valor na hora de lançar.</InfoTip>}>
+        <Toggle checked={settings.autoDailyPay} onChange={(v) => run(() => setSetting('autoDailyPay', v)).then(saved)} label="Lançar a diária sozinha ao iniciar o dia" />
         <div className="flex items-center gap-3">
           <Input inputMode="decimal" value={pay} onChange={(e) => setPay(e.target.value)} onBlur={savePay} placeholder="150" className="!w-32" />
           <span className="flex-1 text-right text-slate-500 text-sm">2 dias = <b className="text-slate-800 text-base">{money((toCents(pay) ?? settings.dailyPayInCents) * 2)}</b></span>

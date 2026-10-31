@@ -472,21 +472,15 @@ describe('dados iniciais oficiais (caderno 30/10 e 31/10)', () => {
     // a conta do caixa: ontem separado, hoje linha por linha (inclusive o Chico e a diária) e o total
     const caixa = w.slice(w.indexOf('🧮 *Caixa*'), w.indexOf('🛍️'));
     expect(caixa).toBe([
-      '🧮 *Caixa*', '',
-      '📅 *Ontem: 1.474,80*',
-      '   💵 645 em dinheiro · 🏦 829,80 no banco', '',
-      '☀️ *Caixa de hoje*',
-      '➕ 💵 Vendas no Dinheiro: 935',
-      '➕ ⚡ Vendas no Pix: 0',
-      '➕ 💳 Vendas no Crédito: 0',
-      '➕ 🏧 Vendas no Débito: 0',
-      '➖ 🤝 Dei a Chico: 50',
-      '➖ 💼 Pagamento da diária (2 dias × 150): 300',
-      '*= Hoje: +585*', '',
-      '✅ *Total: 2.059,80*',
-      '   ontem 1.474,80 + hoje 585',
-      '💵 Na mão: 1.230',
-      '🏦 No banco (Pix/cartão): 829,80', '', '',
+      '🧮 *Caixa*',
+      '📅 Ontem: 1.474,80 (💵 645 · 🏦 829,80)',
+      '➕ Vendas: 935 (💵 935 · ⚡ 0 · 💳 0 · 🏧 0)',
+      '➖ Dei a Chico: 50',
+      '➖ Pagamento da diária de 30/10: 150',
+      '➖ Pagamento da diária de 31/10: 150',
+      '*= Hoje: +585*',
+      '✅ *Total: 2.059,80* (ontem 1.474,80 + hoje 585)',
+      '💵 Na mão: 1.230 · 🏦 No banco: 829,80', '', '',
     ].join('\n'));
     // somando as linhas de hoje dá o "Hoje"; ontem + hoje dá o total
     const { cashStatement } = await import('../services/summary');
@@ -525,6 +519,32 @@ describe('dados iniciais oficiais (caderno 30/10 e 31/10)', () => {
     await removeCashMovement(sale.id);
     c = await computeCash(d.id);
     expect([c.notebookCount, c.notebookUnits, c.salesByMethod.pix]).toEqual([10, 12, 0]);
+  });
+  it('diária automática: 150 por dia, não duplica no dia do caderno, respeita a chave e o valor', async () => {
+    const { ensureDailyPay } = await import('../services/cash');
+    const { setSetting } = await import('../services/settings');
+    useDatabase(new AppDB(`auto-${Math.random()}`));
+    await seedIfNeeded();
+    const d31 = await startDay('2026-10-31');
+    expect(await ensureDailyPay(d31.id)).toBeNull(); // 31/10 já tem a diária do caderno
+    const pays31 = (await db.cashMovements.where('dailyRecordId').equals(d31.id).toArray()).filter((m) => m.type === 'pagamento');
+    expect(pays31.map((m) => [m.description, m.amountInCents]).sort()).toEqual([['diária de 30/10', 15000], ['diária de 31/10', 15000]]);
+    const d1 = await startDay('2026-11-01');
+    await ensureDailyPay(d1.id); await ensureDailyPay(d1.id); // duas vezes: entra uma só
+    let c = await computeCash(d1.id);
+    expect([c.openingCash, c.pagamentos, c.cashOnHand, c.dayResult]).toEqual([123000, 15000, 108000, -15000]);
+    const { cashStatement } = await import('../services/summary');
+    expect(cashStatement(c).map((x) => x.label)).toContain('Pagamento da diária de 01/11');
+    await setSetting('dailyPayInCents', 20000);
+    const d2 = await startDay('2026-11-02');
+    await ensureDailyPay(d2.id);
+    expect((await computeCash(d2.id)).pagamentos).toBe(20000);
+    await setSetting('autoDailyPay', false);
+    const d3 = await startDay('2026-11-03');
+    expect(await ensureDailyPay(d3.id)).toBeNull();
+    c = await computeCash(d3.id);
+    expect(c.pagamentos).toBe(0);
+    expect((await runDiagnostics()).findings.filter((f) => f.level === 'erro')).toEqual([]);
   });
   it('dia antes do caderno começa zerado e não cria os dias do caderno', async () => {
     useDatabase(new AppDB(`caderno2-${Math.random()}`));

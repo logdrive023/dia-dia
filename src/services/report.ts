@@ -111,25 +111,23 @@ export function whatsappReport(date: string, s: DaySummary, opts: Opts = {}) {
 
   // caixa: ontem separado, a conta de hoje linha por linha, e o total no fim
   section('🧮 *Caixa*');
-  L.push('');
-  L.push(`📅 *Ontem: ${$(c.opening)}*`);
-  L.push(`   💵 ${money(c.openingCash)} em dinheiro · 🏦 ${money(c.opening - c.openingCash)} no banco`);
-  L.push('');
-  L.push(`☀️ *Caixa de hoje*`);
-  for (const x of cashStatement(c)) L.push(`${x.sign === '+' ? '➕' : '➖'} ${x.icon} ${x.label}: ${$(x.cents)}`);
+  L.push(`📅 Ontem: ${$(c.opening)} (💵 ${money(c.openingCash)} · 🏦 ${money(c.opening - c.openingCash)})`);
+  const st = cashStatement(c);
+  const sales = st.filter((x) => x.label.startsWith('Vendas no'));
+  L.push(`➕ Vendas: ${$(c.salesTotal)} (${sales.map((x) => `${x.icon} ${money(x.cents)}`).join(' · ')})`);
+  for (const x of st.filter((y) => !y.label.startsWith('Vendas no'))) L.push(`${x.sign === '+' ? '➕' : '➖'} ${x.label}: ${$(x.cents)}`);
   L.push(`*= Hoje: ${c.dayResult >= 0 ? '+' : '−'}${$(Math.abs(c.dayResult))}*`);
-  L.push('');
-  L.push(`✅ *Total: ${$(c.accumulated)}*`);
-  L.push(`   ontem ${money(c.opening)} ${c.dayResult >= 0 ? '+' : '−'} hoje ${money(Math.abs(c.dayResult))}`);
-  L.push(`💵 Na mão: ${$(c.cashOnHand)}`);
-  L.push(`🏦 No banco (Pix/cartão): ${$(c.otherBalance)}`);
+  L.push(`✅ *Total: ${$(c.accumulated)}* (ontem ${money(c.opening)} ${c.dayResult >= 0 ? '+' : '−'} hoje ${money(Math.abs(c.dayResult))})`);
+  L.push(`💵 Na mão: ${$(c.cashOnHand)} · 🏦 No banco: ${$(c.otherBalance)}`);
   if (c.counted !== null)
     L.push(c.difference === 0 ? `🔎 Contado: ${$(c.counted)} — bateu ✅` : `🔎 Contado: ${$(c.counted)} — diferença ${c.difference! > 0 ? '+' : ''}${$(c.difference!)}`);
 
   // peças que saíram (vendidas)
   section(`🛍️ *O que saiu (${plural(s.soldUnits, 'peça', 'peças')})*`);
   if (s.soldByVariant.length) L.push(...byGroup(s.soldByVariant, (x) => `Cor ${x.variant.name}: ${x.qty}`));
-  else L.push('• Nenhuma peça vendida');
+  // vendas copiadas do caderno não dizem a cor
+  if (c.notebookUnits) L.push(`• 📒 ${plural(c.notebookUnits, 'peça', 'peças')} do caderno (sem cor anotada)`);
+  if (!s.soldByVariant.length && !c.notebookUnits) L.push('• Nenhuma peça vendida');
 
   // entrou
   section(`📦 *Entrou no estoque${s.enteredUnits ? ` (${plural(s.enteredUnits, 'peça', 'peças')})` : ''}*`);

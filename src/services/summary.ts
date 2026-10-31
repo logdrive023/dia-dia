@@ -341,9 +341,11 @@ export function cashStatement(c: CashSummary): StatementLine[] {
   for (const m of of('dar')) L.push({ sign: '-', icon: '🤝', label: `Dei a ${m.person || m.description || 'alguém'}`, cents: m.amountInCents });
   for (const m of of('despesa')) L.push({ sign: '-', icon: '🧾', label: `Despesa${extra(m)}`, cents: m.amountInCents });
   for (const m of of('pagamento')) {
+    // uma diária por lançamento, com o dia que ela paga ("Pagamento da diária de 30/10")
+    if (m.description?.startsWith('diária de ')) { L.push({ sign: '-', icon: '💼', label: `Pagamento da ${m.description}`, cents: m.amountInCents }); continue; }
     const n = m.quantity ?? 0;
-    const days = n > 1 && m.amountInCents % n === 0 ? ` (${n} dias × ${money(m.amountInCents / n)})` : n === 1 ? ' (1 dia)' : n > 1 ? ` (${n} dias)` : '';
-    L.push({ sign: '-', icon: '💼', label: `Pagamento da diária${days}`, cents: m.amountInCents });
+    const days = n > 1 && m.amountInCents % n === 0 ? ` (${n} dias × ${money(m.amountInCents / n)})` : n > 1 ? ` (${n} dias)` : '';
+    L.push({ sign: '-', icon: '💼', label: `Pagamento da diária${days}${extra(m)}`, cents: m.amountInCents });
   }
   for (const m of of('retirada')) L.push({ sign: '-', icon: '🏦', label: `Retirada${extra(m)}`, cents: m.amountInCents });
   return L;

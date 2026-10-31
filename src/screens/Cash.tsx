@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../db/db';
 import type { CashMovement, CashType, PaymentMethod, Sale } from '../db/types';
-import { money, PAYMENT_EMOJI, PAYMENT_LABEL, PAYMENTS, toCents, todayStr } from '../lib/util';
+import { addDays, money, PAYMENT_EMOJI, PAYMENT_LABEL, PAYMENTS, toCents, todayStr } from '../lib/util';
 import { addCashMovement, CASH_IN, CASH_LABEL, removeCashMovement, setCountedBalance, setOpeningBalance, updateNotebookSale } from '../services/cash';
 import { activeReservedByVariant, cancelOrder, correctOrderPrices, reservationsOfOrder, swapSaleItem } from '../services/sales';
 import { cashStatement, daySummary, loadStockRows } from '../services/summary';
@@ -16,7 +16,7 @@ const MANUAL: { type: ManualType; label: string; icon: string; tone: string; hin
   { type: 'entrada', label: 'Entrada', icon: '➕', tone: 'bg-emerald-50 text-emerald-700 border-emerald-200', hint: 'Dinheiro que entrou sem ser venda.' },
   { type: 'despesa', label: 'Despesa', icon: '🧾', tone: 'bg-red-50 text-red-700 border-red-200', hint: 'Gasto do dia (sai do total de hoje).' },
   { type: 'retirada', label: 'Retirada', icon: '🏦', tone: 'bg-slate-100 text-slate-700 border-slate-200', hint: 'Tirado do acumulado, depois do “Ontem + hoje” (ex.: − 300).' },
-  { type: 'pagamento', label: 'Pagamento', icon: '💼', tone: 'bg-violet-50 text-violet-700 border-violet-200', hint: 'Sua diária. Sai do saldo depois do “Ontem + hoje”, como no caderno (ex.: 2 dias × 150 = − 300).' },
+  { type: 'pagamento', label: 'Pagamento', icon: '💼', tone: 'bg-violet-50 text-violet-700 border-violet-200', hint: 'Sua diária: 150 por dia. Cada dia vira uma linha na conta (ex.: 2 dias = diária de ontem + diária de hoje).' },
 ];
 
 export default function Cash() {
@@ -142,7 +142,7 @@ export default function Cash() {
                 ['➕', <><b>Entrada:</b> recebi 30 de uma dívida antiga (não é venda)</>],
                 ['🧾', <><b>Despesa:</b> paguei 15 de sacolas</>],
                 ['🏦', <><b>Retirada:</b> tirei 300 do caixa para guardar</>],
-                ['💼', <><b>Pagamento:</b> minha diária, 2 dias × 150 = 300</>],
+                ['💼', <><b>Pagamento:</b> minha diária de 150 (2 dias = 2 diárias de 150)</>],
               ]}>Use para dinheiro que entrou ou saiu sem ser venda. Vendas entram sozinhas.</InfoTip>} />
               <div className="grid grid-cols-3 gap-1.5">
                 {MANUAL.map((m) => (
@@ -157,7 +157,7 @@ export default function Cash() {
             <BlockHeader icon="🧮" tint="bg-blue-100" title="Conta do dia" subtitle="Como se chega no saldo" right={<InfoTip title="Conta do dia" example={[
               ['📅', 'Ontem: 1.474,80 (645 em dinheiro + 829,80 no banco)'],
               ['➕', 'Vendas no Dinheiro 935'],
-              ['➖', 'Dei a Chico 50 · Pagamento da diária (2 dias × 150) 300'],
+              ['➖', 'Dei a Chico 50 · Diária de 30/10 150 · Diária de 31/10 150'],
               ['☀️', <>= Hoje <b>+585</b></>],
               ['✅', <>Total = ontem 1.474,80 + hoje 585 = <b>2.059,80</b> (na mão 1.230)</>],
             ]}>
@@ -629,8 +629,18 @@ function AddCashSheet({ type, onClose, cashOnHand }: { type: ManualType | null; 
       footer={<Button size="lg" className="w-full" disabled={!cents || busy} onClick={() => wrap(async () => {
         if (type !== 'entrada' && method === 'dinheiro' && cents! > cashOnHand && !(await confirm({ title: 'Mais do que tem em dinheiro?', tone: 'warning',
           confirm: 'Lançar mesmo assim', message: `Pelas contas, há ${money(cashOnHand)} em dinheiro vivo. Lançando ${money(cents)}, o dinheiro fica negativo.` }))) return;
-        const r = await run(() => addCashMovement({ dailyRecordId: day.id, type, amountInCents: cents!, person, description: desc, paymentMethod: method,
-          ...(type === 'pagamento' ? { quantity: days } : {}) }), 'Lançado');
+        const r = await run(async () => {
+          if (type !== 'pagamento') return addCashMovement({ dailyRecordId: day.id, type, amountInCents: cents!, person, description: desc, paymentMethod: method });
+          // pagamento: uma diária por dia (2 dias = 2 lançamentos), do mais antigo para hoje
+          const each = Math.floor(cents! / days), rest = cents! - each * days;
+          let last;
+          for (let i = days - 1; i >= 0; i--) {
+            const [, mm, dd] = addDays(day.date, -i).split('-');
+            last = await addCashMovement({ dailyRecordId: day.id, type, amountInCents: each + (i === days - 1 ? rest : 0), paymentMethod: method, quantity: 1,
+              description: desc.trim() || `diária de ${dd}/${mm}` });
+          }
+          return last;
+        }, days > 1 ? `${days} diárias lançadas` : 'Lançado');
         if (r) { setAmount(''); setPerson(''); setDesc(''); setDays(1); onClose(); }
       })}>Lançar {cents ? money(cents) : ''}</Button>}>
       <p className="text-sm text-slate-500 mb-3">{meta.hint}</p>

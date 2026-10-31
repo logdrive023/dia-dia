@@ -47,8 +47,7 @@ describe('pagamento por peça', () => {
     const sales = await db.sales.where('orderId').equals(o.id).toArray();
     expect(orderLine(sales, o.totalInCents, o.paymentMethod)).toMatch(/1x70 Pix \+ 1x85 Dinheiro = 155|1x85 Dinheiro \+ 1x70 Pix = 155/);
     const w = whatsappReport(d.date, await daySummary(d.id, d.date));
-    expect(w).toContain('Pix: 70');
-    expect(w).toContain('Dinheiro: 85');
+    expect(w).toContain('➕ Vendas: 155 (💵 85 · ⚡ 70 · 💳 0 · 🏧 0)');
     // corrigir o preço da peça do Pix: a diferença entra no Pix, o dinheiro não muda
     await correctOrderPrices(o.id, { [sales.find((s) => s.paymentMethod === 'pix')!.id]: 9000 });
     c = await computeCash(d.id);

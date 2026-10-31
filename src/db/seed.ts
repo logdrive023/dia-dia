@@ -36,7 +36,8 @@ export const INITIAL_SELL_GROUPS = ['Azul', 'Plomo', 'Lila', 'Broche Rey'];
 export type NotebookLine =
   | { kind: 'venda'; qty: number; cents: number; method: 'dinheiro' | 'cartao' | 'debito' }
   | { kind: 'dar'; cents: number; person: string }
-  | { kind: 'pagamento'; cents: number; days: number };
+  /** diária de quem vende; `ref` = o dia que ela paga (dd/mm) */
+  | { kind: 'pagamento'; cents: number; days: number; ref?: string };
 
 const v = (qty: number, cents: number, method: 'dinheiro' | 'cartao' | 'debito' = 'dinheiro'): NotebookLine => ({ kind: 'venda', qty, cents, method });
 
@@ -45,7 +46,7 @@ const v = (qty: number, cents: number, method: 'dinheiro' | 'cartao' | 'debito' 
  * Só dinheiro: o caderno não diz a peça, e a lista do estoque já é o começo de 31/10 (fica intacta).
  *  - 30/10 (sexta), encerrado: Dinheiro 645 · Crédito 753,75 · Débito 76,05
  *  - 31/10 (sábado): 11 vendas em dinheiro = 935 · Chico 50 (eu dei) → hoje 885
- *    Ontem 645 + 885 = 1.530 − 300 (pagamento: 2 diárias de 150) = 1.230 em dinheiro vivo
+ *    Ontem 645 + 885 = 1.530 − 300 (pagamento: diária de 30/10 + diária de 31/10, 150 cada) = 1.230 em dinheiro vivo
  */
 export const INITIAL_OPENING: { source: string; days: { date: string; lines: NotebookLine[] }[] } = {
   source: 'Caderno Check List 30/10 e 31/10/26',
@@ -58,7 +59,8 @@ export const INITIAL_OPENING: { source: string; days: { date: string; lines: Not
       v(1, 7000), v(1, 8500), v(2, 14000), v(1, 7000), v(1, 7000), v(2, 14000),
       v(1, 7000), v(1, 7000), v(1, 7500), v(1, 7500), v(1, 7000),
       { kind: 'dar', cents: 5000, person: 'Chico' },
-      { kind: 'pagamento', cents: 30000, days: 2 },
+      { kind: 'pagamento', cents: 15000, days: 1, ref: '30/10' },
+      { kind: 'pagamento', cents: 15000, days: 1, ref: '31/10' },
     ] },
   ],
 };

@@ -117,7 +117,7 @@ async function addNotebookLines(day: DailyRecord, lines?: NotebookLine[]) {
     if (l.kind === 'venda') return { ...base, type: 'venda' as const, amountInCents: l.cents, paymentMethod: l.method, quantity: l.qty,
       description: l.qty > 1 && l.cents % l.qty === 0 ? `${l.qty}× ${money(l.cents / l.qty)} · caderno` : 'caderno' };
     if (l.kind === 'dar') return { ...base, type: 'dar' as const, amountInCents: l.cents, person: l.person, description: 'caderno' };
-    return { ...base, type: 'pagamento' as const, amountInCents: l.cents, quantity: l.days, description: 'caderno' };
+    return { ...base, type: 'pagamento' as const, amountInCents: l.cents, quantity: l.days, description: l.ref ? `diária de ${l.ref}` : 'caderno' };
   }));
 }
 
@@ -247,7 +247,7 @@ export async function dayIsEmpty(dailyRecordId: string) {
   const [m, o, c, r] = await Promise.all([
     db.stockMovements.where('dailyRecordId').equals(dailyRecordId).count(),
     db.orders.where('dailyRecordId').equals(dailyRecordId).count(),
-    db.cashMovements.where('dailyRecordId').equals(dailyRecordId).count(),
+    db.cashMovements.where('dailyRecordId').equals(dailyRecordId).filter((x) => !x.auto).count(),
     db.reservations.where('dailyRecordId').equals(dailyRecordId).count(),
   ]);
   return m + o + c + r === 0;
@@ -258,6 +258,7 @@ export async function undoStartDay(dailyRecordId: string) {
     const day = await assertOpen(dailyRecordId);
     if (!(await dayIsEmpty(day.id))) throw new UserError('Este dia já tem lançamentos. Para corrigir, use Desfazer nos movimentos ou cancele as vendas.');
     await db.dailyStockItems.where('dailyRecordId').equals(day.id).delete();
+    await db.cashMovements.where('dailyRecordId').equals(day.id).delete(); // só a diária automática (o dia está vazio)
     await db.cashRecords.where('dailyRecordId').equals(day.id).delete();
     await db.dailyRecords.delete(day.id);
     await audit('day', day.id, 'undo_start', { date: day.date, sourceDate: day.sourceDate }, null);

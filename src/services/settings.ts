@@ -19,6 +19,8 @@ export interface AppSettings {
   reportTitle: string;
   /** Diária de quem vende (centavos). Sugestão ao lançar “Pagamento”. */
   dailyPayInCents: number;
+  /** Ao iniciar o dia, já lança a diária daquele dia. */
+  autoDailyPay: boolean;
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -30,6 +32,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   backupReminderDays: 7,
   reportTitle: 'Check List',
   dailyPayInCents: 15000,
+  autoDailyPay: true,
 };
 
 export async function getSetting<K extends keyof AppSettings>(key: K): Promise<AppSettings[K]> {
