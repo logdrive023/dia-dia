@@ -63,7 +63,7 @@ export default function CloseDaySheet({ open, onClose }: { open: boolean; onClos
             ))}
           </div>
           <Card className="p-3 mt-2 flex items-center justify-between gap-3">
-            <span className="min-w-0 text-sm text-slate-600 break-words">Saldo final (ontem {money(s.cash.opening)} + hoje {money(s.cash.todayNet)}{s.cash.retiradas ? ` − ${money(s.cash.retiradas)}` : ''})</span>
+            <span className="min-w-0 text-sm text-slate-600 break-words">Saldo final (ontem {money(s.cash.opening)} + hoje {money(s.cash.todayNet)}{s.cash.retiradas ? ` − retirada ${money(s.cash.retiradas)}` : ''}{s.cash.pagamentos ? ` − pagamento ${money(s.cash.pagamentos)}` : ''})</span>
             <span className="shrink-0 text-xl font-extrabold tabular-nums">{money(s.cash.accumulated)}</span>
           </Card>
           {!closed && (

@@ -16,6 +16,7 @@ const MANUAL: { type: ManualType; label: string; icon: string; tone: string; hin
   { type: 'entrada', label: 'Entrada', icon: '➕', tone: 'bg-emerald-50 text-emerald-700 border-emerald-200', hint: 'Dinheiro que entrou sem ser venda.' },
   { type: 'despesa', label: 'Despesa', icon: '🧾', tone: 'bg-red-50 text-red-700 border-red-200', hint: 'Gasto do dia (sai do total de hoje).' },
   { type: 'retirada', label: 'Retirada', icon: '🏦', tone: 'bg-slate-100 text-slate-700 border-slate-200', hint: 'Tirado do acumulado, depois do “Ontem + hoje” (ex.: − 300).' },
+  { type: 'pagamento', label: 'Pagamento', icon: '💼', tone: 'bg-violet-50 text-violet-700 border-violet-200', hint: 'Sua diária. Sai do saldo depois do “Ontem + hoje”, como no caderno (ex.: 2 dias × 150 = − 300).' },
 ];
 
 export default function Cash() {
@@ -98,6 +99,12 @@ export default function Cash() {
                   <span className="block text-[11px] font-semibold break-words">☀️ {isTodayLabel(day.date) === 'de hoje' ? 'Hoje' : 'No dia'}</span>
                   <b className="block text-[16px] tabular-nums leading-tight break-words">{c.todayNet >= 0 ? '+' : '−'}{money(Math.abs(c.todayNet))}</b>
                 </span>
+                {c.pagamentos > 0 && (
+                  <span className="flex-1 min-w-0 rounded-xl bg-white/20 px-2.5 py-1.5">
+                    <span className="block text-[11px] font-semibold text-emerald-50 break-words">💼 Pagamento</span>
+                    <b className="block text-white text-[16px] tabular-nums leading-tight break-words">− {money(c.pagamentos)}</b>
+                  </span>
+                )}
                 {c.retiradas > 0 && (
                   <span className="flex-1 min-w-0 rounded-xl bg-white/20 px-2.5 py-1.5">
                     <span className="block text-[11px] font-semibold text-emerald-50 break-words">🏦 Retirado</span>
@@ -147,8 +154,9 @@ export default function Cash() {
                 ['➕', <><b>Entrada:</b> recebi 30 de uma dívida antiga (não é venda)</>],
                 ['🧾', <><b>Despesa:</b> paguei 15 de sacolas</>],
                 ['🏦', <><b>Retirada:</b> tirei 300 do caixa para guardar</>],
+                ['💼', <><b>Pagamento:</b> minha diária, 2 dias × 150 = 300</>],
               ]}>Use para dinheiro que entrou ou saiu sem ser venda. Vendas entram sozinhas.</InfoTip>} />
-              <div className="grid grid-cols-4 gap-1.5">
+              <div className="grid grid-cols-3 gap-1.5">
                 {MANUAL.map((m) => (
                   <button key={m.type} onClick={() => setAdd(m.type)} className={`h-16 rounded-xl border font-semibold flex flex-col items-center justify-center text-[12px] leading-tight ${m.tone}`}>
                     <span className="text-xl">{m.icon}</span>{m.label}
@@ -200,6 +208,7 @@ export default function Cash() {
                     <span className="font-bold tabular-nums text-slate-800">{money(c.opening)}</span>
                   </div>
                   <ContaLine icon="☀️" tint="bg-amber-100" label={isTodayLabel(day.date) === 'de hoje' ? 'Resultado de hoje' : 'Resultado do dia'} value={Math.abs(c.todayNet)} sign={c.todayNet < 0 ? '−' : '+'} />
+                  {c.pagamentos > 0 && <ContaLine icon="💼" tint="bg-violet-100" label="Pagamento (diária)" value={c.pagamentos} sign="−" sub={payDaysText(c.pagamentos, c.pagamentoDias)} />}
                   {c.retiradas > 0 && <ContaLine icon="🏦" tint="bg-slate-200" label="Retiradas" value={c.retiradas} sign="−" />}
                   <div className="flex items-center justify-between mx-3 mb-3 mt-1 rounded-xl bg-emerald-600 text-white px-3 py-3">
                     <span className="font-bold">= Saldo final</span>
@@ -217,8 +226,10 @@ export default function Cash() {
                 <div>
                   <button disabled={locked} onClick={() => setEditOpening(true)} className="underline decoration-dotted py-2 -my-2">Ontem {money(c.opening)}{c.openingManual ? ' ✎' : ''}</button>
                   {' '}+ {money(c.todayNet)} = {money(c.subtotal)}
-                  {c.retiradas > 0 && <> − {money(c.retiradas)} = <b>{money(c.accumulated)}</b></>}
+                  {c.retiradas + c.pagamentos > 0 && <> − {money(c.retiradas + c.pagamentos)} = <b>{money(c.accumulated)}</b></>}
                 </div>
+                {c.pagamentos > 0 && <div>💼 Pagamento {money(c.pagamentos)} <small>{payDaysText(c.pagamentos, c.pagamentoDias)}</small></div>}
+                <div className="text-[15px]">💵 Dinheiro: {money(c.openingCash)} + {money(c.cashToday)} = {money(c.openingCash + c.cashToday)}{c.retiradas + c.pagamentos > 0 ? <> − {money(c.retiradas + c.pagamentos)} = <b>{money(c.cashOnHand)}</b></> : null}</div>
               </Card>
             )}
 
@@ -243,12 +254,13 @@ export default function Cash() {
                 ['🛍️', 'Cada venda mostra de onde saiu cada peça (grupo › cor) e como foi paga'],
                 ['✏️', <>Errou o preço? <b>Corrigir valor</b></>],
                 ['✖️', <>Venda que não aconteceu? <b>Cancelar venda</b> (as peças voltam)</>],
-                ['🤝', 'Lançamentos de dinheiro (dei, despesa, retirada) também aparecem aqui'],
+                ['🤝', 'Lançamentos de dinheiro (dei, despesa, retirada, pagamento) também aparecem aqui'],
               ]}>Tudo o que mexeu no caixa no dia, em ordem de horário.</InfoTip>}>
               <div className="flex flex-wrap gap-1.5 mt-2">
                 <span className="rounded-full bg-emerald-100 text-emerald-800 px-2.5 py-1 text-[12px] font-bold">🛍️ {data.s.salesCount} {data.s.salesCount === 1 ? 'venda' : 'vendas'} · +{money(c.salesTotal)}</span>
                 {c.entradas > 0 && <span className="rounded-full bg-emerald-50 text-emerald-700 px-2.5 py-1 text-[12px] font-bold">➕ entradas +{money(c.entradas)}</span>}
                 {c.darTotal + c.despesas + c.retiradas > 0 && <span className="rounded-full bg-red-100 text-red-700 px-2.5 py-1 text-[12px] font-bold">↘️ saídas −{money(c.darTotal + c.despesas + c.retiradas)}</span>}
+                {c.pagamentos > 0 && <span className="rounded-full bg-violet-100 text-violet-700 px-2.5 py-1 text-[12px] font-bold">💼 pagamento −{money(c.pagamentos)}</span>}
               </div>
             </BlockHeader>
             <div className="space-y-1.5">
@@ -335,7 +347,7 @@ export default function Cash() {
                 <Card key={t.m.id} className="p-3 flex items-center gap-3">
                   <span className="w-10 h-10 shrink-0 rounded-xl bg-slate-50 flex items-center justify-center text-lg">{MANUAL.find((x) => x.type === t.m.type)?.icon ?? '•'}</span>
                   <span className="flex-1 min-w-0">
-                    <span className="block font-semibold text-slate-800">{CASH_LABEL[t.m.type]}{t.m.person ? ` · ${t.m.person}` : ''}</span>
+                    <span className="block font-semibold text-slate-800">{CASH_LABEL[t.m.type]}{t.m.person ? ` · ${t.m.person}` : ''}{t.m.type === 'pagamento' && t.m.quantity ? ` · ${payDaysText(t.m.amountInCents, t.m.quantity)}` : ''}</span>
                     <span className="block text-xs text-slate-500">{hhmm(t.m.createdAt)} · {PAYMENT_EMOJI[t.m.paymentMethod]} {PAYMENT_LABEL[t.m.paymentMethod]}{t.m.description ? ` · ${t.m.description}` : ''}</span>
                   </span>
                   <span className={`font-bold tabular-nums ${CASH_IN.includes(t.m.type) ? 'text-emerald-600' : 'text-red-600'}`}>
@@ -600,8 +612,16 @@ function CountedCard({ dayId, expected, counted, diff, locked }: { dayId: string
   );
 }
 
+/** "2 diárias de 150" (ou só "2 diárias" se não dividir certinho). */
+function payDaysText(total: number, days: number) {
+  if (!days) return '';
+  if (days === 1) return '1 diária';
+  return total % days === 0 ? `${days} diárias de ${money(total / days)}` : `${days} diárias`;
+}
+
 function AddCashSheet({ type, onClose, cashOnHand }: { type: ManualType | null; onClose: () => void; cashOnHand: number }) {
-  const { day } = useApp();
+  const { day, settings } = useApp();
+  const [days, setDays] = useState(1);
   const { run, confirm } = useUi();
   const [busy, wrap] = useBusy();
   const [amount, setAmount] = useState('');
@@ -610,17 +630,31 @@ function AddCashSheet({ type, onClose, cashOnHand }: { type: ManualType | null; 
   const [method, setMethod] = useState<PaymentMethod>('dinheiro');
   const meta = MANUAL.find((m) => m.type === type);
   if (!type || !meta || !day) return null;
-  const cents = toCents(amount);
+  const cents = toCents(type === 'pagamento' && !amount ? money(settings.dailyPayInCents * days) : amount);
   return (
     <Sheet open onClose={onClose} title={`${meta.icon} ${meta.label}`}
       footer={<Button size="lg" className="w-full" disabled={!cents || busy} onClick={() => wrap(async () => {
         if (type !== 'entrada' && method === 'dinheiro' && cents! > cashOnHand && !(await confirm({ title: 'Mais do que tem em dinheiro?', tone: 'warning',
           confirm: 'Lançar mesmo assim', message: `Pelas contas, há ${money(cashOnHand)} em dinheiro vivo. Lançando ${money(cents)}, o dinheiro fica negativo.` }))) return;
-        const r = await run(() => addCashMovement({ dailyRecordId: day.id, type, amountInCents: cents!, person, description: desc, paymentMethod: method }), 'Lançado');
-        if (r) { setAmount(''); setPerson(''); setDesc(''); onClose(); }
+        const r = await run(() => addCashMovement({ dailyRecordId: day.id, type, amountInCents: cents!, person, description: desc, paymentMethod: method,
+          ...(type === 'pagamento' ? { quantity: days } : {}) }), 'Lançado');
+        if (r) { setAmount(''); setPerson(''); setDesc(''); setDays(1); onClose(); }
       })}>Lançar {cents ? money(cents) : ''}</Button>}>
       <p className="text-sm text-slate-500 mb-3">{meta.hint}</p>
-      <Field label="Valor"><Input inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0" autoFocus /></Field>
+      {type === 'pagamento' && (
+        <div className="mb-3">
+          <div className="text-sm font-semibold text-slate-700 mb-1.5">Quantos dias? <span className="font-normal text-slate-500">(diária {money(settings.dailyPayInCents)})</span></div>
+          <div className="grid grid-cols-4 gap-1.5">
+            {[1, 2, 3, 4].map((n) => (
+              <button key={n} onClick={() => { setDays(n); setAmount(money(settings.dailyPayInCents * n)); }}
+                className={`min-h-12 rounded-xl border text-[13px] font-bold leading-tight ${days === n ? 'bg-violet-600 text-white border-violet-600' : 'bg-white border-slate-200 text-slate-700'}`}>
+                {n} {n === 1 ? 'dia' : 'dias'}<span className="block text-[11px] font-semibold opacity-80">{money(settings.dailyPayInCents * n)}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+      <Field label="Valor"><Input inputMode="decimal" value={type === 'pagamento' && !amount ? money(settings.dailyPayInCents * days) : amount} onChange={(e) => setAmount(e.target.value)} placeholder="0" autoFocus /></Field>
       {type === 'dar' && <Field label="Para quem?"><Input value={person} onChange={(e) => setPerson(e.target.value)} placeholder="Ex.: Chico" /></Field>}
       <Field label="Descrição (opcional)"><Input value={desc} onChange={(e) => setDesc(e.target.value)} /></Field>
       <div className="grid grid-cols-4 gap-1.5">

@@ -166,8 +166,9 @@ export interface CashRecord {
  * venda: recebimento de venda | entrada: outro dinheiro que entrou
  * dar: dinheiro dado a alguém (ex.: "Chico 50 — eu dei") | despesa: gasto do dia
  * retirada: tirado do acumulado (ex.: "- 300" depois do "Ontem + hoje")
+ * pagamento: diária de quem vende (ex.: 2 dias × 150 = 300), também depois do "Ontem + hoje"
  */
-export type CashType = 'venda' | 'entrada' | 'dar' | 'despesa' | 'retirada' | 'estorno';
+export type CashType = 'venda' | 'entrada' | 'dar' | 'despesa' | 'retirada' | 'pagamento' | 'estorno';
 
 export interface CashMovement {
   id: ID;
@@ -178,7 +179,7 @@ export interface CashMovement {
   amountInCents: number; // sempre positivo; o tipo define o sinal
   paymentMethod: PaymentMethod;
   relatedOrderId?: ID | null;
-  /** Venda copiada do caderno (sem peça escolhida): quantas peças foram. */
+  /** Venda copiada do caderno (sem peça escolhida): quantas peças foram. Pagamento: quantas diárias. */
   quantity?: number;
   createdAt: string;
 }

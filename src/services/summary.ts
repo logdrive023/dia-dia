@@ -11,11 +11,17 @@ export interface CashSummary {
   darTotal: number;
   despesas: number;
   retiradas: number;
+  /** Pagamento das diárias (ex.: 300 = 2 × 150). Sai depois do "Ontem + hoje", como a retirada. */
+  pagamentos: number;
+  /** Quantas diárias foram pagas no dia. */
+  pagamentoDias: number;
+  /** Só dinheiro vivo, antes de retirada/pagamento ("935 - 50 = 885" do caderno). */
+  cashToday: number;
   /** Vendas + entradas - dei - despesas ("935 - 50 = 885") */
   todayNet: number;
   /** Ontem + hoje */
   subtotal: number;
-  /** Ontem + hoje - retiradas ("1530 - 300 = 1230"), somando todas as formas de pagamento. */
+  /** Ontem + hoje - retiradas - pagamentos, somando todas as formas de pagamento. */
   accumulated: number;
   /** Dinheiro vivo que deveria estar em mãos (só lançamentos em dinheiro). É o que se confere contando. */
   cashOnHand: number;
@@ -78,11 +84,15 @@ export async function computeCash(dailyRecordId: string): Promise<CashSummary> {
 
 function summarizeCash(opening: number, openingCash: number, openingManual: boolean, counted: number | null, movements: CashMovement[]): CashSummary {
   const salesByMethod: Record<PaymentMethod, number> = { dinheiro: 0, pix: 0, cartao: 0, debito: 0, outro: 0 };
-  let entradas = 0, darTotal = 0, despesas = 0, retiradas = 0;
+  let entradas = 0, darTotal = 0, despesas = 0, retiradas = 0, pagamentos = 0, pagamentoDias = 0, cashToday = 0;
   const dar: CashMovement[] = [];
   let cashDelta = 0;
   for (const m of movements) {
-    if (m.paymentMethod === 'dinheiro') cashDelta += ['venda', 'entrada'].includes(m.type) ? m.amountInCents : -m.amountInCents;
+    if (m.paymentMethod === 'dinheiro') {
+      const v = ['venda', 'entrada'].includes(m.type) ? m.amountInCents : -m.amountInCents;
+      cashDelta += v;
+      if (m.type !== 'retirada' && m.type !== 'pagamento') cashToday += v;
+    }
     switch (m.type) {
       case 'venda': salesByMethod[m.paymentMethod] += m.amountInCents; break;
       case 'estorno': salesByMethod[m.paymentMethod] -= m.amountInCents; break;
@@ -90,16 +100,17 @@ function summarizeCash(opening: number, openingCash: number, openingManual: bool
       case 'dar': darTotal += m.amountInCents; dar.push(m); break;
       case 'despesa': despesas += m.amountInCents; break;
       case 'retirada': retiradas += m.amountInCents; break;
+      case 'pagamento': pagamentos += m.amountInCents; pagamentoDias += m.quantity ?? 0; break;
     }
   }
   const salesTotal = Object.values(salesByMethod).reduce((a, b) => a + b, 0);
   const notebook = movements.filter((m) => m.type === 'venda' && !m.relatedOrderId);
   const todayNet = salesTotal + entradas - darTotal - despesas;
   const subtotal = opening + todayNet;
-  const accumulated = subtotal - retiradas;
+  const accumulated = subtotal - retiradas - pagamentos;
   const cashOnHand = openingCash + cashDelta;
   return {
-    opening, salesByMethod, salesTotal, entradas, dar, darTotal, despesas, retiradas, todayNet, subtotal,
+    opening, salesByMethod, salesTotal, entradas, dar, darTotal, despesas, retiradas, pagamentos, pagamentoDias, cashToday, todayNet, subtotal,
     accumulated, cashOnHand, openingCash, otherBalance: accumulated - cashOnHand,
     counted, difference: counted === null ? null : counted - cashOnHand, openingManual, movements,
     notebookCount: notebook.length, notebookUnits: notebook.reduce((n, m) => n + (m.quantity ?? 1), 0),

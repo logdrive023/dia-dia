@@ -17,6 +17,8 @@ export interface AppSettings {
   lastBackupAt: string | null;
   backupReminderDays: number;
   reportTitle: string;
+  /** Diária de quem vende (centavos). Sugestão ao lançar “Pagamento”. */
+  dailyPayInCents: number;
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -27,6 +29,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   lastBackupAt: null,
   backupReminderDays: 7,
   reportTitle: 'Check List',
+  dailyPayInCents: 15000,
 };
 
 export async function getSetting<K extends keyof AppSettings>(key: K): Promise<AppSettings[K]> {

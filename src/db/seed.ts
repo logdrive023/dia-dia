@@ -32,22 +32,35 @@ export const SEED_DATA: { name: string; color: string; icon: string; variants: [
 
 export const INITIAL_SELL_GROUPS = ['Azul', 'Plomo', 'Lila', 'Broche Rey'];
 
+/** Uma linha do caderno: venda [peças, valor, forma] ou outro lançamento de dinheiro. */
+export type NotebookLine =
+  | { kind: 'venda'; qty: number; cents: number; method: 'dinheiro' | 'cartao' | 'debito' }
+  | { kind: 'dar'; cents: number; person: string }
+  | { kind: 'pagamento'; cents: number; days: number };
+
+const v = (qty: number, cents: number, method: 'dinheiro' | 'cartao' | 'debito' = 'dinheiro'): NotebookLine => ({ kind: 'venda', qty, cents, method });
+
 /**
- * Caderno de hoje, sábado 31/10/26 (antes do app): ao iniciar o dia, cada venda anotada já entra no caixa.
- * Dinheiro 645 · Crédito 753,75 · Débito 76,05 = 1.474,80. Dias anteriores: sem dados (começa em 0).
- * O caderno não diz a peça, então não mexe no estoque (a lista oficial já é depois das vendas).
+ * Os dois dias do caderno (Check List), lançados no caixa ao iniciar o primeiro dia do app.
+ * Só dinheiro: o caderno não diz a peça, e a lista do estoque já é o começo de 31/10 (fica intacta).
+ *  - 30/10 (sexta), encerrado: Dinheiro 645 · Crédito 753,75 · Débito 76,05
+ *  - 31/10 (sábado): 11 vendas em dinheiro = 935 · Chico 50 (eu dei) → hoje 885
+ *    Ontem 645 + 885 = 1.530 − 300 (pagamento: 2 diárias de 150) = 1.230 em dinheiro vivo
  */
-export const INITIAL_OPENING = {
-  date: '2026-10-31',
-  source: 'Caderno 31/10/26 (sábado)',
-  total: 64500 + 75375 + 7605,
-  cash: 64500,
-  // [quantidade, valor em centavos, forma]
-  sales: [
-    [1, 7500, 'dinheiro'], [1, 7000, 'dinheiro'], [2, 15000, 'dinheiro'], [1, 7000, 'dinheiro'],
-    [1, 7000, 'dinheiro'], [2, 14000, 'dinheiro'], [10, 75375, 'cartao'], [1, 7000, 'dinheiro'],
-    [1, 7605, 'debito'],
-  ] as [number, number, 'dinheiro' | 'cartao' | 'debito'][],
+export const INITIAL_OPENING: { source: string; days: { date: string; lines: NotebookLine[] }[] } = {
+  source: 'Caderno Check List 30/10 e 31/10/26',
+  days: [
+    { date: '2026-10-30', lines: [
+      v(1, 7500), v(1, 7000), v(2, 15000), v(1, 7000), v(1, 7000), v(2, 14000),
+      v(10, 75375, 'cartao'), v(1, 7000), v(1, 7605, 'debito'),
+    ] },
+    { date: '2026-10-31', lines: [
+      v(1, 7000), v(1, 8500), v(2, 14000), v(1, 7000), v(1, 7000), v(2, 14000),
+      v(1, 7000), v(1, 7000), v(1, 7500), v(1, 7500), v(1, 7000),
+      { kind: 'dar', cents: 5000, person: 'Chico' },
+      { kind: 'pagamento', cents: 30000, days: 2 },
+    ] },
+  ],
 };
 
 export const VARIANT_COLOR: Record<string, string> = {

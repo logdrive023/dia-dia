@@ -1,9 +1,9 @@
 import { useState } from 'react';
 import { runDiagnostics, type Finding } from '../services/diagnostics';
-import { money, PAYMENT_EMOJI, PAYMENT_LABEL, PAYMENTS } from '../lib/util';
+import { money, PAYMENT_EMOJI, PAYMENT_LABEL, PAYMENTS, toCents } from '../lib/util';
 import type { PaymentMethod } from '../db/types';
 import { setSetting } from '../services/settings';
-import { resetToInitialData } from '../services/backup';
+import { resetToInitialData, resetToZero } from '../services/backup';
 import { useApp } from '../state';
 import { Button, Card, InfoTip, Input, Sheet, useUi } from '../components/ui';
 
@@ -29,6 +29,12 @@ export default function SettingsSheet({ open, onClose }: { open: boolean; onClos
   const [title, setTitle] = useState(settings.reportTitle);
   if (!open) return null;
   const saved = () => toast('Salvo');
+  const [pay, setPay] = useState(money(settings.dailyPayInCents));
+  const savePay = () => {
+    const c = toCents(pay);
+    if (c === null || c <= 0) { setPay(money(settings.dailyPayInCents)); return; }
+    if (c !== settings.dailyPayInCents) run(() => setSetting('dailyPayInCents', c)).then(saved);
+  };
   const saveSymbol = () => { if (symbol.trim() !== settings.currencySymbol) run(() => setSetting('currencySymbol', symbol.trim().slice(0, 4))).then(saved); };
   const saveTitle = () => { const t = title.trim().slice(0, 30) || 'Check List'; if (t !== settings.reportTitle) run(() => setSetting('reportTitle', t)).then(saved); };
   const toggleMethod = (p: PaymentMethod, on: boolean) => {
@@ -78,6 +84,18 @@ export default function SettingsSheet({ open, onClose }: { open: boolean; onClos
         </div>
       </Section>
 
+      <Section icon="💼" title="Sua diária" tip={
+        <InfoTip title="Diária" example={[
+          ['💼', <>Diária <b>150</b> → em Caixa › Pagamento, “2 dias” já vem 300</>],
+          ['🧮', 'O pagamento sai do saldo depois do “Ontem + hoje”, como no caderno'],
+          ['💬', 'Aparece separado no relatório do WhatsApp: “Pagamento da diária: −300 (2 diárias de 150)”'],
+        ]}>Quanto você recebe por dia. Só preenche a sugestão; dá para mudar o valor na hora de lançar.</InfoTip>}>
+        <div className="flex items-center gap-3">
+          <Input inputMode="decimal" value={pay} onChange={(e) => setPay(e.target.value)} onBlur={savePay} placeholder="150" className="!w-32" />
+          <span className="flex-1 text-right text-slate-500 text-sm">2 dias = <b className="text-slate-800 text-base">{money((toCents(pay) ?? settings.dailyPayInCents) * 2)}</b></span>
+        </div>
+      </Section>
+
       <Section icon="💲" title="Moeda" tip={
         <InfoTip title="Símbolo da moeda" example={[
           ['✍️', <>Digite <b>R$</b> → aparece “R$ 70”</>],
@@ -121,14 +139,13 @@ export default function SettingsSheet({ open, onClose }: { open: boolean; onClos
         <Diagnostics />
       </Section>
 
-      <Section icon="🔄" title="Recomeçar com os dados iniciais" tip={
+      <Section icon="🔄" title="Recomeçar" tip={
         <InfoTip title="Recomeçar" example={[
-          ['📦', 'Estoque volta para a lista oficial (238 peças)'],
-          ['🏷️', 'À venda: Azul, Plomo, Lila e Broche Rey; os outros guardados'],
-          ['🧮', 'Vendas do caderno de hoje (31/10): 💵 645 · 💳 753,75 · 🏧 76,05'],
-          ['↩️', 'Antes de apagar, o app guarda uma cópia (Menu › Backup › Voltar como estava)'],
-        ]}>Use para preparar o app pela primeira vez ou apagar testes. Tudo o que foi lançado some.</InfoTip>}>
-        <ResetButton />
+          ['📒', <><b>Voltar aos dados iniciais:</b> estoque da lista oficial (238 peças) e os cadernos de 30/10 e 31/10</>],
+          ['🧹', <><b>Reiniciar tudo do 0:</b> app vazio, sem grupos, sem peças, sem dias, caixa em 0</>],
+          ['↩️', 'Nos dois, o app guarda uma cópia antes (Menu › Backup › Voltar como estava)'],
+        ]}>Escolha uma das duas. Tudo o que foi lançado neste celular é apagado.</InfoTip>}>
+        <ResetButtons />
       </Section>
 
       <p className="text-xs text-slate-400 text-center mt-2">Dia a Dia · funciona offline · dados só neste aparelho</p>
@@ -166,17 +183,37 @@ function Diagnostics() {
   );
 }
 
-function ResetButton() {
+/** Duas formas de recomeçar: com os dados iniciais oficiais ou do zero (app vazio). */
+function ResetButtons() {
   const { run, confirm } = useUi();
+  const go = async (kind: 'inicial' | 'zero') => {
+    const zero = kind === 'zero';
+    if (!(await confirm({
+      title: zero ? 'Reiniciar tudo do 0?' : 'Voltar aos dados iniciais?', tone: 'danger',
+      confirm: zero ? 'Sim, apagar tudo' : 'Sim, voltar aos iniciais',
+      message: zero
+        ? 'O app fica vazio: sem grupos, sem peças, sem dias e caixa em 0. O app guarda uma cópia antes (dá para voltar em Backup).'
+        : 'Volta o estoque da lista oficial e os cadernos de 30/10 e 31/10. Tudo o que foi lançado é apagado. O app guarda uma cópia antes (dá para voltar em Backup).',
+    }))) return;
+    const ok = await run(() => (zero ? resetToZero() : resetToInitialData()), zero ? 'Pronto! App zerado.' : 'Pronto! Dados iniciais carregados.');
+    if (ok !== undefined) setTimeout(() => location.reload(), 600);
+  };
   return (
-    <>
-      <p className="text-[13px] text-slate-600 mb-2">Apaga tudo o que foi lançado e deixa o app como no primeiro dia: estoque da lista oficial e caixa do caderno.</p>
-      <Button variant="outline" className="w-full !text-red-600 !border-red-200" onClick={async () => {
-        if (!(await confirm({ title: 'Recomeçar do início?', tone: 'danger', confirm: 'Sim, recomeçar',
-          message: 'Todas as vendas, dias e lançamentos deste celular serão apagados. O app guarda uma cópia antes (dá para voltar em Backup).' }))) return;
-        const ok = await run(() => resetToInitialData(), 'Pronto! Dados iniciais carregados.');
-        if (ok !== undefined) setTimeout(() => location.reload(), 600);
-      }}>🔄 Recomeçar com os dados iniciais</Button>
-    </>
+    <div className="space-y-2">
+      <button onClick={() => go('inicial')} className="w-full flex items-center gap-3 rounded-xl border-2 border-blue-200 bg-blue-50 px-3 py-3 text-left active:bg-blue-100">
+        <span className="w-10 h-10 rounded-xl bg-blue-100 flex items-center justify-center text-xl shrink-0">📒</span>
+        <span className="flex-1 min-w-0">
+          <span className="block text-[15px] font-bold text-blue-900">Voltar aos dados iniciais</span>
+          <span className="block text-[12px] text-slate-600 break-words">Estoque da lista oficial + cadernos de 30/10 e 31/10</span>
+        </span>
+      </button>
+      <button onClick={() => go('zero')} className="w-full flex items-center gap-3 rounded-xl border-2 border-red-200 bg-red-50 px-3 py-3 text-left active:bg-red-100">
+        <span className="w-10 h-10 rounded-xl bg-red-100 flex items-center justify-center text-xl shrink-0">🧹</span>
+        <span className="flex-1 min-w-0">
+          <span className="block text-[15px] font-bold text-red-700">Reiniciar tudo do 0</span>
+          <span className="block text-[12px] text-slate-600 break-words">App vazio: sem grupos, sem peças, sem dias, caixa em 0</span>
+        </span>
+      </button>
+    </div>
   );
 }

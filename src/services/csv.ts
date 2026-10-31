@@ -57,7 +57,7 @@ export async function buildCsv(kind: CsvKind, dailyRecordId?: string): Promise<s
         PAYMENT_LABEL[m.paymentMethod]])]);
   }
   const days = await db.dailyRecords.orderBy('date').toArray();
-  const rows: unknown[][] = [['Data', 'Status', 'Peças início', 'Peças fim', 'Peças vendidas', 'Vendas', 'Dinheiro', 'Pix', 'Crédito', 'Débito', 'Outro', 'Dei', 'Despesas', 'Retiradas', 'Ontem', 'Saldo']];
+  const rows: unknown[][] = [['Data', 'Status', 'Peças início', 'Peças fim', 'Peças vendidas', 'Vendas', 'Dinheiro', 'Pix', 'Crédito', 'Débito', 'Outro', 'Dei', 'Despesas', 'Retiradas', 'Pagamento (diárias)', 'Ontem', 'Saldo']];
   for (const day of days) {
     const [items, sales, c] = await Promise.all([
       db.dailyStockItems.where('dailyRecordId').equals(day.id).toArray(),
@@ -68,7 +68,7 @@ export async function buildCsv(kind: CsvKind, dailyRecordId?: string): Promise<s
       items.reduce((s, i) => s + i.initialQuantity, 0), items.reduce((s, i) => s + i.currentQuantity, 0),
       sales.filter((s) => s.status === 'ok').reduce((s, x) => s + x.quantity, 0),
       money(c.salesTotal), money(c.salesByMethod.dinheiro), money(c.salesByMethod.pix), money(c.salesByMethod.cartao), money(c.salesByMethod.debito),
-      money(c.salesByMethod.outro), money(c.darTotal), money(c.despesas), money(c.retiradas), money(c.opening), money(c.accumulated)]);
+      money(c.salesByMethod.outro), money(c.darTotal), money(c.despesas), money(c.retiradas), money(c.pagamentos), money(c.opening), money(c.accumulated)]);
   }
   return toCsv(rows);
 }

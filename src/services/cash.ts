@@ -11,6 +11,7 @@ export const CASH_LABEL: Record<CashType, string> = {
   dar: 'Dei dinheiro',
   despesa: 'Despesa',
   retirada: 'Retirada',
+  pagamento: 'Pagamento (diária)',
   estorno: 'Estorno de venda',
 };
 
@@ -20,9 +21,12 @@ export const CASH_IN: CashType[] = ['venda', 'entrada'];
 export async function addCashMovement(p: {
   dailyRecordId: string; type: Exclude<CashType, 'venda' | 'estorno'>; amountInCents: number;
   paymentMethod?: PaymentMethod; person?: string; description?: string;
+  /** pagamento: quantas diárias (ex.: 2 dias = 300) */
+  quantity?: number;
 }) {
   if (!isCents(p.amountInCents) || p.amountInCents <= 0) throw new UserError('Informe um valor maior que zero.');
-  if (!['entrada', 'dar', 'despesa', 'retirada'].includes(p.type)) throw new UserError('Tipo de lançamento inválido.');
+  if (!['entrada', 'dar', 'despesa', 'retirada', 'pagamento'].includes(p.type)) throw new UserError('Tipo de lançamento inválido.');
+  if (p.quantity !== undefined && (!Number.isInteger(p.quantity) || p.quantity < 1 || p.quantity > 60)) throw new UserError('Quantidade de dias inválida.');
   if (p.paymentMethod && !PAYMENTS.includes(p.paymentMethod)) throw new UserError('Forma de pagamento inválida.');
   return db.transaction('rw', db.dailyRecords, db.cashMovements, async () => {
     await assertOpen(p.dailyRecordId);
@@ -30,6 +34,7 @@ export async function addCashMovement(p: {
       id: uid(), dailyRecordId: p.dailyRecordId, type: p.type, amountInCents: p.amountInCents,
       paymentMethod: p.paymentMethod ?? 'dinheiro', person: p.person?.trim() || undefined,
       description: p.description?.trim() || undefined, relatedOrderId: null, createdAt: nowIso(),
+      ...(p.type === 'pagamento' && p.quantity ? { quantity: p.quantity } : {}),
     };
     await db.cashMovements.add(m);
     return m;

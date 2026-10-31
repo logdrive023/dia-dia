@@ -1,5 +1,5 @@
 import { db } from '../db/db';
-import { nowIso } from '../lib/util';
+import { nowIso, uid } from '../lib/util';
 import { setSetting } from './settings';
 
 export const BACKUP_FORMAT = 'ESTOQUE_BACKUP';
@@ -297,6 +297,26 @@ export function readFileText(f: Blob): Promise<string> {
  */
 export async function resetToInitialData() {
   const { seedIfNeeded } = await import('../db/seed');
+  await saveSafetyAndClear();
+  await seedIfNeeded();
+}
+
+/**
+ * Apaga tudo e deixa o app vazio: sem grupos, sem cores, sem dias, caixa em 0, configurações padrão.
+ * Marca como “já preparado” para os dados iniciais não voltarem sozinhos ao abrir o app.
+ * Antes guarda uma cópia: dá para “voltar como estava”.
+ */
+export async function resetToZero() {
+  await saveSafetyAndClear();
+  const now = nowIso();
+  await db.settings.bulkAdd([
+    { id: uid(), key: 'seedDone', value: `zerado ${now}` },
+    { id: uid(), key: 'forSaleDefaults', value: `zerado ${now}` },
+  ]);
+}
+
+/** Guarda a cópia de segurança (se houver dados) e limpa todas as tabelas. */
+async function saveSafetyAndClear() {
   if (await hasLocalData()) {
     const current = await buildBackup();
     const s = summarizeBackup(current);
@@ -306,5 +326,4 @@ export async function resetToInitialData() {
   await db.transaction('rw', db.allTables, async () => {
     for (const t of TABLES) await db.table(t).clear();
   });
-  await seedIfNeeded();
 }

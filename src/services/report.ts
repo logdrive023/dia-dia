@@ -20,6 +20,13 @@ export function orderLine(lines: { quantity: number; unitPriceInCents: number | 
   return `${parts.join(' + ')} = ${money(total)} ${how}`;
 }
 
+/** " (2 diárias de 150)" quando der para dividir certinho. */
+function payDays(c: DaySummary['cash']) {
+  const n = c.pagamentoDias;
+  if (!n) return '';
+  return n === 1 ? ' (1 diária)' : c.pagamentos % n === 0 ? ` (${n} diárias de ${money(c.pagamentos / n)})` : ` (${n} diárias)`;
+}
+
 function cashLines(s: DaySummary, extraSymbol = '') {
   const c = s.cash;
   const out: string[] = [];
@@ -29,8 +36,9 @@ function cashLines(s: DaySummary, extraSymbol = '') {
   if (minus) parts.push(`- ${money(minus)}`);
   out.push(parts.length > 1 ? `${parts.join(' ')} = ${money(c.todayNet)}${extraSymbol}` : `Hoje = ${money(c.todayNet)}${extraSymbol}`);
   let ontem = `Ontem ${money(c.opening)} + ${money(c.todayNet)} = ${money(c.subtotal)}`;
-  if (c.retiradas) ontem += ` - ${money(c.retiradas)} = ${money(c.accumulated)}`;
+  if (c.retiradas || c.pagamentos) ontem += ` - ${money(c.retiradas + c.pagamentos)} = ${money(c.accumulated)}`;
   out.push(ontem);
+  if (c.pagamentos) out.push(`Pagamento: ${money(c.pagamentos)}${payDays(c)}`);
   return out;
 }
 
@@ -105,9 +113,17 @@ export function whatsappReport(date: string, s: DaySummary, opts: Opts = {}) {
   const how = minus || c.entradas
     ? ` (vendas ${money(c.salesTotal)}${c.entradas ? ` + ${money(c.entradas)}` : ''}${minus ? ` - ${money(minus)}` : ''})` : '';
   L.push(`• Hoje: ${c.todayNet >= 0 ? '+' : ''}${$(c.todayNet)}${how}`);
+  if (c.pagamentos) L.push(`• 💼 *Pagamento da diária: -${$(c.pagamentos)}*${payDays(c)}`);
   if (c.retiradas) L.push(`• Retirada: -${$(c.retiradas)}`);
   L.push(`• ✅ *Saldo: ${$(c.accumulated)}*`);
   L.push(`• 💵 Na mão: ${$(c.cashOnHand)}`);
+  // a conta do dinheiro vivo igual ao caderno: "Ontem 645 + 885 = 1530 - 300 = 1230"
+  {
+    const out = c.retiradas + c.pagamentos;
+    let conta = `   ↳ ontem ${money(c.openingCash)} + hoje ${money(c.cashToday)} = ${money(c.openingCash + c.cashToday)}`;
+    if (out) conta += ` - ${money(out)}${c.pagamentos && !c.retiradas ? ' (pagamento)' : ''} = ${money(c.cashOnHand)}`;
+    L.push(conta);
+  }
   L.push(`• 🏦 No banco (Pix/cartão): ${$(c.otherBalance)}`);
   if (c.counted !== null)
     L.push(c.difference === 0 ? `• 🔎 Contado: ${$(c.counted)} — bateu ✅` : `• 🔎 Contado: ${$(c.counted)} — diferença ${c.difference! > 0 ? '+' : ''}${$(c.difference!)}`);

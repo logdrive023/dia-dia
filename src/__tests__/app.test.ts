@@ -442,48 +442,76 @@ describe('lista oficial: o que está à venda', () => {
   });
 });
 
-describe('dados iniciais oficiais (caderno de 30/10)', () => {
-  it('31/10: o dia já começa com as vendas do caderno; ontem é 0; segundo dia continua dele', async () => {
+describe('dados iniciais oficiais (caderno 30/10 e 31/10)', () => {
+  it('bate com o caderno: 30/10 encerrado; 31/10 = 645 + 885 = 1.530 − 300 = 1.230 na mão', async () => {
     useDatabase(new AppDB(`caderno-${Math.random()}`));
     await seedIfNeeded();
     const d1 = await startDay('2026-10-31');
-    let c = await computeCash(d1.id);
-    expect([c.opening, c.salesByMethod.dinheiro, c.salesByMethod.cartao, c.salesByMethod.debito]).toEqual([0, 64500, 75375, 7605]);
-    expect([c.accumulated, c.cashOnHand, c.otherBalance, c.notebookCount, c.notebookUnits]).toEqual([147480, 64500, 82980, 9, 20]);
-    const rows = await loadStockRows(d1.id, d1.date);
-    expect(rows.reduce((s, r) => s + r.item.currentQuantity, 0)).toBe(238);
+    // 30/10 (sexta) encerrado: Dinheiro 645 · Crédito 753,75 · Débito 76,05
+    const d0 = (await db.dailyRecords.where('date').equals('2026-10-30').first())!;
+    expect(d0.status).toBe('closed');
+    const c0 = await computeCash(d0.id);
+    expect([c0.opening, c0.salesByMethod.dinheiro, c0.salesByMethod.cartao, c0.salesByMethod.debito, c0.cashOnHand, c0.notebookCount, c0.notebookUnits])
+      .toEqual([0, 64500, 75375, 7605, 64500, 9, 20]);
+    // 31/10 (sábado): 11 vendas em dinheiro = 935; Chico 50 → hoje 885; ontem 645 + 885 = 1.530; pagamento 300 → 1.230
+    const c = await computeCash(d1.id);
+    expect(d1.sourceDate).toBe('2026-10-30');
+    expect([c.openingCash, c.salesByMethod.dinheiro, c.salesByMethod.cartao, c.salesByMethod.debito]).toEqual([64500, 93500, 0, 0]);
+    expect([c.darTotal, c.cashToday, c.openingCash + c.cashToday, c.pagamentos, c.pagamentoDias, c.cashOnHand]).toEqual([5000, 88500, 153000, 30000, 2, 123000]);
+    expect([c.opening, c.accumulated, c.otherBalance, c.notebookCount, c.notebookUnits]).toEqual([147480, 147480 + 88500 - 30000, 82980, 11, 13]);
+    expect(c.dar[0].person).toBe('Chico');
+    // estoque intacto: a lista é o começo de 31/10 (238 peças), nos dois dias
+    for (const d of [d0, d1]) {
+      const rows = await loadStockRows(d.id, d.date);
+      expect([rows.reduce((s, r) => s + r.item.initialQuantity, 0), rows.reduce((s, r) => s + r.item.currentQuantity, 0)]).toEqual([238, 238]);
+    }
+    expect(await db.stockMovements.count()).toBe(0);
     expect((await runDiagnostics()).findings.filter((f) => f.level === 'erro')).toEqual([]);
-    // venda nova no app soma às do caderno
-    const g = (await db.groups.toArray()).find((x) => x.name === 'Azul')!;
-    const v = (await db.variants.where('groupId').equals(g.id).toArray()).find((x) => x.name === 'Verde Piscina')!;
-    await createOrder({ orderId: uid(), dailyRecordId: d1.id, paymentMethod: 'dinheiro', lines: [{ variantId: v.id, quantity: 1, unitPriceInCents: 7000 }] });
-    await addCashMovement({ dailyRecordId: d1.id, type: 'retirada', amountInCents: 30000 });
-    c = await computeCash(d1.id);
-    expect(c.cashOnHand).toBe(64500 + 7000 - 30000);
-    expect((await daySummary(d1.id, d1.date)).salesCount).toBe(10);
+    // WhatsApp deixa o pagamento claro e a conta do dinheiro igual ao caderno
+    const w = whatsappReport('2026-10-31', await daySummary(d1.id, d1.date));
+    expect(w).toContain('Pagamento da diária: -300*');
+    expect(w).toContain('(2 diárias de 150)');
+    expect(w).toContain('Dei a Chico: 50');
+    expect(w).toContain('ontem 645 + hoje 885 = 1.530 - 300 (pagamento) = 1.230');
+    const n = notebookReport('2026-10-31', await daySummary(d1.id, d1.date));
+    expect(n).toContain('Pagamento: 300 (2 diárias de 150)');
+    // o dia seguinte continua do 1.230 em dinheiro
     const d2 = await startDay('2026-11-01');
-    expect((await computeCash(d2.id)).openingCash).toBe(41500);
+    expect((await computeCash(d2.id)).openingCash).toBe(123000);
     expect((await computeCash(d2.id)).notebookCount).toBe(0);
+  });
+  it('pagamento: lança com diárias, sai depois do ontem + hoje, recusa dias inválidos', async () => {
+    useDatabase(new AppDB(`pag-${Math.random()}`));
+    await seedIfNeeded();
+    await db.settings.where('key').equals('initialOpening').delete();
+    const d = await startDay('2026-11-03');
+    await addCashMovement({ dailyRecordId: d.id, type: 'entrada', amountInCents: 50000 });
+    await addCashMovement({ dailyRecordId: d.id, type: 'pagamento', amountInCents: 15000, quantity: 1 });
+    const c = await computeCash(d.id);
+    expect([c.todayNet, c.subtotal, c.pagamentos, c.pagamentoDias, c.accumulated, c.cashOnHand]).toEqual([50000, 50000, 15000, 1, 35000, 35000]);
+    await expect(addCashMovement({ dailyRecordId: d.id, type: 'pagamento', amountInCents: 15000, quantity: 0 })).rejects.toThrow();
+    expect((await getSetting('dailyPayInCents'))).toBe(15000);
   });
   it('venda do caderno: corrige valor/forma/peças e cancela', async () => {
     const { updateNotebookSale, removeCashMovement } = await import('../services/cash');
     useDatabase(new AppDB(`caderno3-${Math.random()}`));
     await seedIfNeeded();
     const d = await startDay('2026-10-31');
-    const credit = (await db.cashMovements.toArray()).find((m) => m.paymentMethod === 'cartao')!;
-    await updateNotebookSale(credit.id, { amountInCents: 73000, paymentMethod: 'pix', quantity: 10 });
+    const sale = (await db.cashMovements.where('dailyRecordId').equals(d.id).toArray()).find((m) => m.type === 'venda' && m.amountInCents === 8500)!;
+    await updateNotebookSale(sale.id, { amountInCents: 8000, paymentMethod: 'pix', quantity: 1 });
     let c = await computeCash(d.id);
-    expect([c.salesByMethod.cartao, c.salesByMethod.pix, c.accumulated]).toEqual([0, 73000, 147480 - 75375 + 73000]);
-    await expect(updateNotebookSale(credit.id, { amountInCents: 0, paymentMethod: 'pix', quantity: 1 })).rejects.toThrow();
-    await removeCashMovement(credit.id);
+    expect([c.salesByMethod.dinheiro, c.salesByMethod.pix, c.cashOnHand]).toEqual([93500 - 8500, 8000, 123000 - 8500]);
+    await expect(updateNotebookSale(sale.id, { amountInCents: 0, paymentMethod: 'pix', quantity: 1 })).rejects.toThrow();
+    await removeCashMovement(sale.id);
     c = await computeCash(d.id);
-    expect([c.notebookCount, c.notebookUnits, c.cashOnHand]).toEqual([8, 10, 64500]);
+    expect([c.notebookCount, c.notebookUnits, c.salesByMethod.pix]).toEqual([10, 12, 0]);
   });
-  it('outro dia que não o do caderno começa zerado', async () => {
+  it('dia antes do caderno começa zerado e não cria os dias do caderno', async () => {
     useDatabase(new AppDB(`caderno2-${Math.random()}`));
     await seedIfNeeded();
-    const d = await startDay('2026-11-02');
+    const d = await startDay('2026-10-29');
     expect((await computeCash(d.id)).accumulated).toBe(0);
+    expect(await db.dailyRecords.count()).toBe(1);
   });
   it('crédito e débito ficam separados', async () => {
     useDatabase(new AppDB(`cartoes-${Math.random()}`));

@@ -154,9 +154,15 @@ export async function createVariant(input: {
       displayOrder: siblings.length, active: true, archivedAt: null,
       minimumStock: input.minimumStock ?? null, idealStock: input.idealStock ?? null, startQuantity: qty,
       optionalPriceInCents: input.optionalPriceInCents ?? null, notes: input.notes, createdAt: now, updatedAt: now,
-      forSale: await groupIsForSale(input.groupId),
+      // grupo novo (ainda sem cores): a primeira cor já nasce à venda e o grupo entra em ⭐ Para vender.
+      // Guardar no estoque é uma escolha (Vender › Estoque ⇄ Venda).
+      forSale: siblings.length === 0 ? true : await groupIsForSale(input.groupId),
     };
     await db.variants.add(v);
+    if (siblings.length === 0) {
+      const sell = await getSetting('sellGroups');
+      if (!sell.some((e) => e.groupId === input.groupId)) await setSetting('sellGroups', [...sell, { groupId: input.groupId, highlight: false }]);
+    }
     if (input.dailyRecordId) {
       const day = await db.dailyRecords.get(input.dailyRecordId);
       if (day && day.status === 'closed') throw new UserError('O dia está encerrado. Reabra para lançar a quantidade.');

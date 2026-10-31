@@ -39,6 +39,8 @@ export async function startDay(date: string, mode: 'copy' | 'blank' = 'copy'): P
       const existing = await getDayByDate(date);
       if (existing) return existing;
       const firstDay = !(await db.dailyRecords.count());
+      // primeiro dia do app: os dias do caderno que vêm antes entram encerrados no histórico
+      if (firstDay && mode === 'copy') await addNotebookDaysBefore(date);
       const prev = mode === 'copy' ? await previousDay(date) : undefined;
       const now = nowIso();
       const day: DailyRecord = {
@@ -75,23 +77,48 @@ export async function startDay(date: string, mode: 'copy' | 'blank' = 'copy'): P
         id: uid(), dailyRecordId: day.id, openingBalanceInCents: 0, openingManual: mode === 'blank', countedBalanceInCents: null, status: 'open',
       });
       // primeiro dia do app no dia do caderno: as vendas anotadas já entram no caixa
-      if (firstDay && mode === 'copy') await addNotebookSales(day);
+      if (firstDay && mode === 'copy') await addNotebookLines(day, (await notebook())?.days.find((d) => d.date === date)?.lines);
       await audit('day', day.id, 'start', null, { date, mode, sourceDate: day.sourceDate });
       return day;
     });
 }
 
-/** Vendas do caderno (dados iniciais) lançadas no caixa do dia. Use dentro da transação de startDay. */
-async function addNotebookSales(day: DailyRecord) {
-  const init = (await db.settings.where('key').equals('initialOpening').first())?.value as
-    { date: string; source: string; sales?: [number, number, PaymentMethod][] } | undefined;
-  if (!init?.sales || init.date !== day.date) return;
-  // horários espaçados ao longo da tarde, na ordem do caderno
-  await db.cashMovements.bulkAdd(init.sales.map(([qty, cents, method], i) => ({
-    id: uid(), dailyRecordId: day.id, type: 'venda' as const, amountInCents: cents, paymentMethod: method,
-    quantity: qty, description: qty > 1 && cents % qty === 0 ? `${qty}× ${money(cents / qty)} · caderno` : 'caderno',
-    relatedOrderId: null, createdAt: new Date(`${init.date}T${String(9 + i).padStart(2, '0')}:00:00`).toISOString(),
-  })));
+type NotebookLine = import('../db/seed').NotebookLine;
+type Notebook = { source: string; days: { date: string; lines: NotebookLine[] }[] };
+
+async function notebook() {
+  const v = (await db.settings.where('key').equals('initialOpening').first())?.value as Notebook | undefined;
+  return v && Array.isArray(v.days) ? v : undefined;
+}
+
+/** Dias do caderno antes de `date`: encerrados, com a lista do estoque intacta e o dinheiro anotado. */
+async function addNotebookDaysBefore(date: string) {
+  const nb = await notebook();
+  if (!nb) return;
+  const variants = (await db.variants.toArray()).filter((x) => !x.archivedAt);
+  for (const d of nb.days.filter((x) => isValidDate(x.date) && x.date < date).sort((x, y) => x.date.localeCompare(y.date))) {
+    const now = nowIso();
+    const day: DailyRecord = { id: uid(), date: d.date, sourceDate: null, status: 'closed', notes: nb.source, closedAt: now, createdAt: now, updatedAt: now };
+    await db.dailyRecords.add(day);
+    await db.dailyStockItems.bulkAdd(variants.map((x) => ({
+      id: uid(), dailyRecordId: day.id, variantId: x.id, initialQuantity: x.startQuantity, currentQuantity: x.startQuantity,
+    })));
+    await db.cashRecords.add({ id: uid(), dailyRecordId: day.id, openingBalanceInCents: 0, openingManual: false, countedBalanceInCents: null, status: 'closed' });
+    await addNotebookLines(day, d.lines);
+  }
+}
+
+/** Lança no caixa do dia as linhas do caderno, na ordem e com horários espaçados. Não mexe no estoque. */
+async function addNotebookLines(day: DailyRecord, lines?: NotebookLine[]) {
+  if (!lines?.length) return;
+  const at = (i: number) => new Date(`${day.date}T${String(9 + Math.floor(i / 2)).padStart(2, '0')}:${i % 2 ? '30' : '00'}:00`).toISOString();
+  await db.cashMovements.bulkAdd(lines.map((l, i) => {
+    const base = { id: uid(), dailyRecordId: day.id, relatedOrderId: null, createdAt: at(i), paymentMethod: 'dinheiro' as PaymentMethod };
+    if (l.kind === 'venda') return { ...base, type: 'venda' as const, amountInCents: l.cents, paymentMethod: l.method, quantity: l.qty,
+      description: l.qty > 1 && l.cents % l.qty === 0 ? `${l.qty}× ${money(l.cents / l.qty)} · caderno` : 'caderno' };
+    if (l.kind === 'dar') return { ...base, type: 'dar' as const, amountInCents: l.cents, person: l.person, description: 'caderno' };
+    return { ...base, type: 'pagamento' as const, amountInCents: l.cents, quantity: l.days, description: 'caderno' };
+  }));
 }
 
 export async function ensureItem(dailyRecordId: string, variantId: string) {
