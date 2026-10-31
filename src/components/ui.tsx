@@ -1,4 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 
 // ---------------- botões e blocos ----------------
 
@@ -33,7 +34,7 @@ export function Chip({ active, className = '', ...p }: React.ButtonHTMLAttribute
   return (
     <button
       {...p}
-      className={`shrink-0 h-9 px-3.5 rounded-full text-sm font-medium border transition
+      className={`shrink-0 h-10 px-4 rounded-full text-sm font-medium border transition
         ${active ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-600 border-slate-200 active:bg-slate-100'} ${className}`}
     />
   );
@@ -94,7 +95,8 @@ export function Input(p: React.InputHTMLAttributes<HTMLInputElement>) {
 
 export function Toggle({ checked, onChange, label }: { checked: boolean; onChange: (v: boolean) => void; label: string }) {
   return (
-    <button type="button" onClick={() => onChange(!checked)} className="flex items-center justify-between w-full py-2.5">
+    <button type="button" role="switch" aria-checked={checked} aria-label={label || (checked ? 'Ligado' : 'Desligado')} onClick={() => onChange(!checked)}
+      className={`flex items-center justify-between py-2.5 min-h-11 ${label ? 'w-full' : 'shrink-0'}`}>
       <span className="text-[15px] text-slate-700">{label}</span>
       <span className={`w-12 h-7 rounded-full p-0.5 transition ${checked ? 'bg-blue-600' : 'bg-slate-300'}`}>
         <span className={`block w-6 h-6 rounded-full bg-white shadow transition ${checked ? 'translate-x-5' : ''}`} />
@@ -117,21 +119,44 @@ export function Stepper({ value, onChange, min = 0, max }: { value: number; onCh
 
 // ---------------- folha inferior (modal) ----------------
 
-export function Sheet({ open, onClose, title, children, footer, tall }:
-  { open: boolean; onClose: () => void; title?: ReactNode; children: ReactNode; footer?: ReactNode; tall?: boolean }) {
+// janelas abertas, da mais antiga para a mais nova (o voltar do celular e o Esc fecham a de cima)
+const sheetStack: { close: () => void }[] = [];
+export function closeTopSheet() {
+  const top = sheetStack[sheetStack.length - 1];
+  if (!top) return false;
+  top.close();
+  return true;
+}
+if (typeof window !== 'undefined')
+  window.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeTopSheet(); });
+
+/** Registra uma janela aberta: o voltar do celular/Esc fecha a de cima e a página atrás não rola. */
+function useOverlay(open: boolean, onClose: () => void) {
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
   useEffect(() => {
     if (!open) return;
-    const prev = document.body.style.overflow;
+    const entry = { close: () => closeRef.current() };
+    sheetStack.push(entry);
     document.body.style.overflow = 'hidden';
-    return () => { document.body.style.overflow = prev; };
+    return () => {
+      const i = sheetStack.indexOf(entry);
+      if (i >= 0) sheetStack.splice(i, 1);
+      if (!sheetStack.length) document.body.style.overflow = '';
+    };
   }, [open]);
+}
+
+export function Sheet({ open, onClose, title, children, footer, tall }:
+  { open: boolean; onClose: () => void; title?: ReactNode; children: ReactNode; footer?: ReactNode; tall?: boolean }) {
+  useOverlay(open, onClose);
   if (!open) return null;
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center">
       <div className="absolute inset-0 bg-slate-900/40 animate-fade" onClick={onClose} />
       <div className={`relative w-full max-w-lg bg-slate-50 rounded-t-3xl shadow-2xl flex flex-col animate-up ${tall ? 'h-[92dvh]' : 'max-h-[92dvh]'}`}>
         <div className="flex items-center justify-between px-5 pt-3 pb-2">
-          <div className="text-lg font-bold text-slate-800 truncate">{title}</div>
+          <div className="text-lg font-bold text-slate-800 break-words">{title}</div>
           <button onClick={onClose} className="w-9 h-9 rounded-full bg-slate-200/70 text-slate-600 text-lg" aria-label="Fechar">✕</button>
         </div>
         <div className="overflow-y-auto px-5 pb-4 flex-1 overscroll-contain">{children}</div>
@@ -175,6 +200,7 @@ export function UiProvider({ children }: { children: ReactNode }) {
     }
   }, [toast]);
   const close = (v: boolean) => { req?.resolve(v); setReq(null); };
+  useOverlay(!!req, () => close(false));
   return (
     <UiCtx.Provider value={{ toast, confirm, run }}>
       {children}
@@ -224,4 +250,88 @@ export function useBusy() {
     try { await fn(); } finally { lock.current = false; setBusy(false); }
   }, []);
   return [busy, wrap] as const;
+}
+
+/**
+ * ⓘ que explica o número/termo com um exemplo. No celular abre um cartão no meio da tela
+ * (toque para abrir e para fechar).
+ */
+export function InfoTip({ title, children, example, action, open: openProp, onOpenChange, hideButton }: {
+  title: string; children: ReactNode;
+  /** de preferência uma lista curta: [emoji, texto] por linha */
+  example?: ReactNode | [ReactNode, ReactNode][];
+  /** botão extra dentro do cartão (ex.: "Ver no Estoque") */
+  action?: { label: string; onClick: () => void };
+  /** controlado por fora (ex.: o cartão inteiro abre a explicação) */
+  open?: boolean; onOpenChange?: (v: boolean) => void; hideButton?: boolean;
+}) {
+  const [openState, setOpenState] = useState(false);
+  const open = openProp ?? openState;
+  const setOpen = (v: boolean) => { onOpenChange?.(v); if (openProp === undefined) setOpenState(v); };
+  useOverlay(open, () => setOpen(false));
+  return (
+    <>
+      {!hideButton && (
+        // o círculo é pequeno, mas a área de toque tem 44px (não precisa mirar)
+        <button type="button" aria-label={`O que é: ${title}`}
+          onClick={(e) => { e.stopPropagation(); setOpen(true); }}
+          className="relative inline-flex items-center justify-center w-6 h-6 rounded-full bg-slate-200 text-slate-600 text-[12px] font-bold align-middle shrink-0
+            after:content-[''] after:absolute after:-inset-[10px] active:bg-slate-300">i</button>
+      )}
+      {open && createPortal(
+        // fora do título/cartão onde o ⓘ está: não herda maiúsculas nem negrito
+        <div className="fixed inset-0 z-[65] flex items-center justify-center p-5 normal-case tracking-normal font-normal text-left"
+          onClick={(e) => { e.stopPropagation(); setOpen(false); }}>
+          <div className="absolute inset-0 bg-slate-900/40 animate-fade" />
+          <div className="relative bg-white rounded-3xl p-5 w-full max-w-sm shadow-2xl animate-pop" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center gap-2.5">
+              <span className="w-9 h-9 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center font-bold">i</span>
+              <div className="text-[17px] font-bold text-slate-800 leading-tight">{title}</div>
+            </div>
+            <div className="text-[15px] leading-relaxed text-slate-600 mt-3">{children}</div>
+            {example && (
+              <div className="mt-4 rounded-2xl bg-amber-50 border border-amber-200/70 overflow-hidden">
+                <div className="px-3.5 pt-2.5 text-[12px] font-semibold text-amber-700 tracking-wide">💡 Por exemplo</div>
+                {Array.isArray(example) ? (
+                  <ul className="px-3.5 pb-3 pt-1.5 space-y-2">
+                    {(example as [ReactNode, ReactNode][]).map(([emoji, text], i) => (
+                      <li key={i} className="flex items-start gap-2.5 text-[15px] leading-snug text-slate-700">
+                        <span className="min-w-6 flex justify-center text-[17px] leading-tight shrink-0">{emoji}</span>
+                        <span className="flex-1">{text}</span>
+                      </li>
+                    ))}
+                  </ul>
+                ) : <div className="px-3.5 pb-3 pt-1 text-[15px] leading-relaxed text-slate-700">{example}</div>}
+              </div>
+            )}
+            {action ? (
+              <div className="grid grid-cols-2 gap-2 mt-5">
+                <Button variant="soft" onClick={() => setOpen(false)}>Entendi</Button>
+                <Button onClick={() => { setOpen(false); action.onClick(); }}>{action.label}</Button>
+              </div>
+            ) : <Button className="w-full mt-5" onClick={() => setOpen(false)}>Entendi</Button>}
+          </div>
+        </div>,
+        document.body,
+      )}
+    </>
+  );
+}
+
+/** Botão de ajuda compacto ("🛍️ Como vender ⓘ"): abre a explicação com exemplo. Ocupa uma linha só. */
+export function HelpButton({ icon, label, title, children, example }: {
+  icon: string; label: string; title: string; children: ReactNode; example?: ReactNode | [ReactNode, ReactNode][];
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <button type="button" onClick={() => setOpen(true)}
+        className="flex-1 min-w-0 h-11 px-3 rounded-xl bg-white border border-slate-200 flex items-center gap-2 text-left active:bg-slate-50">
+        <span className="text-lg">{icon}</span>
+        <span className="flex-1 break-words text-[14px] font-semibold text-slate-700">{label}</span>
+        <span className="w-5 h-5 rounded-full bg-slate-200 text-slate-600 text-[11px] font-bold flex items-center justify-center">i</span>
+      </button>
+      <InfoTip hideButton open={open} onOpenChange={setOpen} title={title} example={example}>{children}</InfoTip>
+    </>
+  );
 }

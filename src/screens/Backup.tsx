@@ -1,7 +1,8 @@
+import { useLiveQuery } from 'dexie-react-hooks';
 import { useRef, useState } from 'react';
 import { fmtDate, todayStr } from '../lib/util';
 import {
-  backupFileName, buildBackup, decodeTextBackup, encodeTextBackup, markBackupDone, restoreBackup, shareOrDownloadFile,
+  getSafetyCopy, undoLastRestore, readFileText, backupFileName, buildBackup, decodeTextBackup, encodeTextBackup, markBackupDone, restoreBackup, shareOrDownloadFile,
   summarizeBackup, validateBackup, type BackupFile,
 } from '../services/backup';
 import { buildCsv, type CsvKind } from '../services/csv';
@@ -24,9 +25,8 @@ export default function BackupSheet({ open, onClose }: { open: boolean; onClose:
     if (r !== 'aborted') { await markBackupDone(); toast(r === 'shared' ? 'Backup compartilhado' : 'Backup salvo em Downloads'); }
   });
   const genText = () => wrap(async () => {
-    const b = await buildBackup();
-    setParts(encodeTextBackup(b));
-    await markBackupDone();
+    const p = await run(async () => encodeTextBackup(await buildBackup()));
+    if (p) { setParts(p); await markBackupDone(); }
   });
   const askRestore = async (b: BackupFile) => {
     const s = summarizeBackup(b);
@@ -40,17 +40,18 @@ export default function BackupSheet({ open, onClose }: { open: boolean; onClose:
     });
     if (ok) {
       const r = await run(() => restoreBackup(b), 'Backup restaurado!');
-      if (r) { setPasted(''); onClose(); }
+      // recarrega para todas as telas, carrinho e seleção partirem dos dados restaurados
+      if (r) { setPasted(''); onClose(); setTimeout(() => location.reload(), 600); }
     }
   };
   const fromFile = async (f: File) => {
     try {
-      const b = validateBackup(JSON.parse(await f.text()));
+      const b = validateBackup(JSON.parse(await readFileText(f)));
       askRestore(b);
     } catch (e) { toast(e instanceof SyntaxError ? 'Arquivo não é um JSON válido.' : (e as Error).message, 'err'); }
   };
   const fromText = () => {
-    try { askRestore(decodeTextBackup(pasted)); } catch (e) { toast((e as Error).message, 'err'); }
+    decodeTextBackup(pasted).then(askRestore).catch((e) => toast((e as Error).message, 'err'));
   };
   const csv = (k: CsvKind) => wrap(async () => {
     const content = await buildCsv(k, k === 'estoque' ? day?.id : undefined);
@@ -59,6 +60,7 @@ export default function BackupSheet({ open, onClose }: { open: boolean; onClose:
 
   return (
     <Sheet open onClose={onClose} title="💾 Backup e restauração" tall>
+      <UndoRestoreCard />
       <Card className="p-3 bg-orange-50 border-orange-200 text-sm text-orange-900">
         Os dados ficam <b>só neste aparelho</b>. Podem ser perdidos se o navegador for limpo, o app desinstalado ou o celular perdido.
         Faça backup com frequência e guarde no WhatsApp, e-mail ou Drive.
@@ -77,12 +79,13 @@ export default function BackupSheet({ open, onClose }: { open: boolean; onClose:
           <div className="font-semibold text-slate-700 mb-2">Backup em texto · {parts.length} {parts.length === 1 ? 'parte' : 'partes'}</div>
           {parts.map((p, i) => (
             <div key={i} className="flex items-center gap-2 mb-1.5">
-              <code className="flex-1 text-[10px] bg-slate-100 rounded px-2 py-1.5 truncate">{p.slice(0, 60)}…</code>
+              <code className="flex-1 text-[10px] bg-slate-100 rounded px-2 py-1.5 break-words">{p.slice(0, 60)}…</code>
               <Button size="sm" variant="soft" onClick={async () => { if (await copyText(p)) toast(`Parte ${i + 1} copiada`); }}>Copiar {parts.length > 1 ? i + 1 : ''}</Button>
               {navigator.share && <Button size="sm" variant="soft" onClick={() => navigator.share({ text: p }).catch(() => {})}>📤</Button>}
             </div>
           ))}
           <p className="text-xs text-slate-500">Para restaurar, cole todas as partes (em qualquer ordem).</p>
+          {parts.length > 3 && <p className="text-xs text-orange-700 mt-1">São muitas partes: com meses de uso, prefira <b>📁 Arquivo</b> (é um só).</p>}
         </Card>
       )}
 
@@ -91,7 +94,7 @@ export default function BackupSheet({ open, onClose }: { open: boolean; onClose:
       <input ref={fileRef} type="file" accept=".json,application/json" className="hidden"
         onChange={(e) => { const f = e.target.files?.[0]; if (f) fromFile(f); e.target.value = ''; }} />
       <textarea value={pasted} onChange={(e) => setPasted(e.target.value)} placeholder="…ou cole aqui o texto do backup (ESTOQUE_BACKUP_V1 …)"
-        className="w-full h-28 mt-2 p-3 rounded-xl border border-slate-300 text-xs font-mono outline-none focus:border-blue-500" />
+        className="w-full h-28 mt-2 p-3 rounded-xl border border-slate-300 text-base font-mono outline-none focus:border-blue-500" />
       <Button variant="outline" className="w-full mt-1" disabled={!pasted.trim()} onClick={fromText}>Restaurar pelo texto</Button>
       <p className="text-xs text-slate-500 mt-1.5">O backup é conferido antes. Se estiver incompleto ou corrompido, nada é alterado.</p>
 
@@ -103,5 +106,24 @@ export default function BackupSheet({ open, onClose }: { open: boolean; onClose:
       </div>
       <p className="text-xs text-slate-500 mt-1.5">CSV abre no Excel/Planilhas. Não substitui o backup completo.</p>
     </Sheet>
+  );
+}
+
+function UndoRestoreCard() {
+  const { run, confirm } = useUi();
+  const saved = useLiveQuery(() => getSafetyCopy(), []);
+  if (!saved) return null;
+  return (
+    <Card className="p-3 mb-3 border-amber-200 bg-amber-50">
+      <div className="text-[14px] text-amber-900">
+        <b>Recebeu ou restaurou e se arrependeu?</b> O app guardou como estava em {new Date(saved.createdAt).toLocaleString('pt-BR')} ({saved.summary}).
+      </div>
+      <Button variant="outline" className="w-full mt-2" onClick={async () => {
+        if (await confirm({ title: 'Voltar como estava?', confirm: 'Voltar', message: 'Os dados de agora ficam guardados no lugar, então dá para refazer depois se mudar de ideia.' })) {
+          const r = await run(() => undoLastRestore(), 'Voltou como estava');
+          if (r) setTimeout(() => location.reload(), 600);
+        }
+      }}>↩ Voltar como estava antes</Button>
+    </Card>
   );
 }

@@ -19,6 +19,7 @@ let n = 0;
 beforeEach(async () => {
   useDatabase(new AppDB(`test-${n++}-${Math.random()}`));
   await seedIfNeeded();
+  await db.variants.toCollection().modify({ forSale: true }); await db.settings.where('key').equals('initialOpening').delete(); // testes de regra vendem qualquer peça
 });
 
 const variantId = async (group: string, name: string) => {
@@ -178,7 +179,7 @@ describe('caixa e relatório do caderno', () => {
     expect(nb).toContain('935 - 50 = 885');
     expect(nb).toContain('Ontem 645 + 885 = 1.530 - 300 = 1.230');
     const wa = whatsappReport(d.date, s);
-    expect(wa).toContain('Vendeu: 935');
+    expect(wa).toContain('Vendeu: *935*');
     expect(wa).toContain('Precisa repor');
     // o dia seguinte começa com o saldo acumulado
     const amanha = await startDay('2026-11-01');
@@ -268,18 +269,18 @@ describe('comparação e backup', () => {
     const v = await variantId('Lila', 'Azul');
     await createOrder({ orderId: uid(), dailyRecordId: d.id, paymentMethod: 'pix', lines: [{ variantId: v, quantity: 2, unitPriceInCents: 7000 }] });
     const backup = await buildBackup();
-    const parts = encodeTextBackup(backup, 2000);
+    const parts = await encodeTextBackup(backup, 500);
     expect(parts.length).toBeGreaterThan(1);
     expect(parts[0].startsWith('ESTOQUE_BACKUP_V1')).toBe(true);
 
     // banco novo, vazio
     useDatabase(new AppDB(`restore-${Math.random()}`));
-    expect(() => decodeTextBackup(parts.slice(1).join('\n'))).toThrow(/Faltam partes/);
+    await expect(decodeTextBackup(parts.slice(1).join('\n'))).rejects.toThrow(/Faltam partes/);
     const broken = parts.join('\n').replace(/[A-Za-z0-9]{40}/, (m) => m.split('').reverse().join(''));
-    expect(() => decodeTextBackup(broken)).toThrow();
+    await expect(decodeTextBackup(broken)).rejects.toThrow();
     expect(await db.groups.count()).toBe(0);
 
-    await restoreBackup(decodeTextBackup([...parts].reverse().join('\n\n')));
+    await restoreBackup(await decodeTextBackup([...parts].reverse().join('\n\n')));
     expect(await db.groups.count()).toBe(9);
     expect((await db.groups.get(plomo.id))!.name).toBe('Plomo Premium');
     expect((await db.groups.toArray()).find((x) => x.name === 'Camisa')!.archivedAt).toBeTruthy();
@@ -361,10 +362,10 @@ describe('gaps corrigidos', () => {
     expect((await runDiagnostics()).findings.filter((f) => f.level === 'erro')).toEqual([]);
     const item = await db.dailyStockItems.where('[dailyRecordId+variantId]').equals([d.id, v]).first();
     await db.dailyStockItems.update(item!.id, { currentQuantity: 99 });
-    await db.cashMovements.where('relatedOrderId').equals(o.id).delete();
+    await db.cashMovements.where('relatedOrderId').equals(o.id).filter((c) => c.type === 'estorno').delete();
     const errs = (await runDiagnostics()).findings.filter((f) => f.level === 'erro').map((f) => f.title);
     expect(errs.some((t) => t.startsWith('Estoque não bate'))).toBe(true);
-    expect(errs.some((t) => t.includes('recebimentos no caixa'))).toBe(true);
+    expect(errs.some((t) => t.includes('estorno completo no caixa'))).toBe(true);
   });
 });
 
@@ -403,5 +404,95 @@ describe('melhorias 1–3', () => {
     await moveStock(d.id, v, 4, 'entrada');
     await setStock(d.id, v, 4);
     expect(await qty(d.id, v)).toBe(4);
+  });
+});
+
+describe('lista oficial: o que está à venda', () => {
+  it('só Azul, Plomo e Lila à venda; os outros grupos guardados; estoque e quantidades iguais à lista', async () => {
+    useDatabase(new AppDB(`oficial-${Math.random()}`));
+    await seedIfNeeded();
+    const groups = await db.groups.toArray();
+    const vs = await db.variants.toArray();
+    const byGroup = (n: string) => vs.filter((v) => v.groupId === groups.find((g) => g.name === n)!.id);
+    for (const n of ['Azul', 'Plomo', 'Lila']) expect(byGroup(n).every((v) => v.forSale === true), n).toBe(true);
+    for (const n of ['Broche', 'Camisa', 'Broche Médio', 'Naranja', 'Dorado']) expect(byGroup(n).every((v) => v.forSale === false), n).toBe(true);
+    expect(vs.reduce((s, v) => s + v.startQuantity, 0)).toBe(238);
+    expect((await getSetting('sellGroups')).map((s) => s.pendingName ?? groups.find((g) => g.id === s.groupId)?.name)).toEqual(['Azul', 'Plomo', 'Lila', 'Broche Rey']);
+    // Broche Rey cadastrado depois: já nasce à venda
+    const rey = await registerPendingSellGroup('Broche Rey');
+    const v = await createVariant({ groupId: rey.id, name: 'Dourado', startQuantity: 4 });
+    expect((await db.variants.get(v.id))!.forSale).toBe(true);
+    // cor nova num grupo guardado nasce guardada
+    const broche = groups.find((g) => g.name === 'Broche')!;
+    const nv = await createVariant({ groupId: broche.id, name: 'Lilás' });
+    expect((await db.variants.get(nv.id))!.forSale).toBe(false);
+  });
+  it('aparelho que já tinha dados recebe o padrão uma vez, sem desfazer o que a pessoa mudou', async () => {
+    useDatabase(new AppDB(`antigo-${Math.random()}`));
+    await seedIfNeeded();
+    await db.settings.where('key').equals('forSaleDefaults').delete();
+    await db.variants.toCollection().modify((v) => { delete (v as { forSale?: boolean }).forSale; });
+    await seedIfNeeded(); // abre o app de novo
+    const camisa = (await db.groups.toArray()).find((g) => g.name === 'Camisa')!;
+    const cv = (await db.variants.where('groupId').equals(camisa.id).toArray())[0];
+    expect(cv.forSale).toBe(false);
+    await db.variants.update(cv.id, { forSale: true }); // a pessoa pôs à venda
+    await seedIfNeeded();
+    expect((await db.variants.get(cv.id))!.forSale).toBe(true);
+  });
+});
+
+describe('dados iniciais oficiais (caderno de 30/10)', () => {
+  it('31/10: o dia já começa com as vendas do caderno; ontem é 0; segundo dia continua dele', async () => {
+    useDatabase(new AppDB(`caderno-${Math.random()}`));
+    await seedIfNeeded();
+    const d1 = await startDay('2026-10-31');
+    let c = await computeCash(d1.id);
+    expect([c.opening, c.salesByMethod.dinheiro, c.salesByMethod.cartao, c.salesByMethod.debito]).toEqual([0, 64500, 75375, 7605]);
+    expect([c.accumulated, c.cashOnHand, c.otherBalance, c.notebookCount, c.notebookUnits]).toEqual([147480, 64500, 82980, 9, 20]);
+    const rows = await loadStockRows(d1.id, d1.date);
+    expect(rows.reduce((s, r) => s + r.item.currentQuantity, 0)).toBe(238);
+    expect((await runDiagnostics()).findings.filter((f) => f.level === 'erro')).toEqual([]);
+    // venda nova no app soma às do caderno
+    const g = (await db.groups.toArray()).find((x) => x.name === 'Azul')!;
+    const v = (await db.variants.where('groupId').equals(g.id).toArray()).find((x) => x.name === 'Verde Piscina')!;
+    await createOrder({ orderId: uid(), dailyRecordId: d1.id, paymentMethod: 'dinheiro', lines: [{ variantId: v.id, quantity: 1, unitPriceInCents: 7000 }] });
+    await addCashMovement({ dailyRecordId: d1.id, type: 'retirada', amountInCents: 30000 });
+    c = await computeCash(d1.id);
+    expect(c.cashOnHand).toBe(64500 + 7000 - 30000);
+    expect((await daySummary(d1.id, d1.date)).salesCount).toBe(10);
+    const d2 = await startDay('2026-11-01');
+    expect((await computeCash(d2.id)).openingCash).toBe(41500);
+    expect((await computeCash(d2.id)).notebookCount).toBe(0);
+  });
+  it('outro dia que não o do caderno começa zerado', async () => {
+    useDatabase(new AppDB(`caderno2-${Math.random()}`));
+    await seedIfNeeded();
+    const d = await startDay('2026-11-02');
+    expect((await computeCash(d.id)).accumulated).toBe(0);
+  });
+  it('crédito e débito ficam separados', async () => {
+    useDatabase(new AppDB(`cartoes-${Math.random()}`));
+    await seedIfNeeded();
+    await db.settings.where('key').equals('initialOpening').delete();
+    const d = await startDay('2026-10-30');
+    const v = (await db.variants.toArray()).find((x) => x.forSale && x.startQuantity >= 2)!;
+    await createOrder({ orderId: uid(), dailyRecordId: d.id, paymentMethod: 'cartao', lines: [{ variantId: v.id, quantity: 1, unitPriceInCents: 75375 }] });
+    await createOrder({ orderId: uid(), dailyRecordId: d.id, paymentMethod: 'debito', lines: [{ variantId: v.id, quantity: 1, unitPriceInCents: 7605 }] });
+    const c = await computeCash(d.id);
+    expect([c.salesByMethod.cartao, c.salesByMethod.debito, c.cashOnHand]).toEqual([75375, 7605, 0]);
+  });
+  it('recomeçar com os dados iniciais apaga os testes e dá para voltar como estava', async () => {
+    const { resetToInitialData, undoLastRestore } = await import('../services/backup');
+    useDatabase(new AppDB(`reset-${Math.random()}`));
+    await seedIfNeeded();
+    const d = await startDay('2026-10-20');
+    await addCashMovement({ dailyRecordId: d.id, type: 'entrada', amountInCents: 1000 });
+    await resetToInitialData();
+    expect(await db.dailyRecords.count()).toBe(0);
+    expect(await db.variants.count()).toBe(51);
+    expect((await getSetting('sellGroups')).length).toBe(4);
+    await undoLastRestore();
+    expect(await db.dailyRecords.count()).toBe(1);
   });
 });

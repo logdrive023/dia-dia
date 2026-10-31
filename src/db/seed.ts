@@ -32,13 +32,57 @@ export const SEED_DATA: { name: string; color: string; icon: string; variants: [
 
 export const INITIAL_SELL_GROUPS = ['Azul', 'Plomo', 'Lila', 'Broche Rey'];
 
+/**
+ * Caderno de hoje, sábado 31/10/26 (antes do app): ao iniciar o dia, cada venda anotada já entra no caixa.
+ * Dinheiro 645 · Crédito 753,75 · Débito 76,05 = 1.474,80. Dias anteriores: sem dados (começa em 0).
+ * O caderno não diz a peça, então não mexe no estoque (a lista oficial já é depois das vendas).
+ */
+export const INITIAL_OPENING = {
+  date: '2026-10-31',
+  source: 'Caderno 31/10/26 (sábado)',
+  total: 64500 + 75375 + 7605,
+  cash: 64500,
+  // [quantidade, valor em centavos, forma]
+  sales: [
+    [1, 7500, 'dinheiro'], [1, 7000, 'dinheiro'], [2, 15000, 'dinheiro'], [1, 7000, 'dinheiro'],
+    [1, 7000, 'dinheiro'], [2, 14000, 'dinheiro'], [10, 75375, 'cartao'], [1, 7000, 'dinheiro'],
+    [1, 7605, 'debito'],
+  ] as [number, number, 'dinheiro' | 'cartao' | 'debito'][],
+};
+
 export const VARIANT_COLOR: Record<string, string> = {
   Vermelho: '#ef4444', Branco: '#f8fafc', Amarelo: '#facc15', Preto: '#111827',
   'Verde Piscina': '#2dd4bf', Rosa: '#f472b6', Azul: '#3b82f6', Celeste: '#7dd3fc',
   Café: '#92400e', Verde: '#22c55e', Poa: 'poa',
 };
 
+/**
+ * Lista oficial: nem tudo que está no estoque está à venda. À venda ficam só os grupos de "Para vender"
+ * (Azul, Plomo, Lila e Broche Rey quando for cadastrado); os outros ficam guardados no estoque.
+ */
 export async function seedIfNeeded(): Promise<boolean> {
+  const created = await seedOnce();
+  await applyForSaleDefaults();
+  return created;
+}
+
+/** Aplica uma vez em aparelhos que já tinham dados (só se ninguém mexeu ainda em “à venda/guardada”). */
+async function applyForSaleDefaults() {
+  await db.transaction('rw', db.groups, db.variants, db.settings, async () => {
+    if (await db.settings.where('key').equals('forSaleDefaults').first()) return;
+    const variants = await db.variants.toArray();
+    if (variants.some((v) => v.forSale !== undefined)) {
+      await db.settings.add({ id: uid(), key: 'forSaleDefaults', value: 'pulado (já personalizado)' });
+      return;
+    }
+    const sell = ((await db.settings.where('key').equals('sellGroups').first())?.value ?? []) as SellEntry[];
+    const sellIds = new Set(sell.map((e) => e.groupId).filter(Boolean));
+    for (const v of variants) await db.variants.update(v.id, { forSale: sellIds.has(v.groupId) });
+    await db.settings.add({ id: uid(), key: 'forSaleDefaults', value: nowIso() });
+  });
+}
+
+async function seedOnce(): Promise<boolean> {
   return db.transaction('rw', db.groups, db.variants, db.settings, async () => {
     const done = await db.settings.where('key').equals('seedDone').first();
     if (done || (await db.groups.count()) > 0) return false;
@@ -52,7 +96,7 @@ export async function seedIfNeeded(): Promise<boolean> {
       g.variants.forEach(([name, qty], vi) => {
         variants.push({ id: uid(), groupId, name, color: VARIANT_COLOR[name], displayOrder: vi, active: true,
           archivedAt: null, minimumStock: null, startQuantity: qty, optionalPriceInCents: null,
-          createdAt: now, updatedAt: now });
+          forSale: INITIAL_SELL_GROUPS.includes(g.name), createdAt: now, updatedAt: now });
       });
     });
     await db.groups.bulkAdd(groups);
@@ -65,6 +109,8 @@ export async function seedIfNeeded(): Promise<boolean> {
     await db.settings.bulkAdd([
       { id: uid(), key: 'seedDone', value: now },
       { id: uid(), key: 'sellGroups', value: sell },
+      { id: uid(), key: 'forSaleDefaults', value: now },
+      { id: uid(), key: 'initialOpening', value: INITIAL_OPENING },
     ]);
     return true;
   });

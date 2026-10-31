@@ -9,7 +9,7 @@ import {
   updateGroup, updateVariant, variantHasHistory,
 } from '../services/catalog';
 import { useApp } from '../state';
-import { Badge, Button, Card, Field, Input, Sheet, Swatch, Toggle, useBusy, useUi } from '../components/ui';
+import { Badge, Button, Card, Field, InfoTip, Input, Sheet, Swatch, Toggle, useBusy, useUi } from '../components/ui';
 
 const ICONS = ['📦', '🎀', '💜', '📌', '📍', '👕', '🧡', '✨', '💙', '👑', '💎', '🌸', '⭐', '🔥', '🆕', '🎁', '👜', '🧢', '🧦', '💍', '🌈', '🍀', '❤️', '🖤'];
 const VCOLORS = ['poa', '#f8fafc', '#111827', ...COLORS.filter((c) => c !== '#111827')];
@@ -43,24 +43,39 @@ export default function CatalogSheet({ open, onClose }: { open: boolean; onClose
         <Button onClick={() => setQuick('group')}>＋ Grupo</Button>
         <Button variant="outline" onClick={() => setQuick('variant')}>＋ Variação</Button>
       </div>
-      <Input placeholder="🔍 Buscar..." value={q} onChange={(e) => setQ(e.target.value)} />
-      <div className="space-y-1.5 mt-3">
+      <Input placeholder="🔍 Buscar grupo ou cor..." value={q} onChange={(e) => setQ(e.target.value)} />
+      {!nq && (
+        <div className="flex items-center gap-2 mt-4 mb-1 px-1">
+          <span className="flex-1 text-[13px] font-bold text-slate-600">📋 Ordem dos grupos nas telas</span>
+          <InfoTip title="Ordem dos grupos" example={[
+            ['1️⃣', <><b>Plomo</b> está em 1º → aparece primeiro no Início, no Estoque e no Vender</>],
+            ['⬇️', <>Toque em <b>Descer</b> no Plomo → ele vira o 2º e o Lila sobe para 1º</>],
+            ['⬆️', <>Vende muito Azul? Toque em <b>Subir</b> até ele chegar em 1º</>],
+          ]}>As setas só mudam a posição na fila (quem aparece antes). Não mexem em quantidades nem vendas.</InfoTip>
+        </div>
+      )}
+      <div className="space-y-1.5 mt-1">
         {list.map((g, i) => matches(g) && (
-          <Card key={g.id} className={`flex items-center gap-2 p-2 pl-3 ${g.active ? '' : 'opacity-60'}`}>
+          <Card key={g.id} className={`flex items-center gap-2 p-2 pl-2 ${g.active ? '' : 'opacity-60'}`}>
+            {!nq && <span className="w-7 h-7 shrink-0 rounded-full bg-slate-800 text-white text-[12px] font-bold flex items-center justify-center tabular-nums" title="Posição na fila">{i + 1}º</span>}
             <button className="flex-1 flex items-center gap-2.5 text-left min-w-0" onClick={() => setEdit(g.id)}>
               <span className="w-9 h-9 rounded-lg flex items-center justify-center text-lg" style={{ background: g.color + '22' }}>{g.icon}</span>
               <span className="min-w-0">
-                <span className="block font-bold text-slate-800 truncate">{g.name}</span>
+                <span className="block font-bold text-slate-800 break-words">{g.name}</span>
                 <span className="block text-xs text-slate-500">
-                  {data!.variants.filter((v) => v.groupId === g.id && !v.archivedAt).length} variações
+                  {(() => { const n = data!.variants.filter((v) => v.groupId === g.id && !v.archivedAt).length; return `🎨 ${n} ${n === 1 ? 'cor' : 'cores'} · toque para editar`; })()}
                   {!g.active && ' · desativado'}
                   {g.categoryIds?.map((c) => { const cat = data!.categories.find((x) => x.id === c); return cat ? <span key={c} className="ml-1 font-semibold" style={{ color: cat.color }}>#{cat.name}</span> : null; })}
                 </span>
               </span>
             </button>
             {!nq && <>
-              <button className="w-9 h-9 rounded-lg bg-slate-100" onClick={() => move(i, -1)} aria-label="Subir">↑</button>
-              <button className="w-9 h-9 rounded-lg bg-slate-100" onClick={() => move(i, 1)} aria-label="Descer">↓</button>
+              <button disabled={i === 0} className="w-12 h-12 rounded-lg bg-slate-100 active:bg-slate-200 disabled:opacity-30 flex flex-col items-center justify-center leading-none" onClick={() => move(i, -1)} aria-label={`Subir ${g.name}`}>
+                <span className="text-base">↑</span><span className="text-[9px] font-semibold text-slate-500 mt-0.5">subir</span>
+              </button>
+              <button disabled={i === list.length - 1} className="w-12 h-12 rounded-lg bg-slate-100 active:bg-slate-200 disabled:opacity-30 flex flex-col items-center justify-center leading-none" onClick={() => move(i, 1)} aria-label={`Descer ${g.name}`}>
+                <span className="text-base">↓</span><span className="text-[9px] font-semibold text-slate-500 mt-0.5">descer</span>
+              </button>
             </>}
           </Card>
         ))}
@@ -92,36 +107,79 @@ function QuickAdd({ kind, onClose, groups, onCreatedGroup }: { kind: 'group' | '
   const [busy, wrap] = useBusy();
   const [name, setName] = useState('');
   const [groupId, setGroupId] = useState('');
-  const [qty, setQty] = useState('');
+  const [qty, setQty] = useState(0);
+  const [color, setColor] = useState<string | undefined>();
   if (!kind) return null;
   const gid = groupId || groups[0]?.id;
+  const group = groups.find((g) => g.id === gid);
+  const close = () => { setName(''); setQty(0); setColor(undefined); onClose(); };
   const save = () => wrap(async () => {
     if (kind === 'group') {
       const g = await run(() => createGroup({ name }), 'Grupo criado');
       if (g) { setName(''); onClose(); onCreatedGroup(g.id); }
     } else {
-      const v = await run(() => createVariant({ groupId: gid, name, startQuantity: Number(qty) || 0, dailyRecordId: day?.status === 'open' ? day.id : null }), 'Variação criada');
-      if (v) { setName(''); setQty(''); }
+      const v = await run(() => createVariant({ groupId: gid, name, color, startQuantity: qty, dailyRecordId: day?.status === 'open' ? day.id : null }),
+        `${name.trim()} cadastrada em ${group?.name ?? ''}`);
+      if (v) { setName(''); setQty(0); setColor(undefined); } // continua aberto para cadastrar a próxima cor
     }
   });
-  return (
-    <Sheet open onClose={onClose} title={kind === 'group' ? 'Novo grupo' : 'Nova variação'}
-      footer={<Button size="lg" className="w-full" disabled={!name.trim() || busy} onClick={save}>Salvar</Button>}>
-      {kind === 'variant' && (
-        <Field label="Grupo">
-          <select value={gid} onChange={(e) => setGroupId(e.target.value)} className="w-full h-12 rounded-xl border border-slate-300 bg-white px-3">
-            {groups.map((g) => <option key={g.id} value={g.id}>{g.icon} {g.name}</option>)}
-          </select>
-        </Field>
-      )}
-      <Field label="Nome"><Input value={name} onChange={(e) => setName(e.target.value)} placeholder={kind === 'group' ? 'Ex.: Novidades' : 'Ex.: Verde'} autoFocus
+  if (kind === 'group') return (
+    <Sheet open onClose={close} title="📦 Novo grupo"
+      footer={<Button size="lg" className="w-full" disabled={!name.trim() || busy} onClick={save}>Salvar grupo</Button>}>
+      <p className="text-sm text-slate-500 mb-3">Grupo é o tipo de peça (ex.: Plomo, Broche). Depois você coloca as cores dentro dele.</p>
+      <Field label="Nome do grupo"><Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Ex.: Novidades" autoFocus
         onKeyDown={(e) => e.key === 'Enter' && name.trim() && save()} /></Field>
-      {kind === 'variant' && (
-        <Field label="Quantidade inicial (opcional)" hint={day?.status === 'open' ? 'Entra no estoque do dia selecionado.' : 'Usada quando o próximo dia for iniciado.'}>
-          <Input inputMode="numeric" value={qty} onChange={(e) => setQty(e.target.value.replace(/\D/g, ''))} placeholder="0" />
-        </Field>
-      )}
-      {kind === 'group' && <p className="text-sm text-slate-500">Ícone, cor e variações você ajusta em seguida.</p>}
+      <p className="text-xs text-slate-500">Ícone e cor você escolhe em seguida.</p>
+    </Sheet>
+  );
+  return (
+    <Sheet open onClose={close} title="🎨 Nova cor / variação" tall
+      footer={<Button size="lg" className="w-full" disabled={!name.trim() || busy} onClick={save}>
+        {name.trim() ? `Salvar ${name.trim()} em ${group?.name ?? ''}` : 'Salvar'}
+      </Button>}>
+      <div className="flex items-start gap-2 rounded-xl bg-blue-50 border border-blue-200 px-3 py-2.5 mb-4 text-[14px] text-blue-900">
+        <span className="flex-1">Variação é a cor ou modelo dentro de um grupo (ex.: Plomo <b>Verde</b>).</span>
+        <InfoTip title="Cadastrar uma cor" example={[
+          ['📦', <>Escolha o grupo: <b>Plomo</b></>],
+          ['✍️', <>Nome: <b>Verde</b> · bolinha verde</>],
+          ['🔢', <>Quantidade: <b>15</b> → entra 15 no estoque de hoje</>],
+          ['🔁', 'Esses 15 viram o estoque ideal: vendeu 1 → aparece “repor 1”'],
+          ['➕', 'Depois de salvar, já dá para cadastrar a próxima cor'],
+        ]}>A quantidade é opcional; dá para lançar depois na aba Estoque com o +.</InfoTip>
+      </div>
+
+      <div className="text-sm font-semibold text-slate-700 mb-1.5">1. Grupo</div>
+      <div className="flex gap-2 overflow-x-auto no-scrollbar -mx-5 px-5 pb-1 mb-4">
+        {groups.map((g) => (
+          <button key={g.id} onClick={() => setGroupId(g.id)}
+            className={`shrink-0 h-11 px-3 rounded-xl border-2 flex items-center gap-1.5 text-[14px] font-semibold ${g.id === gid ? 'border-blue-600 bg-blue-50 text-blue-800' : 'border-slate-200 bg-white text-slate-600'}`}>
+            <span>{g.icon}</span>{g.name}
+          </button>
+        ))}
+      </div>
+
+      <div className="text-sm font-semibold text-slate-700 mb-1.5">2. Nome e cor</div>
+      <div className="flex items-center gap-2 mb-2">
+        <Swatch color={color} size={44} />
+        <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Ex.: Verde" autoFocus onKeyDown={(e) => e.key === 'Enter' && name.trim() && save()} />
+      </div>
+      <div className="flex flex-wrap gap-2 mb-4">
+        {VCOLORS.map((c) => (
+          <button key={c} onClick={() => setColor(c)} aria-label={`Cor ${c}`} className={`rounded-full p-0.5 ${color === c ? 'ring-2 ring-blue-500' : ''}`}><Swatch color={c} size={30} /></button>
+        ))}
+      </div>
+
+      <div className="text-sm font-semibold text-slate-700 mb-1.5">3. Quantidade agora <span className="font-normal text-slate-500">(opcional)</span></div>
+      <div className="flex items-center justify-between bg-white rounded-xl border border-slate-200 px-3 py-2">
+        <span className="text-[14px] text-slate-600">{qty === 0 ? 'Nenhuma peça ainda' : `${qty} ${qty === 1 ? 'peça' : 'peças'} · ideal ${qty}`}</span>
+        <div className="flex items-center gap-1">
+          <button onClick={() => setQty(Math.max(0, qty - 1))} className="w-11 h-11 rounded-lg bg-slate-100 text-xl font-bold" aria-label="Menos">−</button>
+          <input inputMode="numeric" value={qty} onChange={(e) => setQty(Math.min(100000, Number(e.target.value.replace(/\D/g, '')) || 0))}
+            className="w-14 h-11 text-center text-lg font-extrabold border border-slate-200 rounded-lg" aria-label="Quantidade" />
+          <button onClick={() => setQty(qty + 1)} className="w-11 h-11 rounded-lg bg-blue-600 text-white text-xl font-bold" aria-label="Mais">+</button>
+        </div>
+      </div>
+      <p className="text-xs text-slate-500 mt-1.5">{day?.status === 'open' ? 'Entra no estoque do dia selecionado.' : 'Entra quando o próximo dia for iniciado.'}</p>
     </Sheet>
   );
 }
@@ -193,13 +251,13 @@ function GroupEditor({ id, onClose }: { id: string | null; onClose: () => void }
           <Card key={v.id} className={`flex items-center gap-2 p-2 pl-3 ${v.active ? '' : 'opacity-60'}`}>
             <button className="flex-1 flex items-center gap-2.5 text-left min-w-0" onClick={() => setEditVar(v.id)}>
               <Swatch color={v.color} />
-              <span className="font-semibold truncate">{v.name}</span>
+              <span className="font-semibold break-words">{v.name}</span>
               {v.optionalPriceInCents ? <Badge tone="blue">{money(v.optionalPriceInCents)}</Badge> : null}
-              {v.minimumStock !== null && <Badge>mín {v.minimumStock}</Badge>}
+              <Badge>ideal {v.idealStock ?? v.startQuantity}</Badge>
               {!v.active && <Badge>desativada</Badge>}
             </button>
-            <button className="w-9 h-9 rounded-lg bg-slate-100" onClick={() => moveV(i, -1)}>↑</button>
-            <button className="w-9 h-9 rounded-lg bg-slate-100" onClick={() => moveV(i, 1)}>↓</button>
+            <button className="w-11 h-11 rounded-lg bg-slate-100 active:bg-slate-200" onClick={() => moveV(i, -1)}>↑</button>
+            <button className="w-11 h-11 rounded-lg bg-slate-100 active:bg-slate-200" onClick={() => moveV(i, 1)}>↓</button>
           </Card>
         ))}
         {archivedV.map((v) => (
@@ -281,9 +339,10 @@ function VariantEditor({ id, onClose }: { id: string | null; onClose: () => void
           ))}
         </div>
       </Field>
-      <NumberField key={'m' + v.id + v.minimumStock} label="Estoque mínimo" hint="Abaixo disso entra em “precisa repor”. Vazio = padrão das configurações."
-        value={v.minimumStock === null ? '' : String(v.minimumStock)}
-        onSave={(t) => run(() => updateVariant(v.id, { minimumStock: t === '' ? null : Number(t) }), 'Salvo')} />
+      <NumberField key={'i' + v.id + v.idealStock} label="Estoque ideal"
+        hint={`Quantas peças você quer ter. “Repor” = ideal − o que tem. Ex.: ideal 15, vendeu 1 → repor 1. Vazio = usa a quantidade do cadastro (${v.startQuantity}).`}
+        value={v.idealStock === null || v.idealStock === undefined ? '' : String(v.idealStock)}
+        onSave={(t) => run(() => updateVariant(v.id, { idealStock: t === '' ? null : Number(t) }), 'Salvo')} />
       <NumberField key={'p' + v.id + v.optionalPriceInCents} label="Preço de venda (opcional)" hint="Já vem preenchido na venda. Vazio = digitar na hora." decimal
         value={v.optionalPriceInCents ? money(v.optionalPriceInCents) : ''}
         onSave={(t) => run(() => updateVariant(v.id, { optionalPriceInCents: t === '' ? null : toCents(t) }), 'Salvo')} />

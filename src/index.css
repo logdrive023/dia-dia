@@ -3,6 +3,9 @@
 @tailwind utilities;
 
 html, body, #root { min-height: 100%; }
+html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+button { -webkit-user-select: none; user-select: none; }
+input, textarea, select { font-size: max(16px, 1em); }
 body {
   -webkit-tap-highlight-color: transparent;
   font-family: Inter, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
@@ -16,6 +19,8 @@ body {
 @keyframes up { from { transform: translateY(100%); } to { transform: none; } }
 @keyframes down { from { transform: translateY(-20px); opacity: 0; } to { transform: none; opacity: 1; } }
 @keyframes fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes heartbeat { 0%, 100% { transform: scale(1); } 15% { transform: scale(1.18); } 30% { transform: scale(1); } 45% { transform: scale(1.12); } }
+.animate-heartbeat { display: inline-block; animation: heartbeat 1.6s ease-in-out infinite; }
 @keyframes pop { from { transform: scale(.95); opacity: 0; } to { transform: none; opacity: 1; } }
 .animate-up { animation: up .22s cubic-bezier(.2,.8,.2,1); }
 .animate-down { animation: down .2s ease-out; }
@@ -29,3 +34,9 @@ body {
   line-height: 32px;
   color: #b45309;
 }
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-up, .animate-down, .animate-fade, .animate-pop, .animate-heartbeat { animation: none; }
+}
+/* toque mais rápido no celular (sem atraso de duplo toque) */
+button, [role="button"], a { touch-action: manipulation; }

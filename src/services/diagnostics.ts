@@ -63,11 +63,13 @@ export async function runDiagnostics(): Promise<{ findings: Finding[]; checked: 
     if (total !== o.totalInCents) f.push({ level: 'erro', title: `Total da venda não bate (${when})`, detail: `Venda ${money(o.totalInCents)}, peças somam ${money(total)}.` });
     if (ls.some((l) => l.status !== o.status)) f.push({ level: 'erro', title: `Situação das peças diferente da venda (${when})` });
     const cm = cashBy.get(o.id) ?? [];
-    const got = cm.filter((c) => c.type === 'venda');
-    const back = cm.filter((c) => c.type === 'estorno');
-    if (o.totalInCents > 0 && got.length !== 1) f.push({ level: 'erro', title: `Venda com ${got.length} recebimentos no caixa (${when})`, detail: 'Deveria ter exatamente 1.' });
-    if (got.some((c) => c.amountInCents !== o.totalInCents)) f.push({ level: 'erro', title: `Valor no caixa diferente da venda (${when})` });
-    if (o.status === 'cancelled' && o.totalInCents > 0 && back.length !== 1) f.push({ level: 'erro', title: `Venda cancelada sem estorno no caixa (${when})` });
+    const net = cm.reduce((s, c) => s + (c.type === 'venda' ? c.amountInCents : c.type === 'estorno' ? -c.amountInCents : 0), 0);
+    const expected = o.status === 'ok' ? o.totalInCents : 0;
+    if (net !== expected)
+      f.push({ level: 'erro', title: o.status === 'ok' ? `Valor no caixa diferente da venda (${when})` : `Venda cancelada sem estorno completo no caixa (${when})`,
+        detail: `No caixa ${money(net)}, deveria ser ${money(expected)}.` });
+    if (o.payments && o.payments.reduce((s, p) => s + p.amountInCents, 0) !== o.totalInCents && !cm.some((c) => c.description === 'Correção de valor'))
+      f.push({ level: 'erro', title: `Pagamento dividido não soma o total (${when})` });
     // baixa no estoque exatamente uma vez por peça
     const sold = moves.filter((m) => m.orderId === o.id && m.type === 'venda').reduce((s, m) => s - m.quantity, 0);
     const qty = ls.reduce((s, l) => s + l.quantity, 0);

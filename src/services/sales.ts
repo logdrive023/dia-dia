@@ -1,6 +1,6 @@
 import { db } from '../db/db';
-import type { Order, PaymentMethod, Reservation, Sale } from '../db/types';
-import { nowIso, uid } from '../lib/util';
+import type { CashMovement, Order, Payment, PaymentMethod, Reservation, Sale } from '../db/types';
+import { isCents, isQty, MAX_QTY, nowIso, PAYMENTS, uid } from '../lib/util';
 import { audit } from './audit';
 import { UserError } from './catalog';
 import { applyStockDelta, assertOpen, ensureItem } from './days';
@@ -26,69 +26,114 @@ const SALE_TABLES = () => [
   db.cashMovements, db.reservations, db.auditLogs,
 ];
 
+function validateLine(l: CartLine) {
+  if (!isQty(l.quantity)) throw new UserError(`Quantidade inválida (de 1 a ${MAX_QTY}).`);
+  if (l.unitPriceInCents !== null && !isCents(l.unitPriceInCents)) throw new UserError('Preço inválido.');
+}
+
+/** Confere e normaliza o pagamento: uma forma só, ou dividido somando exatamente o total. */
+function normalizePayments(total: number, method: PaymentMethod, payments?: Payment[]): Payment[] {
+  if (!PAYMENTS.includes(method)) throw new UserError('Forma de pagamento inválida.');
+  const list = (payments ?? []).filter((p) => p.amountInCents > 0);
+  if (!list.length) return total > 0 ? [{ method, amountInCents: total }] : [];
+  for (const p of list) {
+    if (!PAYMENTS.includes(p.method) || !isCents(p.amountInCents)) throw new UserError('Pagamento dividido inválido.');
+  }
+  const sum = list.reduce((s, p) => s + p.amountInCents, 0);
+  if (sum !== total) throw new UserError('A soma das formas de pagamento precisa dar o total da venda.');
+  // junta formas repetidas (ex.: dois "Pix")
+  const merged = new Map<PaymentMethod, number>();
+  for (const p of list) merged.set(p.method, (merged.get(p.method) ?? 0) + p.amountInCents);
+  return [...merged.entries()].map(([m, a]) => ({ method: m, amountInCents: a }));
+}
+
 /**
  * Registra uma venda (uma pessoa, várias peças). `orderId` é gerado quando o carrinho abre:
  * repetir o toque com o mesmo id não duplica a venda nem o recebimento.
  */
 export async function createOrder(params: {
   orderId: string; dailyRecordId: string; lines: CartLine[]; paymentMethod: PaymentMethod;
-  customer?: string; notes?: string;
+  payments?: Payment[]; customer?: string; notes?: string;
 }): Promise<Order> {
-  const lines = params.lines.filter((l) => l.quantity > 0);
+  const lines = params.lines.filter((l) => l.quantity !== 0);
   if (!lines.length) throw new UserError('Adicione pelo menos uma peça.');
-  for (const l of lines) if (!Number.isInteger(l.quantity)) throw new UserError('Quantidade inválida.');
+  lines.forEach(validateLine);
+  const total = lines.reduce((s, l) => s + (l.unitPriceInCents ?? 0) * l.quantity, 0);
+  if (!isCents(total)) throw new UserError('Total da venda inválido.');
+  const pays = normalizePayments(total, params.paymentMethod, params.payments);
   return db.transaction('rw', SALE_TABLES(), async () => {
     const dup = await db.orders.get(params.orderId);
     if (dup) return dup;
     const day = await assertOpen(params.dailyRecordId);
 
-    // disponibilidade: físico do dia - reservas ativas (as reservas que estão sendo convertidas não contam)
+    // reservas sendo convertidas precisam existir, estar ativas e ser da mesma peça
     const converting = lines.map((l) => l.reservationId).filter(Boolean) as string[];
+    for (const l of lines) if (l.reservationId) {
+      const r = await db.reservations.get(l.reservationId);
+      if (!r || r.status !== 'active') throw new UserError('Esta reserva não está mais ativa.');
+      if (r.variantId !== l.variantId || l.quantity > r.quantity) throw new UserError('A venda não confere com a reserva.');
+    }
+    // disponibilidade: físico do dia - reservas ativas (as que estão sendo convertidas não contam)
     const reserved = await activeReservedByVariant(day.date, converting);
     const need = new Map<string, number>();
     for (const l of lines) need.set(l.variantId, (need.get(l.variantId) ?? 0) + l.quantity);
     for (const [variantId, qty] of need) {
+      const v = await db.variants.get(variantId);
+      if (!v) throw new UserError('Uma das peças não existe mais no cadastro.');
+      if (v.forSale === false && !lines.some((l) => l.variantId === variantId && l.reservationId))
+        throw new UserError(`${v.name} está guardada (fora da venda). Coloque à venda no Estoque.`);
       const item = await ensureItem(day.id, variantId);
       const available = item.currentQuantity - (reserved.get(variantId) ?? 0);
-      if (qty > available) {
-        const v = await db.variants.get(variantId);
-        throw new UserError(`Só há ${Math.max(0, available)} disponível de ${v?.name ?? 'item'}.`);
-      }
+      if (qty > available) throw new UserError(`Só há ${Math.max(0, available)} disponível de ${v.name}.`);
     }
 
     const now = nowIso();
-    const total = lines.reduce((s, l) => s + (l.unitPriceInCents ?? 0) * l.quantity, 0);
+    const main = pays.slice().sort((a, b) => b.amountInCents - a.amountInCents)[0]?.method ?? params.paymentMethod;
     const order: Order = {
-      id: params.orderId, dailyRecordId: day.id, customer: params.customer?.trim() || undefined,
-      paymentMethod: params.paymentMethod, totalInCents: total,
+      id: params.orderId, dailyRecordId: day.id, customer: params.customer?.trim().slice(0, 80) || undefined,
+      paymentMethod: main, payments: pays.length > 1 ? pays : undefined, totalInCents: total,
       itemCount: lines.reduce((s, l) => s + l.quantity, 0), status: 'ok', cashMovementId: null,
       createdAt: now, notes: params.notes,
     };
-    // venda sem valor não gera receita fictícia
-    if (total > 0) {
-      order.cashMovementId = uid();
+    // venda sem valor não gera receita fictícia; dividido = um recebimento por forma
+    for (const p of pays) {
+      const id = uid();
+      if (!order.cashMovementId) order.cashMovementId = id;
       await db.cashMovements.add({
-        id: order.cashMovementId, dailyRecordId: day.id, type: 'venda', amountInCents: total,
-        paymentMethod: params.paymentMethod, relatedOrderId: order.id, createdAt: now,
-        description: order.customer ? `Venda — ${order.customer}` : 'Venda',
+        id, dailyRecordId: day.id, type: 'venda', amountInCents: p.amountInCents, paymentMethod: p.method,
+        relatedOrderId: order.id, createdAt: now, description: order.customer ? `Venda — ${order.customer}` : 'Venda',
       });
     }
     await db.orders.add(order);
     const sales: Sale[] = lines.map((l) => ({
       id: uid(), orderId: order.id, dailyRecordId: day.id, variantId: l.variantId, quantity: l.quantity,
       unitPriceInCents: l.unitPriceInCents, totalInCents: (l.unitPriceInCents ?? 0) * l.quantity,
-      paymentMethod: params.paymentMethod, createdAt: now, cashMovementId: order.cashMovementId, status: 'ok',
+      paymentMethod: main, createdAt: now, cashMovementId: order.cashMovementId, status: 'ok',
     }));
     await db.sales.bulkAdd(sales);
     for (const l of lines)
       await applyStockDelta(day.id, l.variantId, -l.quantity, 'venda', { orderId: order.id, description: order.customer });
-    for (const rid of converting) await db.reservations.update(rid, { status: 'converted', updatedAt: now });
+    for (const rid of converting) await db.reservations.update(rid, { status: 'converted', orderId: order.id, updatedAt: now });
     return order;
   });
 }
 
-/** Cancela a venda: devolve as peças e estorna o recebimento. Nada é apagado. */
-export async function cancelOrder(orderId: string) {
+/** Saldo que a venda ainda tem no caixa, por forma de pagamento (recebido - estornado). */
+async function orderCashByMethod(orderId: string) {
+  const moves = await db.cashMovements.where('relatedOrderId').equals(orderId).toArray();
+  const net = new Map<PaymentMethod, number>();
+  for (const m of moves) {
+    if (m.type === 'venda') net.set(m.paymentMethod, (net.get(m.paymentMethod) ?? 0) + m.amountInCents);
+    if (m.type === 'estorno') net.set(m.paymentMethod, (net.get(m.paymentMethod) ?? 0) - m.amountInCents);
+  }
+  return net;
+}
+
+/**
+ * Cancela a venda: devolve as peças e estorna o que entrou no caixa. Nada é apagado.
+ * `restoreReservations`: se a venda veio de reserva, a reserva volta a valer.
+ */
+export async function cancelOrder(orderId: string, opts: { restoreReservations?: boolean } = {}) {
   return db.transaction('rw', SALE_TABLES(), async () => {
     const order = await db.orders.get(orderId);
     if (!order) throw new UserError('Venda não encontrada.');
@@ -99,22 +144,80 @@ export async function cancelOrder(orderId: string) {
       await applyStockDelta(order.dailyRecordId, s.variantId, s.quantity, 'cancelamento', { orderId, description: 'Venda cancelada' });
       await db.sales.update(s.id, { status: 'cancelled' });
     }
-    if (order.totalInCents > 0)
-      await db.cashMovements.add({
-        id: uid(), dailyRecordId: order.dailyRecordId, type: 'estorno', amountInCents: order.totalInCents,
-        paymentMethod: order.paymentMethod, relatedOrderId: orderId, createdAt: nowIso(), description: 'Venda cancelada',
-      });
+    for (const [method, amount] of await orderCashByMethod(orderId))
+      if (amount > 0)
+        await db.cashMovements.add({
+          id: uid(), dailyRecordId: order.dailyRecordId, type: 'estorno', amountInCents: amount,
+          paymentMethod: method, relatedOrderId: orderId, createdAt: nowIso(), description: 'Venda cancelada',
+        });
     await db.orders.update(orderId, { status: 'cancelled' });
-    await audit('order', orderId, 'cancel');
+    if (opts.restoreReservations)
+      for (const r of await db.reservations.filter((x) => x.orderId === orderId && x.status === 'converted').toArray())
+        await db.reservations.update(r.id, { status: 'active', orderId: null, updatedAt: nowIso() });
+    await audit('order', orderId, 'cancel', null, { restoreReservations: !!opts.restoreReservations });
+  });
+}
+
+/** Reservas que viraram esta venda (para perguntar se voltam ao cancelar). */
+export async function reservationsOfOrder(orderId: string) {
+  return db.reservations.filter((r) => r.orderId === orderId && r.status === 'converted').toArray();
+}
+
+/**
+ * Corrige os preços de uma venda já feita. A diferença entra no caixa como novo recebimento
+ * (ou estorno), na forma principal da venda; o lançamento original não é apagado.
+ */
+export async function correctOrderPrices(orderId: string, prices: Record<string, number | null>) {
+  return db.transaction('rw', SALE_TABLES(), async () => {
+    const order = await db.orders.get(orderId);
+    if (!order) throw new UserError('Venda não encontrada.');
+    if (order.status !== 'ok') throw new UserError('Venda cancelada não pode ser corrigida.');
+    await assertOpen(order.dailyRecordId);
+    const sales = await db.sales.where('orderId').equals(orderId).toArray();
+    let total = 0;
+    const changes: { saleId: string; from: number | null; to: number | null }[] = [];
+    for (const s of sales) {
+      const p = s.id in prices ? prices[s.id] : s.unitPriceInCents;
+      if (p !== null && !isCents(p)) throw new UserError('Preço inválido.');
+      total += (p ?? 0) * s.quantity;
+      if (p !== s.unitPriceInCents) {
+        changes.push({ saleId: s.id, from: s.unitPriceInCents, to: p });
+        await db.sales.update(s.id, { unitPriceInCents: p, totalInCents: (p ?? 0) * s.quantity });
+      }
+    }
+    if (!changes.length) return order;
+    if (!isCents(total)) throw new UserError('Total inválido.');
+    const net = await orderCashByMethod(orderId);
+    const received = [...net.values()].reduce((a, b) => a + b, 0);
+    let diff = total - received;
+    const now = nowIso();
+    const add = (type: CashMovement['type'], amount: number, method: PaymentMethod) => db.cashMovements.add({
+      id: uid(), dailyRecordId: order.dailyRecordId, type, amountInCents: amount, paymentMethod: method,
+      relatedOrderId: orderId, createdAt: now, description: 'Correção de valor',
+    });
+    if (diff > 0) await add('venda', diff, order.paymentMethod);
+    // devolução: tira primeiro da forma principal, depois das outras, sem deixar nenhuma negativa
+    const order_ = [order.paymentMethod, ...PAYMENTS.filter((m) => m !== order.paymentMethod)];
+    for (const m of order_) {
+      if (diff >= 0) break;
+      const take = Math.min(net.get(m) ?? 0, -diff);
+      if (take > 0) { await add('estorno', take, m); diff += take; }
+    }
+    await db.orders.update(orderId, { totalInCents: total });
+    await audit('order', orderId, 'correct_prices', order.totalInCents, { total, changes });
+    return { ...order, totalInCents: total };
   });
 }
 
 // ---------------- reservas ----------------
 
 export async function createReservation(p: { dailyRecordId: string; variantId: string; quantity: number; customer?: string; notes?: string }) {
-  if (!Number.isInteger(p.quantity) || p.quantity <= 0) throw new UserError('Quantidade inválida.');
+  if (!isQty(p.quantity)) throw new UserError('Quantidade inválida.');
   return db.transaction('rw', SALE_TABLES(), async () => {
     const day = await assertOpen(p.dailyRecordId);
+    const pv = await db.variants.get(p.variantId);
+    if (!pv) throw new UserError('Peça não encontrada.');
+    if (pv.forSale === false) throw new UserError(`${pv.name} está guardada (fora da venda). Coloque à venda no Estoque.`);
     const item = await ensureItem(day.id, p.variantId);
     const reserved = (await activeReservedByVariant(day.date)).get(p.variantId) ?? 0;
     if (p.quantity > item.currentQuantity - reserved)
@@ -122,7 +225,7 @@ export async function createReservation(p: { dailyRecordId: string; variantId: s
     const now = nowIso();
     const r: Reservation = {
       id: uid(), dailyRecordId: day.id, date: day.date, variantId: p.variantId, quantity: p.quantity,
-      customer: p.customer?.trim() || undefined, notes: p.notes, status: 'active', createdAt: now, updatedAt: now,
+      customer: p.customer?.trim().slice(0, 80) || undefined, notes: p.notes?.slice(0, 200), status: 'active', createdAt: now, updatedAt: now,
     };
     await db.reservations.add(r);
     // registro informativo: reserva não muda o estoque físico (quantity 0)
@@ -135,11 +238,21 @@ export async function createReservation(p: { dailyRecordId: string; variantId: s
   });
 }
 
-export async function cancelReservation(id: string) {
-  await db.transaction('rw', db.reservations, db.auditLogs, async () => {
+/** Cancela a reserva. Com `dailyRecordId` (dia aberto na tela), fica registrado nos Movimentos do dia. */
+export async function cancelReservation(id: string, dailyRecordId?: string) {
+  await db.transaction('rw', SALE_TABLES(), async () => {
     const r = await db.reservations.get(id);
     if (!r || r.status !== 'active') return;
     await db.reservations.update(id, { status: 'cancelled', updatedAt: nowIso() });
+    const day = dailyRecordId ? await db.dailyRecords.get(dailyRecordId) : undefined;
+    if (day && day.status === 'open') {
+      const item = await ensureItem(day.id, r.variantId);
+      await db.stockMovements.add({
+        id: uid(), dailyRecordId: day.id, variantId: r.variantId, type: 'reserva', quantity: 0,
+        previousBalance: item.currentQuantity, newBalance: item.currentQuantity, createdAt: nowIso(),
+        description: `Reserva cancelada${r.customer ? ' — ' + r.customer : ''} (${r.quantity} volta${r.quantity > 1 ? 'm' : ''} à venda)`,
+      });
+    }
     await audit('reservation', id, 'cancel');
   });
 }

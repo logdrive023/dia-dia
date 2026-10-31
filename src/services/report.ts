@@ -5,7 +5,8 @@ import type { DaySummary } from './summary';
 type Opts = { symbol?: string; title?: string };
 
 /** Linha do caderno para uma venda: "2x70 = 140 Dinheiro" ou "1x70 + 1x85 = 155 Pix". */
-export function orderLine(lines: { quantity: number; unitPriceInCents: number | null }[], total: number, method: PaymentMethod) {
+export function orderLine(lines: { quantity: number; unitPriceInCents: number | null }[], total: number, method: PaymentMethod,
+  payments?: { method: PaymentMethod; amountInCents: number }[]) {
   const byPrice = new Map<number, number>();
   for (const l of lines) {
     const k = l.unitPriceInCents ?? -1;
@@ -13,7 +14,10 @@ export function orderLine(lines: { quantity: number; unitPriceInCents: number | 
   }
   const parts = [...byPrice.entries()].sort((a, b) => (a[0] < 0 ? 1 : b[0] < 0 ? -1 : a[0] - b[0]))
     .map(([p, q]) => `${q}x${p < 0 ? '?' : money(p)}`);
-  return `${parts.join(' + ')} = ${money(total)} ${PAYMENT_LABEL[method]}`;
+  const how = payments && payments.length > 1
+    ? `(${payments.map((p) => `${PAYMENT_LABEL[p.method]} ${money(p.amountInCents)}`).join(' + ')})`
+    : PAYMENT_LABEL[method];
+  return `${parts.join(' + ')} = ${money(total)} ${how}`;
 }
 
 function cashLines(s: DaySummary, extraSymbol = '') {
@@ -38,7 +42,7 @@ export function notebookReport(date: string, s: DaySummary, opts: Opts = {}) {
   L.push('');
   const salesByOrder = new Map<string, typeof s.sales>();
   for (const x of s.sales) salesByOrder.set(x.orderId, [...(salesByOrder.get(x.orderId) ?? []), x]);
-  for (const o of s.orders) L.push(`☐ ${orderLine(salesByOrder.get(o.id) ?? [], o.totalInCents, o.paymentMethod)}`);
+  for (const o of s.orders) L.push(`☐ ${orderLine(salesByOrder.get(o.id) ?? [], o.totalInCents, o.paymentMethod, o.payments)}`);
   if (!s.orders.length) L.push('(sem vendas)');
   if (s.cash.dar.length) {
     L.push('');
@@ -51,40 +55,86 @@ export function notebookReport(date: string, s: DaySummary, opts: Opts = {}) {
   return L.join('\n');
 }
 
-/** Relatório curto e bonito para WhatsApp: entrou, vendeu, precisa repor. */
-export function whatsappReport(date: string, s: DaySummary, opts: Opts = {}) {
-  const sym = opts.symbol ? `${opts.symbol} ` : '';
-  const c = s.cash;
-  const L: string[] = [];
-  L.push(`📒 *Fechamento — ${fmtDate(date)}*`);
-  L.push('');
-  L.push(`💰 *Vendeu: ${sym}${money(c.salesTotal)}*  (${s.orders.length} ${s.orders.length === 1 ? 'venda' : 'vendas'} · ${s.soldUnits} ${s.soldUnits === 1 ? 'peça' : 'peças'})`);
-  for (const p of PAYMENTS) if (c.salesByMethod[p]) L.push(`${PAYMENT_EMOJI[p]} ${PAYMENT_LABEL[p]}: ${sym}${money(c.salesByMethod[p])}`);
-  if (c.entradas) L.push(`➕ Outras entradas: ${sym}${money(c.entradas)}`);
-  for (const d of c.dar) L.push(`🤝 Dei a ${d.person || d.description || 'alguém'}: ${sym}${money(d.amountInCents)}`);
-  if (c.despesas) L.push(`🧾 Despesas: ${sym}${money(c.despesas)}`);
-  L.push('');
-  L.push('🧮 *Caixa*');
-  L.push(...cashLines(s).map((x) => '  ' + x));
-  L.push(`  ✅ *Saldo: ${sym}${money(c.accumulated)}*`);
-  L.push(`  💵 Em dinheiro: ${sym}${money(c.cashOnHand)} · ⚡💳 Pix/Cartão: ${sym}${money(c.otherBalance)}`);
-  if (c.counted !== null) L.push(`  Contado em dinheiro: ${sym}${money(c.counted)} (dif. ${money(c.difference)})`);
+/** Agrupa por grupo: título do grupo (com ícone) e as cores embaixo, uma por linha. */
+function byGroup<T extends { group: { name: string; icon?: string }; variant: { name: string } }>(list: T[], line: (x: T) => string) {
+  const map = new Map<string, { icon?: string; items: string[] }>();
+  for (const x of list) {
+    const g = map.get(x.group.name) ?? { icon: x.group.icon, items: [] };
+    g.items.push(line(x));
+    map.set(x.group.name, g);
+  }
+  const out: string[] = [];
+  for (const [name, g] of map) {
+    out.push(`${g.icon ?? '📦'} *${name}*`);
+    for (const it of g.items) out.push(`   • ${it}`);
+  }
+  return out;
+}
 
-  if (s.soldByVariant.length) {
-    L.push('');
-    L.push(`🛍️ *Vendido (${s.soldUnits})*`);
-    for (const x of s.soldByVariant) L.push(`• ${x.group.name} ${x.variant.name} ×${x.qty}`);
+const WEEK_LONG = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
+
+/** Relatório para WhatsApp: seções em lista, uma informação por linha. */
+export function whatsappReport(date: string, s: DaySummary, opts: Opts = {}) {
+  const $ = (v: number) => `${opts.symbol ? opts.symbol + ' ' : ''}${money(v)}`;
+  const c = s.cash;
+  const [y, m, d] = date.split('-').map(Number);
+  const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+  const L: string[] = [];
+  const section = (title: string) => { L.push(''); L.push(title); };
+
+  L.push(`📒 *Fechamento — ${WEEK_LONG[new Date(y, m - 1, d).getDay()]}, ${String(d).padStart(2, '0')}/${String(m).padStart(2, '0')}*`);
+
+  // vendas
+  section('💰 *Vendas*');
+  L.push(`• Vendeu: *${$(c.salesTotal)}*`);
+  L.push(`• ${plural(s.salesCount, 'venda', 'vendas')} · ${plural(s.soldUnits, 'peça', 'peças')}`);
+  for (const p of PAYMENTS) if (p !== 'outro' || c.salesByMethod[p]) L.push(`• ${PAYMENT_EMOJI[p]} ${PAYMENT_LABEL[p]}: ${$(c.salesByMethod[p])}`);
+
+  // dinheiro que saiu/entrou fora das vendas
+  if (c.dar.length || c.despesas || c.entradas) {
+    section('🤝 *Outros lançamentos*');
+    for (const x of c.dar) L.push(`• Dei a ${x.person || x.description || 'alguém'}: ${$(x.amountInCents)}`);
+    if (c.despesas) L.push(`• Despesas: ${$(c.despesas)}`);
+    if (c.entradas) L.push(`• Outras entradas: +${$(c.entradas)}`);
   }
-  L.push('');
-  L.push(`📦 *Entrou no estoque: ${s.enteredUnits} ${s.enteredUnits === 1 ? 'peça' : 'peças'}*`);
-  for (const x of s.enteredByVariant) L.push(`• ${x.group.name} ${x.variant.name} +${x.qty}`);
-  if (s.restock.length) {
-    L.push('');
-    L.push(`🔁 *Precisa repor (${s.restock.length})*`);
-    for (const r of s.restock) L.push(`• ${r.group.name} ${r.variant.name} — ${r.out ? 'esgotado' : `restam ${r.available}`}`);
+
+  // caixa
+  section('🧮 *Caixa*');
+  L.push(`• Ontem: ${$(c.opening)}`);
+  const minus = c.darTotal + c.despesas;
+  const how = minus || c.entradas
+    ? ` (vendas ${money(c.salesTotal)}${c.entradas ? ` + ${money(c.entradas)}` : ''}${minus ? ` - ${money(minus)}` : ''})` : '';
+  L.push(`• Hoje: ${c.todayNet >= 0 ? '+' : ''}${$(c.todayNet)}${how}`);
+  if (c.retiradas) L.push(`• Retirada: -${$(c.retiradas)}`);
+  L.push(`• ✅ *Saldo: ${$(c.accumulated)}*`);
+  L.push(`• 💵 Na mão: ${$(c.cashOnHand)}`);
+  L.push(`• 🏦 No banco (Pix/cartão): ${$(c.otherBalance)}`);
+  if (c.counted !== null)
+    L.push(c.difference === 0 ? `• 🔎 Contado: ${$(c.counted)} — bateu ✅` : `• 🔎 Contado: ${$(c.counted)} — diferença ${c.difference! > 0 ? '+' : ''}${$(c.difference!)}`);
+
+  // peças que saíram (vendidas)
+  section(`🛍️ *O que saiu (${plural(s.soldUnits, 'peça', 'peças')})*`);
+  if (s.soldByVariant.length) L.push(...byGroup(s.soldByVariant, (x) => `Cor ${x.variant.name}: ${x.qty}`));
+  else L.push('• Nenhuma peça vendida');
+
+  // entrou
+  section(`📦 *Entrou no estoque${s.enteredUnits ? ` (${plural(s.enteredUnits, 'peça', 'peças')})` : ''}*`);
+  if (s.enteredByVariant.length) L.push(...byGroup(s.enteredByVariant, (x) => `Cor ${x.variant.name}: +${x.qty}`));
+  else L.push('• Nenhuma peça');
+
+  // repor
+  const toRestock = s.restock.filter((r) => r.restock > 0);
+  const soldOut = s.restock.filter((r) => r.out && r.restock === 0);
+  if (toRestock.length) {
+    section(`🔁 *Precisa repor (${plural(s.restockUnits, 'peça', 'peças')})*`);
+    L.push(...byGroup(toRestock, (r) => `Cor ${r.variant.name}: repor ${r.restock} (tem ${r.item.currentQuantity} de ${r.ideal})`));
   }
-  L.push('');
-  L.push(`📊 Estoque no fim do dia: ${s.totalUnits} peças`);
+  if (soldOut.length) {
+    section(`🚫 *Esgotados (${soldOut.length})*`);
+    L.push(...byGroup(soldOut, (r) => `Cor ${r.variant.name}`));
+  }
+
+  section(`📊 Estoque no fim do dia: *${plural(s.totalUnits, 'peça', 'peças')}*`);
   return L.join('\n');
 }
 

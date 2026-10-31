@@ -1,6 +1,6 @@
 import { db } from '../db/db';
-import type { DailyRecord, DailyStockItem, MovementType, StockMovement } from '../db/types';
-import { nowIso, uid } from '../lib/util';
+import type { DailyRecord, DailyStockItem, MovementType, PaymentMethod, StockMovement } from '../db/types';
+import { isQty, MAX_QTY, money, nowIso, uid } from '../lib/util';
 import { audit } from './audit';
 import { UserError } from './catalog';
 
@@ -24,12 +24,21 @@ export async function assertOpen(dailyRecordId: string) {
  * "Iniciar o dia": cria o registro da data copiando o saldo final do último dia anterior
  * (ou em branco). Idempotente: se já existir, devolve o existente sem mudar nada.
  */
+export function isValidDate(date: string) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return false;
+  const [y, m, d] = date.split('-').map(Number);
+  const dt = new Date(y, m - 1, d);
+  return y >= 2000 && y <= 2100 && dt.getMonth() === m - 1 && dt.getDate() === d;
+}
+
 export async function startDay(date: string, mode: 'copy' | 'blank' = 'copy'): Promise<DailyRecord> {
+  if (!isValidDate(date)) throw new UserError('Data inválida.');
   return db.transaction('rw',
-    [db.dailyRecords, db.dailyStockItems, db.variants, db.cashRecords, db.auditLogs],
+    [db.dailyRecords, db.dailyStockItems, db.variants, db.cashRecords, db.cashMovements, db.auditLogs, db.settings],
     async () => {
       const existing = await getDayByDate(date);
       if (existing) return existing;
+      const firstDay = !(await db.dailyRecords.count());
       const prev = mode === 'copy' ? await previousDay(date) : undefined;
       const now = nowIso();
       const day: DailyRecord = {
@@ -51,8 +60,9 @@ export async function startDay(date: string, mode: 'copy' | 'blank' = 'copy'): P
         let q = 0;
         if (mode === 'copy') {
           if (prevMap.has(v.id)) q = prevMap.get(v.id)!;
-          // quantidade do cadastro só vale se a variação ainda não apareceu em nenhum dia
-          else if (!(await db.dailyStockItems.where('variantId').equals(v.id).count())) q = v.startQuantity;
+          // quantidade do cadastro: no primeiro dia registrado (inclusive um dia lançado antes de todos)
+          // ou para variação que ainda não apareceu em nenhum dia
+          else if (!prev || !(await db.dailyStockItems.where('variantId').equals(v.id).count())) q = v.startQuantity;
         }
         push(v.id, q);
       }
@@ -60,13 +70,28 @@ export async function startDay(date: string, mode: 'copy' | 'blank' = 'copy'): P
       if (mode === 'copy') for (const i of prevItems) if (i.currentQuantity !== 0) push(i.variantId, i.currentQuantity);
       await db.dailyStockItems.bulkAdd(items);
 
-      // "Ontem" é calculado sempre a partir do dia anterior (ver cashChain); em branco começa em 0
+      // "Ontem" é calculado sempre a partir do dia anterior (ver cashChain); em branco começa em 0.
       await db.cashRecords.add({
         id: uid(), dailyRecordId: day.id, openingBalanceInCents: 0, openingManual: mode === 'blank', countedBalanceInCents: null, status: 'open',
       });
+      // primeiro dia do app no dia do caderno: as vendas anotadas já entram no caixa
+      if (firstDay && mode === 'copy') await addNotebookSales(day);
       await audit('day', day.id, 'start', null, { date, mode, sourceDate: day.sourceDate });
       return day;
     });
+}
+
+/** Vendas do caderno (dados iniciais) lançadas no caixa do dia. Use dentro da transação de startDay. */
+async function addNotebookSales(day: DailyRecord) {
+  const init = (await db.settings.where('key').equals('initialOpening').first())?.value as
+    { date: string; source: string; sales?: [number, number, PaymentMethod][] } | undefined;
+  if (!init?.sales || init.date !== day.date) return;
+  // horários espaçados ao longo da tarde, na ordem do caderno
+  await db.cashMovements.bulkAdd(init.sales.map(([qty, cents, method], i) => ({
+    id: uid(), dailyRecordId: day.id, type: 'venda' as const, amountInCents: cents, paymentMethod: method,
+    quantity: qty, description: qty > 1 && cents % qty === 0 ? `${qty}× ${money(cents / qty)} · caderno` : 'caderno',
+    relatedOrderId: null, createdAt: new Date(`${init.date}T${String(9 + i).padStart(2, '0')}:00:00`).toISOString(),
+  })));
 }
 
 export async function ensureItem(dailyRecordId: string, variantId: string) {
@@ -108,15 +133,19 @@ async function checkReserved(date: string, variantId: string, newBalance: number
   const res = (await db.reservations.where('variantId').equals(variantId).toArray())
     .filter((r) => r.status === 'active' && r.date <= date);
   const reserved = res.reduce((s, r) => s + r.quantity, 0);
-  if (newBalance < reserved) throw new ReservedError(reserved, res.map((r) => r.customer).filter(Boolean) as string[]);
+  // estoque negativo é recusado em applyStockDelta (mensagem própria); aqui só reserva de verdade
+  if (reserved > 0 && newBalance >= 0 && newBalance < reserved) throw new ReservedError(reserved, res.map((r) => r.customer).filter(Boolean) as string[]);
 }
 
 export interface StockOpts { allowBelowReserved?: boolean }
 
 export async function moveStock(dailyRecordId: string, variantId: string, delta: number, type: MovementType, description?: string, opts: StockOpts = {}) {
-  if (!Number.isInteger(delta) || delta === 0) throw new UserError('Quantidade inválida.');
+  if (!isQty(Math.abs(delta))) throw new UserError('Quantidade inválida.');
+  if (!['entrada', 'saida', 'perda', 'ajuste', 'correcao'].includes(type)) throw new UserError('Tipo de movimento inválido.');
+  if ((type === 'entrada' && delta < 0) || ((type === 'saida' || type === 'perda') && delta > 0)) throw new UserError('Quantidade inválida.');
   return db.transaction('rw', STOCK_TABLES(), async () => {
     const day = await assertOpen(dailyRecordId);
+    if (!(await db.variants.get(variantId))) throw new UserError('Peça não encontrada.');
     if (delta < 0 && !opts.allowBelowReserved) {
       const item = await ensureItem(dailyRecordId, variantId);
       await checkReserved(day.date, variantId, item.currentQuantity + delta);
@@ -127,9 +156,10 @@ export async function moveStock(dailyRecordId: string, variantId: string, delta:
 
 /** Edição direta da quantidade: gera um ajuste com a diferença (ajuste não é venda). */
 export async function setStock(dailyRecordId: string, variantId: string, quantity: number, description = 'Ajuste manual', opts: StockOpts = {}) {
-  if (!Number.isInteger(quantity) || quantity < 0) throw new UserError('Quantidade inválida.');
+  if (!Number.isInteger(quantity) || quantity < 0 || quantity > MAX_QTY) throw new UserError('Quantidade inválida.');
   return db.transaction('rw', STOCK_TABLES(), async () => {
     const day = await assertOpen(dailyRecordId);
+    if (!(await db.variants.get(variantId))) throw new UserError('Peça não encontrada.');
     const item = await ensureItem(dailyRecordId, variantId);
     const delta = quantity - item.currentQuantity;
     if (delta === 0) return null;
@@ -145,6 +175,7 @@ export async function undoMovement(movementId: string) {
     if (!mv) throw new UserError('Movimentação não encontrada.');
     if (mv.orderId) throw new UserError('Esta movimentação é de uma venda. Cancele a venda.');
     if (mv.reversedMovementId) throw new UserError('Esta movimentação já é um estorno.');
+    if (!mv.quantity) throw new UserError('Este registro não mexe no estoque.');
     const already = await db.stockMovements.filter((m) => m.reversedMovementId === movementId).count();
     if (already) throw new UserError('Esta movimentação já foi desfeita.');
     await assertOpen(mv.dailyRecordId);
@@ -181,6 +212,28 @@ export async function resyncFromPrevious(dailyRecordId: string) {
     await db.dailyRecords.update(day.id, { sourceDate: prev.date, updatedAt: nowIso() });
     await audit('day', day.id, 'resync', null, { from: prev.date, changes });
     return changes.length;
+  });
+}
+
+/** Dia começou errado (do zero x continuar)? Enquanto nada foi lançado, dá para desfazer e escolher de novo. */
+export async function dayIsEmpty(dailyRecordId: string) {
+  const [m, o, c, r] = await Promise.all([
+    db.stockMovements.where('dailyRecordId').equals(dailyRecordId).count(),
+    db.orders.where('dailyRecordId').equals(dailyRecordId).count(),
+    db.cashMovements.where('dailyRecordId').equals(dailyRecordId).count(),
+    db.reservations.where('dailyRecordId').equals(dailyRecordId).count(),
+  ]);
+  return m + o + c + r === 0;
+}
+
+export async function undoStartDay(dailyRecordId: string) {
+  return db.transaction('rw', [db.dailyRecords, db.dailyStockItems, db.cashRecords, db.stockMovements, db.orders, db.cashMovements, db.reservations, db.auditLogs], async () => {
+    const day = await assertOpen(dailyRecordId);
+    if (!(await dayIsEmpty(day.id))) throw new UserError('Este dia já tem lançamentos. Para corrigir, use Desfazer nos movimentos ou cancele as vendas.');
+    await db.dailyStockItems.where('dailyRecordId').equals(day.id).delete();
+    await db.cashRecords.where('dailyRecordId').equals(day.id).delete();
+    await db.dailyRecords.delete(day.id);
+    await audit('day', day.id, 'undo_start', { date: day.date, sourceDate: day.sourceDate }, null);
   });
 }
 

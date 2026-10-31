@@ -1,6 +1,7 @@
 export type ID = string;
 
-export type PaymentMethod = 'dinheiro' | 'pix' | 'cartao' | 'outro';
+/** cartao = cartão de crédito (nome antigo mantido para os dados já salvos) */
+export type PaymentMethod = 'dinheiro' | 'pix' | 'cartao' | 'debito' | 'outro';
 
 export interface Group {
   id: ID;
@@ -25,8 +26,15 @@ export interface Variant {
   displayOrder: number;
   active: boolean;
   archivedAt?: string | null;
-  /** null = usa o padrão das configurações */
+  /** (antigo, não usado) */
   minimumStock: number | null;
+  /**
+   * Estoque ideal: quantas peças você quer ter. "Repor" = ideal - quantidade atual.
+   * null = usa a quantidade do cadastro (startQuantity). Ex.: cadastrou 15, vendeu 1 → repor 1.
+   */
+  idealStock?: number | null;
+  /** false = peça guardada: fica no estoque, mas não aparece em Vender e não pode ser vendida/reservada. */
+  forSale?: boolean;
   /** Quantidade usada quando a variação entra num dia sem histórico anterior. */
   startQuantity: number;
   optionalPriceInCents?: number | null;
@@ -98,8 +106,15 @@ export interface Order {
   itemCount: number;
   status: 'ok' | 'cancelled';
   cashMovementId?: ID | null;
+  /** Pagamento dividido (ex.: 100 Pix + 55 Dinheiro). Vazio = tudo em paymentMethod. */
+  payments?: Payment[];
   createdAt: string;
   notes?: string;
+}
+
+export interface Payment {
+  method: PaymentMethod;
+  amountInCents: number;
 }
 
 export interface Sale {
@@ -129,6 +144,8 @@ export interface Reservation {
   customer?: string;
   notes?: string;
   status: ReservationStatus;
+  /** Venda gerada quando a reserva foi convertida. */
+  orderId?: ID | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -161,6 +178,8 @@ export interface CashMovement {
   amountInCents: number; // sempre positivo; o tipo define o sinal
   paymentMethod: PaymentMethod;
   relatedOrderId?: ID | null;
+  /** Venda copiada do caderno (sem peça escolhida): quantas peças foram. */
+  quantity?: number;
   createdAt: string;
 }
 

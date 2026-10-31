@@ -1,6 +1,6 @@
 # Melhorias de lógica — Dia a Dia
 
-Revisão do código em 31/10/2026 (commit `0c5243d`). Agora são 26 testes passando.
+Revisão do código em 31/10/2026 (commit `0c5243d`). Agora são **61 testes** passando (regras, ataques, tela e 10 dias seguidos).
 ✅ = já corrigido no código (ainda sem commit). Veja também "Rodada de usabilidade" no fim.
 
 Prioridade: 🔴 corrigir já · 🟠 importante · 🟡 melhoria · ⚪ manutenção
@@ -12,16 +12,16 @@ Prioridade: 🔴 corrigir já · 🟠 importante · 🟡 melhoria · ⚪ manuten
 | 3 | ✅ 🟠 | Saída/perda/ajuste pode "comer" peças reservadas | pequeno |
 | 4 | ✅ 🟠 | App aberto depois da meia-noite continua no dia anterior | pequeno |
 | 5 | ✅ 🟠 | iPhone pode apagar os dados se o app não for instalado | só orientação |
-| 6 | 🟠 | Backup em texto vai ficar grande demais para o WhatsApp | médio |
-| 7 | 🟡 | Transferir variações não checa nomes repetidos | pequeno |
-| 8 | 🟡 | Não dá para pagar uma venda metade Pix, metade dinheiro | médio |
-| 9 | 🟡 | Corrigir preço de venda exige cancelar e refazer | médio |
-| 10 | 🟡 | Cancelar venda que veio de reserva não devolve a reserva | pequeno |
-| 11 | 🟡 | Serviço de cadastro aceita lançar em dia encerrado | pequeno |
-| 12 | 🟡 | Erro de restauração com mensagem técnica | pequeno |
-| 13 | ⚪ | Histórico recalcula todos os dias a cada abertura | médio |
-| 14 | ⚪ | `tsconfig.tsbuildinfo` está versionado | trivial |
-| 15 | ⚪ | Sem testes de tela (ponta a ponta) | médio |
+| 6 | ✅ 🟠 | Backup em texto vai ficar grande demais para o WhatsApp | médio |
+| 7 | ✅ 🟡 | Transferir variações não checa nomes repetidos | pequeno |
+| 8 | ✅ 🟡 | Não dá para pagar uma venda metade Pix, metade dinheiro | médio |
+| 9 | ✅ 🟡 | Corrigir preço de venda exige cancelar e refazer | médio |
+| 10 | ✅ 🟡 | Cancelar venda que veio de reserva não devolve a reserva | pequeno |
+| 11 | ✅ 🟡 | Serviço de cadastro aceita lançar em dia encerrado | pequeno |
+| 12 | ✅ 🟡 | Erro de restauração com mensagem técnica | pequeno |
+| 13 | ✅ ⚪ | Histórico recalcula todos os dias a cada abertura | médio |
+| 14 | ✅ ⚪ | `tsconfig.tsbuildinfo` está versionado | trivial |
+| 15 | ✅ ⚪ | Sem testes de tela (ponta a ponta) | médio |
 
 ---
 
@@ -241,3 +241,201 @@ menu, histórico, falha do banco). O que mudou:
 | iPhone pode perder dados sem instalar | Aviso “Instale o app para não perder os dados” só no iPhone fora da tela de início (item 5). |
 | Navegação com muitos botões | **4 abas embaixo** (Início · **Vender** em destaque · Estoque · Caixa) e **um único ☰ Menu** no topo: Produtos e grupos, Histórico, Backup, Configurações — cada um com uma linha explicando. |
 | Botão ⚙️ sem nome em Vender | Agora “⚙️ Grupos”. |
+
+---
+
+## Rodada 2 — tentar quebrar o app — ✅ feito
+
+**Itens 6 a 15 da tabela:** todos corrigidos.
+- **Backup em texto (6):** agora vai comprimido, cerca de 3× menor.
+- **Cadastro e vendas:**
+  - Transferir variações checa nomes repetidos (7).
+  - Pagamento dividido (8).
+  - Corrigir o valor de uma venda (9).
+  - Cancelar uma venda pode devolver a reserva (10).
+- **Proteções:**
+  - Dia encerrado é recusado também pelo serviço (11).
+  - Restauração confere duplicados e mostra mensagem clara (12).
+- **Desempenho (13):** o Histórico carrega só o mês exibido.
+- **Repositório (14):** `tsbuildinfo` fora do git. Ainda falta rodar `git rm --cached tsconfig.tsbuildinfo`.
+- **Teste de tela (15):** `src/__tests__/tela.test.tsx` usa o app de ponta a ponta.
+
+### Ataques testados (`src/__tests__/quebrar.test.ts`)
+- **Valores absurdos:** preço negativo, fracionado ou gigante; "1e5", "+70", "0x10"; quantidade 0, negativa, fracionada ou 1 bilhão.
+- **Dados inválidos:** datas impossíveis (30/02, 13º mês); nomes vazios, gigantes ou repetidos com acento diferente.
+- **Dia encerrado ou inexistente:** vender, lançar no caixa, reservar ou cadastrar com quantidade.
+- **Toques repetidos e corridas:**
+  - Toque triplo em Confirmar.
+  - Duas vendas ao mesmo tempo da última peça.
+  - Cancelar ou desfazer duas vezes.
+  - Converter a mesma reserva duas vezes.
+  - Venda forjada dizendo que vem de reserva de outra peça.
+- **Pagamento e correções:** dividido que não soma o total; correção de valor para mais e para menos (inclusive em venda dividida, sem deixar nenhuma forma negativa).
+- **Cadastro bagunçado:** reativar com nome que já existe; transferir para grupo com nomes iguais.
+- **Dias fora de ordem:** registrar um dia antes do primeiro; registrar um dia no meio de dois existentes.
+- **Restauração com lixo:** 13 arquivos inválidos diferentes, e nada muda no celular.
+- **Backup em texto:** colado fora de ordem, com quebras de linha do WhatsApp e mensagens no meio; partes de dois backups misturadas.
+- **Texto malicioso:** CSV com fórmula do Excel (`=HYPERLINK`); nomes com `<b>`.
+
+**Bugs reais encontrados e corrigidos:**
+- Saída maior que o estoque mostrava “0 peças estão reservadas” → agora diz que o estoque não pode ficar negativo.
+- Botão voltar do celular não fechava o ⓘ nem a pergunta de confirmação.
+- Dia lançado antes do primeiro dia começava zerado.
+- Preço negativo e valores gigantes eram aceitos.
+- Data inválida criava dia.
+- CSV podia virar fórmula no Excel.
+
+### 10 dias seguidos (`src/__tests__/dez-dias.test.ts`)
+Simula 10 dias com 6 a 15 vendas por dia, mais:
+- toques duplos, pagamento dividido, correção de preço e cancelamentos;
+- entradas, perdas e ajustes;
+- reservas convertidas em dias seguintes;
+- "Dei dinheiro", despesas e retiradas;
+- peça nova no dia 5 e arquivada com estoque no dia 7;
+- **correção do dia anterior no dia 6**;
+- **passagem para outro celular no dia 10**, continuando o dia 11 lá.
+
+Um modelo independente confere todo dia: estoque peça por peça, reservas, saldo, dinheiro na mão, vendas por forma, linhas do caderno e diagnóstico. **Tudo bateu.**
+
+### Usabilidade e visual (pedidos durante a rodada)
+- **Navegação e Início:**
+  - Barra de baixo: só a aba atual fica azul; “Início” sempre volta para hoje.
+  - Seleção de dia: aviso amarelo forte com **Voltar para hoje**; o dia novo mostra dois cartões (**Continuar** recomendado × **Do zero**) com ⓘ.
+  - Números do Início com nomes claros e ⓘ (o ⓘ do “Para repor” explica o estoque ideal).
+- **Vender e reservar:**
+  - Repor = estoque ideal (a quantidade cadastrada) − o que tem. Ex.: cadastrou 15, vendeu 1 → repor 1.
+  - Vender: passo a passo no topo, “à venda” no lugar de “disp.”, botão **+ Vender**, − e + na linha, total na barra do carrinho.
+  - Reservar: “Guardar para uma cliente”, mostra quanto fica à venda, ⓘ com exemplo.
+- **Caixa:**
+  - Saldo com **Na mão** × **No banco**.
+  - Conta do dia em **Normal** ou **Caderno**.
+  - Linha do tempo única, com **Corrigir valor** e **Cancelar venda**.
+- **Movimentos do dia:** frases (“Vendeu 2”, “Entrou 5”), resumo e filtros; aviso de que tudo já está salvo; ⓘ de como corrigir erros.
+- **Relatório:** **Editar mensagem** antes de enviar (desligado por padrão) com ⓘ.
+- **Salvamento e transferência:**
+  - **✓ Salvo 15:05** no topo, com o horário do último registro gravado no banco.
+  - **Passar para outro celular** (Menu): Enviar tudo → Receber (escolher arquivo) → confirmar.
+- **Voltar atrás:** “Desfazer o início do dia” enquanto não houver lançamentos; cópia automática antes de receber ou restaurar, com **Voltar como estava** (e refazer).
+- **Desempenho:**
+  - Telas pouco usadas carregam sob demanda.
+  - Sem desfoque de fundo (pesado em Android simples).
+  - Uma consulta só para os cartões de grupo.
+  - Toque sem atraso.
+- **ⓘ:** todos com o mesmo padrão (cartão por cima da tela e “💡 Por exemplo”), sem herdar maiúsculas do título.
+
+### Toque, responsivo e acabamento (pedidos finais) — ✅ feito
+- **Fim do toque errado:**
+  - Os cartões de números do Início abrem a explicação ao tocar em qualquer parte; “Ver no Estoque ›” fica dentro dela.
+  - Todos os “i” têm área de toque de 44px.
+- **Alvos de toque de 44px** (padrão Apple/Google): − e + do carrinho, Reservar, + Vender, Desfazer, Corrigir valor, Cancelar venda, ✕ do caixa, ↑↓ do cadastro, filtros e seletores.
+- **iPhone e Android:**
+  - Campos com 16px de letra, então o iPhone não dá zoom sozinho ao digitar.
+  - O texto não cresce ao girar a tela.
+  - Na tela pequena (iPhone SE, 320px) a faixa de dias mostra 5 dias; nada vaza para o lado.
+- **ⓘ:** todos os exemplos viraram lista curta com emoji, uma ideia por linha (“💡 Por exemplo”).
+- **Estoque:** a legenda cinza ilegível virou o cartão “Como usar esta tela” (+ Entrou · − Saiu · número = ajustar) com ⓘ.
+- **Topo:** ícone do app, nome da tela e “✓ Tudo salvo · 15:05” (a linha toda abre a explicação); Menu em botão maior.
+- **Desfazer:**
+  - Movimentos do dia: aviso de desfazer em destaque, com ⓘ.
+  - Início do dia: enquanto nada for lançado, aparece “Desfazer”.
+  - Dados recebidos de outro celular: o app guarda uma cópia antes, com “Voltar como estava” (e refazer).
+
+---
+
+## Rodada 3 — diagnóstico, teste extremo e revisão de UI/UX — ✅ feito
+
+### Testes novos
+- **`extremo.test.ts`:**
+  - **20.000 ações aleatórias** (5 sorteios × 4.000), misturando ações válidas e inválidas: venda, venda dividida, cancelar, corrigir valor, +/−/perda/definir, desfazer, reservar/cancelar/converter, caixa, contado, “Ontem” à mão, encerrar/reabrir, virar o dia, datas lixo, cadastro (criar, renomear, arquivar, excluir, mover, transferir).
+  - A cada 200 ações confere: diagnóstico sem erro, estoque nunca negativo, caixa encadeado certo, nenhuma data repetida.
+  - No fim de cada sorteio: relatórios, planilhas, backup em texto e restauração.
+- **Tempestade:** 60 operações simultâneas no mesmo dia.
+- **Escala:** 180 dias × 15 vendas.
+- **Relógio do celular errado:** dias “no futuro”.
+- **Voltar atrás em sequência:** receber, desfazer e refazer várias vezes.
+- **`abas.test.tsx`:** teste de tela por aba (Início, Vender, Estoque, Caixa, Menu e janelas, Histórico), tentando errar de propósito em cada uma.
+
+### Bugs e gaps encontrados e corrigidos
+- **Peça cadastrada com quantidade inválida (NaN):** contaminava os dias seguintes. Agora quantidade inicial, estoque ideal e preço são validados no serviço.
+- **Lentidão com meses de uso:** o resumo do dia levava ~1,9 s com 6 meses; agora leva ~12 ms (a conta do caixa lê cada tabela uma vez só).
+- **Backup em texto com muitos meses:** partes de 60 mil caracteres (cabe no WhatsApp) e aviso para preferir o arquivo.
+- **Compatibilidade com celulares mais antigos:**
+  - Ler o arquivo recebido agora funciona mesmo sem `File.text()`.
+  - O backup em texto cai para o formato sem compressão se faltar `Blob.stream`.
+  - Erros aparecem como mensagem, não em silêncio.
+- **Lógica que não fazia mais sentido:**
+  - “Estoque baixo (padrão)” removido (o repor usa o estoque ideal).
+  - Cancelar reserva agora aparece nos Movimentos do dia.
+  - Encerrar o dia limpa o carrinho.
+  - A troca de aba é instantânea, para nunca parecer que duas estão selecionadas.
+
+### UI/UX
+- **Vender:**
+  - Os passo a passos viraram dois botões compactos (“Como vender” · “Como reservar”) com os passos e exemplos dentro.
+  - “Para vender | Todos” virou filtro; busca e filtros ficam fixos ao rolar.
+  - A lista começa bem mais alto.
+- **Estoque:**
+  - Resumo no topo (total, repor e esgotados, que filtram ao tocar), Movimentos do dia e “Como usar” com ⓘ.
+  - Grupos com cor, selos e “peças”; linhas com selos e número com cara de botão (toque para ajustar).
+- **Caixa:** as vendas por forma viraram barra de proporção; “Lançar dinheiro” ganhou ⓘ com exemplo de cada botão.
+- **Início:**
+  - Cartão de vendas com média por venda, barra de proporção e porcentagens; saldo do caixa num botão claro.
+  - Grupos com barra de estoque ideal e selos (“9 cores”, “repor 3”, “✓ completo”).
+- **Abas de trabalho:** o cartão “Hoje” só aparece quando há algo a avisar (outro dia, encerrado, não iniciado).
+- **“Hoje, 31 de outubro”** virou uma faixa com a data por extenso, o selo colorido da situação e a legenda visual das bolinhas.
+- **Menu:**
+  - Separado em seções (Dia a dia · Seus dados · App), com ícones coloridos.
+  - Ganhou **Sobre** (“Feito com amor, pelo seu amor 🥰”).
+- **Configurações:**
+  - Salvam sozinhas; seções em cartões com ⓘ e exemplo.
+  - Pagamentos com “⭐ padrão” na mesma linha; prévia da moeda; lembrete de backup em botões (3/7/15/30 dias).
+- **Relatório do WhatsApp:** seções em lista (Vendas · Outros lançamentos · Caixa · O que saiu · Entrou · Precisa repor · Esgotados · Estoque do fim do dia).
+
+---
+
+## Rodada final — validação para sinal verde (MVP) — ✅
+
+### Lista oficial aplicada
+- Estoque igual à lista oficial (8 grupos, 51 cores, 238 peças; Rojo → Vermelho, Blanco → Branco).
+- **À venda:** Azul, Plomo, Lila (e Broche Rey, que já nasce à venda quando for cadastrado).
+- **Guardados no estoque (fora da venda):** Broche, Camisa, Broche Médio, Naranja, Dorado.
+- Peça “guardada”:
+  - fica no estoque e no relatório, mas não aparece em Vender e não pode ser vendida nem reservada;
+  - liga e desliga no Estoque (peça ou grupo inteiro);
+  - colocar um grupo em “Para vender” já o põe à venda.
+- Aparelhos que já tinham dados recebem esse padrão uma única vez, sem desfazer o que a pessoa mudou.
+
+### Teste final supremo (bancos temporários, sem tocar nos dados reais)
+- **Macaco nos serviços:** 40.000 ações aleatórias (5 × 8.000), sem erro técnico e sem dado inconsistente.
+- **Macaco na tela:** 4.000 toques aleatórios no app inteiro (4 × 1.000), sem cair na tela de erro e com os dados íntegros.
+- **85 testes automáticos:**
+  - regras, ataques e 10 dias seguidos;
+  - escala de 6 meses (resumo do dia em ~14 ms);
+  - teste por aba;
+  - lista oficial.
+- **Verificação de tipos e build de produção:** ok.
+- **Responsividade:** nenhum vazamento nos 7 tamanhos (280, 320, 360, 375, 390, 412 e 430 px), em todas as abas e janelas.
+
+### Bug importante encontrado e corrigido nesta rodada
+- Depois de uma atualização do app, abrir uma tela carregada sob demanda (ex.: Encerrar o dia) derrubava o app com a mensagem errada “Não foi possível abrir os dados”.
+- Agora o app recarrega sozinho na versão nova; se ainda falhar, avisa “O app foi atualizado” com o botão Atualizar.
+
+### Últimos ajustes visuais
+- **Início:** filtro dos grupos (Todos · À venda · Guardados) com contagem e selo em cada cartão.
+- **Estoque e Vender:** “começou → agora” num componente único (com ▼/▲, repor, esgotado e reservadas); a legenda do Estoque ficou mais visível.
+- **Movimentos do dia:** toques repetidos agrupados (“Saiu 4 · 4 toques”), Desfazer compacto, números do topo como filtro e busca por peça.
+- **Caixa:**
+  - títulos padronizados (Lançar dinheiro · Conta do dia · Movimentado hoje);
+  - formas de pagamento em blocos com porcentagem;
+  - selos “Veio de ontem + Hoje”;
+  - venda mostrando grupo › cor de cada peça.
+- **Relatório do WhatsApp:** agrupado por grupo, com as cores embaixo (“🎀 *Plomo* · • Cor Vermelho: 2”); botão “📋 Copiar texto” com confirmação.
+- **Cadastro:** posição de cada grupo na fila (1º, 2º…) com ⓘ; nova tela de “Nova cor” em 3 passos (grupo, nome e cor, quantidade).
+- **Histórico:**
+  - resumo do mês (vendido, peças, dias com venda, média e melhor dia);
+  - cartões de dia com barra por forma de pagamento.
+
+### O que falta para ir para o celular (fora do código)
+1. `git rm --cached tsconfig.tsbuildinfo` e fazer o commit/push.
+2. No GitHub: Settings › Pages › Source: **GitHub Actions** (o workflow publica sozinho).
+3. Abrir o link no celular, **Adicionar à tela de início**, e fazer um teste rápido real (vender, encerrar, mandar no WhatsApp e testar sem internet).

@@ -18,6 +18,8 @@ export class AppDB extends Dexie {
   cashMovements!: Table<CashMovement, string>;
   settings!: Table<Setting, string>;
   auditLogs!: Table<AuditLog, string>;
+  /** Cópia automática dos dados de antes de receber/restaurar (para "voltar como estava"). Fica fora do backup. */
+  safety!: Table<{ id: string; createdAt: string; json: string; summary: string }, string>;
 
   constructor(name = 'dia-dia') {
     super(name);
@@ -36,6 +38,8 @@ export class AppDB extends Dexie {
       settings: 'id, &key',
       auditLogs: 'id, entityType, entityId, createdAt',
     });
+    // v2: só acrescenta a tabela da cópia de segurança (dados existentes não mudam)
+    this.version(2).stores({ safety: 'id' });
   }
 
   get allTables() {

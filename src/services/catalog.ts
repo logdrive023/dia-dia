@@ -1,16 +1,33 @@
 import { db } from '../db/db';
 import type { Group, Variant } from '../db/types';
-import { normalize, nowIso, uid } from '../lib/util';
+import { isCents, MAX_QTY, normalize, nowIso, uid } from '../lib/util';
 import { audit } from './audit';
 import { getSetting, setSetting } from './settings';
 
 export class UserError extends Error {}
 
+const MAX_NAME = 40;
+
+/** Estoque ideal/mínimo: inteiro de 0 a MAX_QTY; preço: centavos válidos. null = não definido. */
+function validateNumbers(p: { idealStock?: number | null; minimumStock?: number | null; optionalPriceInCents?: number | null }) {
+  for (const k of ['idealStock', 'minimumStock'] as const) {
+    const v = p[k];
+    if (v !== undefined && v !== null && !(Number.isInteger(v) && v >= 0 && v <= MAX_QTY)) throw new UserError('Estoque ideal inválido.');
+  }
+  const pr = p.optionalPriceInCents;
+  if (pr !== undefined && pr !== null && !isCents(pr)) throw new UserError('Preço inválido.');
+}
+function cleanName(raw: string, what: string) {
+  const name = raw.replace(/\s+/g, ' ').trim();
+  if (!name) throw new UserError(`Informe o nome ${what}.`);
+  if (name.length > MAX_NAME) throw new UserError(`Nome muito longo (máximo ${MAX_NAME} letras).`);
+  return name;
+}
+
 // ---------------- grupos ----------------
 
 export async function createGroup(input: { name: string; color?: string; icon?: string; description?: string }) {
-  const name = input.name.trim();
-  if (!name) throw new UserError('Informe o nome do grupo.');
+  const name = cleanName(input.name, 'do grupo');
   return db.transaction('rw', db.groups, db.auditLogs, async () => {
     const all = await db.groups.toArray();
     if (all.some((g) => !g.archivedAt && normalize(g.name) === normalize(name)))
@@ -32,8 +49,7 @@ export async function updateGroup(id: string, patch: Partial<Pick<Group, 'name' 
     const g = await db.groups.get(id);
     if (!g) throw new UserError('Grupo não encontrado.');
     if (patch.name !== undefined) {
-      const name = patch.name.trim();
-      if (!name) throw new UserError('O nome não pode ficar vazio.');
+      const name = cleanName(patch.name, '');
       const dup = (await db.groups.toArray()).some((x) => x.id !== id && !x.archivedAt && normalize(x.name) === normalize(name));
       if (dup) throw new UserError(`Já existe um grupo chamado "${name}".`);
       patch.name = name;
@@ -49,6 +65,12 @@ export async function setGroupActive(id: string, active: boolean) {
 }
 
 export async function archiveGroup(id: string, archived: boolean) {
+  if (!archived) {
+    const g = await db.groups.get(id);
+    const all = await db.groups.toArray();
+    if (g && all.some((x) => x.id !== id && !x.archivedAt && normalize(x.name) === normalize(g.name)))
+      throw new UserError(`Já existe outro grupo ativo chamado "${g.name}". Renomeie um deles antes.`);
+  }
   await db.groups.update(id, { archivedAt: archived ? nowIso() : null, active: !archived, updatedAt: nowIso() });
   await audit('group', id, archived ? 'archive' : 'unarchive');
 }
@@ -94,9 +116,13 @@ export async function deleteGroup(id: string) {
 
 /** Move todas as variações de um grupo para outro (histórico preservado: só muda o vínculo atual). */
 export async function transferVariants(fromGroupId: string, toGroupId: string) {
-  await db.transaction('rw', db.variants, db.auditLogs, async () => {
+  if (fromGroupId === toGroupId) throw new UserError('Escolha outro grupo de destino.');
+  await db.transaction('rw', db.variants, db.groups, db.auditLogs, async () => {
+    if (!(await db.groups.get(toGroupId))) throw new UserError('Grupo de destino não encontrado.');
     const vs = await db.variants.where('groupId').equals(fromGroupId).toArray();
     const target = await db.variants.where('groupId').equals(toGroupId).toArray();
+    const clash = vs.filter((v) => !v.archivedAt && target.some((t) => !t.archivedAt && normalize(t.name) === normalize(v.name)));
+    if (clash.length) throw new UserError(`O destino já tem: ${clash.map((v) => v.name).join(', ')}. Renomeie antes de transferir.`);
     let order = target.length;
     for (const v of vs) {
       await db.variants.update(v.id, { groupId: toGroupId, displayOrder: order++, updatedAt: nowIso() });
@@ -108,15 +134,16 @@ export async function transferVariants(fromGroupId: string, toGroupId: string) {
 // ---------------- variações ----------------
 
 export async function createVariant(input: {
-  groupId: string; name: string; startQuantity?: number; minimumStock?: number | null;
+  groupId: string; name: string; startQuantity?: number; minimumStock?: number | null; idealStock?: number | null;
   optionalPriceInCents?: number | null; color?: string; description?: string; notes?: string;
   /** Se informado, a quantidade inicial entra neste dia (se existir e estiver aberto). */
   dailyRecordId?: string | null;
 }) {
-  const name = input.name.trim();
-  if (!name) throw new UserError('Informe o nome da variação.');
-  const qty = Math.max(0, Math.floor(input.startQuantity ?? 0));
-  return db.transaction('rw', [db.variants, db.groups, db.dailyStockItems, db.dailyRecords, db.stockMovements, db.auditLogs], async () => {
+  const name = cleanName(input.name, 'da variação');
+  const qty = input.startQuantity ?? 0;
+  if (!Number.isInteger(qty) || qty < 0 || qty > MAX_QTY) throw new UserError('Quantidade inválida.');
+  validateNumbers(input);
+  return db.transaction('rw', [db.variants, db.groups, db.dailyStockItems, db.dailyRecords, db.stockMovements, db.auditLogs, db.settings], async () => {
     if (!(await db.groups.get(input.groupId))) throw new UserError('Grupo não encontrado.');
     const siblings = await db.variants.where('groupId').equals(input.groupId).toArray();
     if (siblings.some((v) => !v.archivedAt && normalize(v.name) === normalize(name)))
@@ -125,12 +152,14 @@ export async function createVariant(input: {
     const v: Variant = {
       id: uid(), groupId: input.groupId, name, description: input.description, color: input.color,
       displayOrder: siblings.length, active: true, archivedAt: null,
-      minimumStock: input.minimumStock ?? null, startQuantity: qty,
+      minimumStock: input.minimumStock ?? null, idealStock: input.idealStock ?? null, startQuantity: qty,
       optionalPriceInCents: input.optionalPriceInCents ?? null, notes: input.notes, createdAt: now, updatedAt: now,
+      forSale: await groupIsForSale(input.groupId),
     };
     await db.variants.add(v);
     if (input.dailyRecordId) {
       const day = await db.dailyRecords.get(input.dailyRecordId);
+      if (day && day.status === 'closed') throw new UserError('O dia está encerrado. Reabra para lançar a quantidade.');
       if (day) {
         await db.dailyStockItems.add({ id: uid(), dailyRecordId: day.id, variantId: v.id, initialQuantity: 0, currentQuantity: qty });
         if (qty > 0)
@@ -144,20 +173,20 @@ export async function createVariant(input: {
 }
 
 export async function updateVariant(id: string, patch: Partial<Pick<Variant,
-  'name' | 'description' | 'color' | 'minimumStock' | 'optionalPriceInCents' | 'notes'>>) {
+  'name' | 'description' | 'color' | 'minimumStock' | 'idealStock' | 'optionalPriceInCents' | 'notes'>>) {
   return db.transaction('rw', db.variants, db.auditLogs, async () => {
     const v = await db.variants.get(id);
     if (!v) throw new UserError('Variação não encontrada.');
     if (patch.name !== undefined) {
-      const name = patch.name.trim();
-      if (!name) throw new UserError('O nome não pode ficar vazio.');
+      const name = cleanName(patch.name, '');
       const sib = await db.variants.where('groupId').equals(v.groupId).toArray();
       if (sib.some((x) => x.id !== id && !x.archivedAt && normalize(x.name) === normalize(name)))
         throw new UserError(`Já existe "${name}" neste grupo.`);
       patch.name = name;
       if (name !== v.name) await audit('variant', id, 'rename', v.name, name);
     }
-    for (const k of ['minimumStock', 'optionalPriceInCents'] as const)
+    validateNumbers(patch);
+    for (const k of ['minimumStock', 'idealStock', 'optionalPriceInCents'] as const)
       if (patch[k] !== undefined && patch[k] !== v[k]) await audit('variant', id, `set_${k}`, v[k], patch[k]);
     await db.variants.update(id, { ...patch, updatedAt: nowIso() });
   });
@@ -169,6 +198,12 @@ export async function setVariantActive(id: string, active: boolean) {
 }
 
 export async function archiveVariant(id: string, archived: boolean) {
+  if (!archived) {
+    const v = await db.variants.get(id);
+    const sib = v ? await db.variants.where('groupId').equals(v.groupId).toArray() : [];
+    if (v && sib.some((x) => x.id !== id && !x.archivedAt && normalize(x.name) === normalize(v.name)))
+      throw new UserError(`O grupo já tem outra "${v.name}" ativa. Renomeie uma delas antes.`);
+  }
   await db.variants.update(id, { archivedAt: archived ? nowIso() : null, active: !archived, updatedAt: nowIso() });
   await audit('variant', id, archived ? 'archive' : 'unarchive');
 }
@@ -226,8 +261,30 @@ export async function deleteCategory(id: string) {
 
 /** Cadastra um grupo pendente da seleção "Para vender" e troca a entrada pendente pelo grupo real. */
 export async function registerPendingSellGroup(pendingName: string, name = pendingName) {
-  const g = await createGroup({ name, icon: '👑' });
+  // se já foi cadastrado por outro caminho, só liga a seleção ao grupo existente
+  const existing = (await db.groups.toArray()).find((x) => !x.archivedAt && normalize(x.name) === normalize(name));
+  const g = existing ?? await createGroup({ name, icon: '👑' });
+  await setForSale((await db.variants.where('groupId').equals(g.id).toArray()).map((v) => v.id), true);
   const sell = await getSetting('sellGroups');
   await setSetting('sellGroups', sell.map((s) => (s.pendingName === pendingName ? { groupId: g.id, highlight: s.highlight } : s)));
   return g;
+}
+
+/** Coloca ou tira peças da venda (ficam no estoque, só não aparecem em Vender). */
+export async function setForSale(variantIds: string[], forSale: boolean) {
+  await db.transaction('rw', db.variants, db.auditLogs, async () => {
+    for (const id of variantIds) {
+      const v = await db.variants.get(id);
+      if (!v || (v.forSale !== false) === forSale) continue;
+      await db.variants.update(id, { forSale, updatedAt: nowIso() });
+      await audit('variant', id, forSale ? 'for_sale_on' : 'for_sale_off');
+    }
+  });
+}
+
+/** O grupo está em "Para vender" (ou já tem peça à venda)? Usado para a variação nova já nascer certa. */
+async function groupIsForSale(groupId: string) {
+  const sell = await getSetting('sellGroups');
+  if (sell.some((e) => e.groupId === groupId)) return true;
+  return (await db.variants.where('groupId').equals(groupId).toArray()).some((v) => v.forSale !== false && !v.archivedAt);
 }

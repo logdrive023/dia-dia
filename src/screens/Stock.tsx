@@ -4,13 +4,15 @@ import { db } from '../db/db';
 import type { MovementType, StockMovement } from '../db/types';
 import { normalize } from '../lib/util';
 import { moveStock, ReservedError, setStock, undoMovement, type StockOpts } from '../services/days';
-import { loadStockRows, type StockRow } from '../services/summary';
+import { setForSale } from '../services/catalog';
+import { effectiveMovements, loadStockRows, type StockRow } from '../services/summary';
 import { useApp } from '../state';
 import { DayNotices, DayBar, StartDayCard } from '../components/day';
-import { Badge, Button, Card, Chip, Empty, Field, Input, Sheet, Swatch, useBusy, useUi } from '../components/ui';
+import { StockFlow } from '../components/StockFlow';
+import { Badge, Button, Card, Chip, Empty, Field, HelpButton, InfoTip, Input, Sheet, Swatch, useBusy, useUi } from '../components/ui';
 
 type Filter = 'todos' | 'com' | 'sem' | 'baixo' | 'vender';
-const FILTERS: [Filter, string][] = [['todos', 'Todos'], ['com', 'Com estoque'], ['sem', 'Sem estoque'], ['baixo', 'Estoque baixo'], ['vender', 'Para vender']];
+const FILTERS: [Filter, string][] = [['todos', 'Todos'], ['baixo', 'Para repor'], ['com', 'Com estoque'], ['sem', 'Sem estoque'], ['vender', 'Para vender']];
 
 export const MOVE_LABEL: Record<MovementType, string> = {
   venda: 'Venda', entrada: 'Entrada', saida: 'Saída', perda: 'Perda', ajuste: 'Ajuste', correcao: 'Correção',
@@ -37,7 +39,7 @@ export default function Stock() {
       if (nq && !normalize(`${r.group.name} ${r.variant.name}`).includes(nq)) return false;
       if (filter === 'com') return r.item.currentQuantity > 0;
       if (filter === 'sem') return r.item.currentQuantity <= 0;
-      if (filter === 'baixo') return r.low || r.out;
+      if (filter === 'baixo') return r.restock > 0 || r.out;
       if (filter === 'vender') return sellIds.has(r.group.id);
       return true;
     });
@@ -57,62 +59,126 @@ export default function Stock() {
   };
 
   const total = rows?.reduce((s, r) => s + r.item.currentQuantity, 0) ?? 0;
+  const live = (rows ?? []).filter((r) => !r.variant.archivedAt && !r.group.archivedAt && r.variant.active && r.group.active);
+  const restockTotal = live.reduce((s, r) => s + r.restock, 0);
+  const outCount = live.filter((r) => r.out).length;
 
   return (
     <div>
-      <DayBar />
+      <DayBar compact />
       <DayNotices />
       {day === null && <StartDayCard />}
       {day && (
         <>
-          <div className="flex items-center justify-between mb-2">
-            <div><span className="text-2xl font-extrabold tabular-nums">{total}</span> <span className="text-slate-500 text-sm">peças no total</span></div>
-            <Button size="sm" variant="outline" className="whitespace-nowrap" onClick={() => setShowMoves(true)}>🧾 Movimentos do dia</Button>
+          {/* resumo + ajuda + movimentos */}
+          <Card className="p-3.5 mb-3">
+            <div className="flex items-center gap-3">
+              <span className="w-12 h-12 rounded-xl bg-blue-50 flex items-center justify-center text-2xl">📦</span>
+              <div className="flex-1 min-w-0">
+                <div className="text-[28px] font-extrabold tabular-nums leading-none">{total}</div>
+                <div className="text-[13px] text-slate-500">peças no estoque</div>
+              </div>
+              <div className="flex flex-col items-end gap-1">
+                {restockTotal > 0 && <button onClick={() => setFilter('baixo')} className="rounded-full bg-orange-100 text-orange-700 px-2.5 py-1 text-[12px] font-bold">🔁 repor {restockTotal}</button>}
+                {outCount > 0 && <button onClick={() => setFilter('sem')} className="rounded-full bg-red-100 text-red-700 px-2.5 py-1 text-[12px] font-bold">🚫 {outCount} esgotado{outCount > 1 ? 's' : ''}</button>}
+              </div>
+            </div>
+            <div className="flex gap-2 mt-3">
+              <button onClick={() => setShowMoves(true)} className="flex-1 h-11 rounded-xl bg-slate-100 text-[14px] font-semibold text-slate-700 active:bg-slate-200">🧾 Movimentos do dia</button>
+              {!locked && (
+                <HelpButton icon="❓" label="Como usar" title="Estoque: + e −" example={[
+                  ['📥', <>Chegaram 3 Plomo Vermelho → 3× no <b>+</b></>],
+                  ['💔', <>Uma peça manchou → 1× no <b>−</b></>],
+                  ['🔢', <>Contou 12 em vez de 14 → toque no <b>número</b> › Definir › 12</>],
+                  ['🛍️', <>Vendeu? Use a aba <b>Vender</b> (o dinheiro entra no caixa)</>],
+                ]}>
+                  <span className="grid grid-cols-3 gap-2 text-center mb-2">
+                    <span className="rounded-lg bg-emerald-50 py-2"><b className="block text-lg text-emerald-600">+</b><span className="text-[12px] text-emerald-800">Entrou peça</span></span>
+                    <span className="rounded-lg bg-red-50 py-2"><b className="block text-lg text-red-600">−</b><span className="text-[12px] text-red-800">Saiu (não é venda)</span></span>
+                    <span className="rounded-lg bg-slate-100 py-2"><b className="block text-lg text-slate-700">12</b><span className="text-[12px] text-slate-700">Toque: ajustar</span></span>
+                  </span>
+                  Aqui você mexe só no estoque. Errou um toque? Aparece “Desfazer” na hora, e também em Movimentos do dia.
+                </HelpButton>
+              )}
+            </div>
+          </Card>
+          <div className="sticky top-[calc(64px+env(safe-area-inset-top))] z-10 bg-slate-100 -mx-4 px-4 pt-1 pb-2 mb-1">
+            <Input placeholder="🔍 Buscar grupo ou cor..." value={q} onChange={(e) => setQ(e.target.value)} />
+            <div className="flex gap-2 overflow-x-auto no-scrollbar mt-2 -mx-4 px-4 pb-1">
+              {FILTERS.map(([k, l]) => <Chip key={k} active={filter === k} onClick={() => setFilter(k)}>{l}</Chip>)}
+            </div>
           </div>
-          <Input placeholder="🔍 Buscar grupo ou cor..." value={q} onChange={(e) => setQ(e.target.value)} />
-          <div className="flex gap-2 overflow-x-auto no-scrollbar my-3 -mx-4 px-4">
-            {FILTERS.map(([k, l]) => <Chip key={k} active={filter === k} onClick={() => setFilter(k)}>{l}</Chip>)}
-          </div>
+          {groups.length > 0 && (
+            <div className="flex items-center gap-2.5 mb-2.5 rounded-xl bg-blue-50 border border-blue-200 pl-3 pr-2 py-2">
+              <span className="text-lg">📖</span>
+              <span className="flex-1 text-[13px] text-blue-900 leading-snug">
+                Cada peça mostra <b className="whitespace-nowrap">começou → agora</b>.
+                <span className="block text-[12px] text-blue-800/80">Toque no <b>número</b> para ajustar · <b>+</b> entrou · <b>−</b> saiu</span>
+              </span>
+              <InfoTip title="Como ler cada linha" example={[
+                ['🌅', <><b>Começou com 14</b> = quantas tinha quando o dia começou</>],
+                ['🌙', <><b>Agora 12</b> = quantas tem neste momento (no fim do dia, é o “terminou com”)</>],
+                [<span className="rounded-full bg-red-100 text-red-700 px-1.5 text-[12px] font-bold">−2</span>, 'Diminuiu 2 hoje (vendeu, saiu ou perdeu)'],
+                [<span className="rounded-full bg-emerald-100 text-emerald-700 px-1.5 text-[12px] font-bold">+3</span>, 'Aumentou 3 hoje (chegou mercadoria)'],
+                [<span className="rounded-full bg-orange-100 text-orange-700 px-1.5 text-[12px] font-bold">repor 2</span>, 'Faltam 2 para voltar ao estoque ideal → já aparece para repor'],
+              ]}>Assim dá para ver de relance o que mudou em cada cor hoje.</InfoTip>
+            </div>
+          )}
           {!groups.length && <Empty icon="🔍" title="Nada encontrado">Tente outro filtro ou busca.</Empty>}
           <div className="space-y-2.5">
             {groups.map(({ group, rows: gr }) => {
               const isOpen = open[group.id] ?? (!!q || filter !== 'todos');
               const sum = gr.reduce((s, r) => s + r.item.currentQuantity, 0);
-              const alerts = gr.filter((r) => r.low || r.out).length;
+              const alerts = gr.reduce((s, r) => s + r.restock, 0);
               return (
                 <Card key={group.id} className="overflow-hidden">
-                  <button className="w-full flex items-center gap-3 p-3.5 text-left" onClick={() => setOpen({ ...open, [group.id]: !isOpen })}>
-                    <span className="w-10 h-10 rounded-xl flex items-center justify-center text-xl" style={{ background: group.color + '22' }}>{group.icon || '📦'}</span>
+                  <button className="relative w-full flex items-center gap-3 pl-4 pr-3 py-3 text-left active:bg-slate-50" onClick={() => setOpen({ ...open, [group.id]: !isOpen })}>
+                    <span className="absolute left-0 top-0 bottom-0 w-1.5" style={{ background: group.color }} />
+                    <span className="w-11 h-11 rounded-xl flex items-center justify-center text-xl shrink-0" style={{ background: group.color + '22' }}>{group.icon || '📦'}</span>
                     <span className="flex-1 min-w-0">
-                      <span className="block font-bold text-slate-800 truncate">{group.name} {group.archivedAt && <Badge>arquivado</Badge>}</span>
-                      <span className="block text-xs text-slate-500">{gr.length} variações{alerts ? ` · ${alerts} p/ repor` : ''}</span>
+                      <span className="block font-bold text-slate-800 break-words text-[16px]">{group.name} {group.archivedAt && <Badge>arquivado</Badge>}</span>
+                      <span className="block text-[11px] text-slate-500 font-semibold mt-0.5">🎨 {gr.length} {gr.length === 1 ? 'cor' : 'cores'}</span>
+                      <StockFlow size="sm" start={gr.reduce((n, r) => n + r.item.initialQuantity, 0)} now={sum} restock={alerts} />
                     </span>
-                    <span className="text-2xl font-extrabold tabular-nums">{sum}</span>
-                    <span className={`text-slate-400 transition ${isOpen ? 'rotate-90' : ''}`}>›</span>
+                    <span className="text-right">
+                      <span className="block text-2xl font-extrabold tabular-nums leading-none">{sum}</span>
+                      <span className="block text-[11px] text-slate-500">peças</span>
+                    </span>
+                    <span className={`text-slate-400 text-lg transition ${isOpen ? 'rotate-90' : ''}`}>›</span>
                   </button>
                   {isOpen && (
                     <div className="border-t border-slate-100 divide-y divide-slate-100">
+                      {(() => {
+                        const off = gr.filter((r) => r.variant.forSale === false).length;
+                        const allOff = off === gr.length;
+                        return (
+                          <div className="flex items-center gap-2 px-3.5 py-2 bg-slate-50 text-[12px] text-slate-600">
+                            <span className="flex-1">{off === 0 ? '🏷️ Todas as cores estão à venda' : allOff ? '🔒 Grupo inteiro guardado (fora da venda)' : `🏷️ ${gr.length - off} à venda · 🔒 ${off} guardada${off > 1 ? 's' : ''}`}</span>
+                            <button onClick={() => run(() => setForSale(gr.map((r) => r.variant.id), allOff), allOff ? 'Grupo à venda' : 'Grupo guardado')}
+                              className={`h-9 px-3 rounded-lg font-semibold ${allOff ? 'bg-blue-600 text-white' : 'bg-white border border-slate-200 text-slate-700'}`}>
+                              {allOff ? '🏷️ Pôr à venda' : '🔒 Guardar todas'}
+                            </button>
+                          </div>
+                        );
+                      })()}
                       {gr.map((r) => (
                         <div key={r.variant.id} className="flex items-center gap-2 pl-3.5 pr-2 py-2">
-                          <button className="flex-1 flex items-center gap-2.5 min-w-0 text-left py-1" onClick={() => setSel(r)}>
-                            <Swatch color={r.variant.color} />
+                          <button className="flex-1 flex items-center gap-3 min-w-0 text-left py-1" onClick={() => setSel(r)}>
+                            <Swatch color={r.variant.color} size={24} />
                             <span className="min-w-0">
-                              <span className="block font-medium text-slate-800 truncate">{r.variant.name}</span>
-                              <span className="block text-[11px]">
-                                {r.out ? <span className="text-red-600 font-semibold">esgotado</span>
-                                  : r.low ? <span className="text-orange-600 font-semibold">baixo (mín. {r.min})</span>
-                                  : <span className="text-slate-400">início {r.item.initialQuantity}</span>}
-                                {r.reserved > 0 && <span className="text-purple-600 font-semibold"> · {r.reserved} reserv.</span>}
-                              </span>
+                              <span className="block font-semibold text-slate-800 break-words">{r.variant.name}</span>
+                              <StockFlow start={r.item.initialQuantity} now={r.item.currentQuantity} restock={r.restock} out={r.out} reserved={r.reserved} />
+                              {r.variant.forSale === false && <span className="inline-block mt-1 rounded-full bg-slate-800 text-white px-2 py-0.5 text-[10px] font-bold">🔒 guardada · fora da venda</span>}
                             </span>
                           </button>
-                          <button disabled={locked || r.item.currentQuantity <= 0} onClick={() => quick(r, -1)}
-                            className="w-10 h-10 rounded-xl bg-red-50 text-red-600 text-xl font-bold disabled:opacity-30">−</button>
-                          <button onClick={() => setSel(r)} className={`w-12 text-center text-xl font-extrabold tabular-nums ${r.item.currentQuantity <= 0 ? 'text-red-600' : ''}`}>
+                          <button disabled={locked || r.item.currentQuantity <= 0} onClick={() => quick(r, -1)} aria-label={`Saiu 1 ${r.variant.name}`}
+                            className="w-11 h-11 rounded-xl bg-red-50 text-red-600 text-xl font-bold disabled:opacity-30 active:scale-95">−</button>
+                          <button onClick={() => setSel(r)} title="Toque para ajustar"
+                            className={`w-12 h-11 rounded-xl border border-slate-200 bg-white text-center text-xl font-extrabold tabular-nums active:bg-slate-50 ${r.item.currentQuantity <= 0 ? 'text-red-600' : ''}`}>
                             {r.item.currentQuantity}
                           </button>
-                          <button disabled={locked} onClick={() => quick(r, 1)}
-                            className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 text-xl font-bold disabled:opacity-30">+</button>
+                          <button disabled={locked} onClick={() => quick(r, 1)} aria-label={`Entrou 1 ${r.variant.name}`}
+                            className="w-11 h-11 rounded-xl bg-emerald-50 text-emerald-600 text-xl font-bold disabled:opacity-30 active:scale-95">+</button>
                         </div>
                       ))}
                     </div>
@@ -121,7 +187,7 @@ export default function Stock() {
               );
             })}
           </div>
-          <p className="text-xs text-slate-400 text-center mt-4">“+” = entrada · “−” = saída (não é venda; para vender use a aba Vender). Toque no número para ajustar, perda ou ver os movimentos.</p>
+
         </>
       )}
       <VariantSheet row={sel} onClose={() => setSel(null)} locked={locked} />
@@ -150,6 +216,35 @@ function useReserveGuard() {
   };
 }
 
+/** À venda x guardada (fica no estoque, mas some de Vender). */
+function ForSaleSwitch({ variantId }: { variantId: string }) {
+  const { run } = useUi();
+  const v = useLiveQuery(() => db.variants.get(variantId), [variantId]);
+  if (!v) return null;
+  const on = v.forSale !== false;
+  return (
+    <div className={`flex items-center gap-3 rounded-xl border px-3 py-2 mb-3 ${on ? 'bg-emerald-50 border-emerald-200' : 'bg-slate-100 border-slate-300'}`}>
+      <span className="text-xl">{on ? '🏷️' : '🔒'}</span>
+      <span className="flex-1 min-w-0">
+        <span className="block font-bold text-slate-800 text-[14px]">{on ? 'À venda' : 'Guardada (fora da venda)'}</span>
+        <span className="block text-[12px] text-slate-500">{on ? 'Aparece na aba Vender' : 'Fica no estoque, mas não aparece em Vender'}</span>
+      </span>
+      <InfoTip title="À venda ou guardada?" example={[
+        ['🏷️', <><b>À venda:</b> aparece em Vender (o normal)</>],
+        ['🔒', <><b>Guardada:</b> peça de mostruário, separada para encomenda ou com defeito</>],
+        ['📦', 'Guardada continua contando no estoque e no relatório'],
+        ['🔁', 'Dá para colocar à venda de novo a qualquer momento'],
+      ]}>Use para peças que você tem, mas não quer vender agora.</InfoTip>
+      <button type="button" role="switch" aria-checked={on} aria-label={on ? 'À venda' : 'Guardada'}
+        onClick={() => run(() => setForSale([variantId], !on), on ? 'Peça guardada' : 'Peça à venda')} className="min-h-11 flex items-center">
+        <span className={`w-12 h-7 rounded-full p-0.5 transition ${on ? 'bg-emerald-500' : 'bg-slate-400'}`}>
+          <span className={`block w-6 h-6 rounded-full bg-white shadow transition ${on ? 'translate-x-5' : ''}`} />
+        </span>
+      </button>
+    </div>
+  );
+}
+
 function VariantSheet({ row, onClose, locked }: { row: StockRow | null; onClose: () => void; locked: boolean }) {
   const guarded = useReserveGuard();
   const [busy, wrap] = useBusy();
@@ -176,6 +271,7 @@ function VariantSheet({ row, onClose, locked }: { row: StockRow | null; onClose:
   });
   return (
     <Sheet open onClose={onClose} title={<span className="flex items-center gap-2"><Swatch color={row.variant.color} />{row.group.name} · {row.variant.name}</span>}>
+      <ForSaleSwitch variantId={row.variant.id} />
       <div className="grid grid-cols-3 gap-2 text-center mb-4">
         <Card className="p-2"><div className="text-xs text-slate-500">Início do dia</div><div className="text-xl font-bold">{row.item.initialQuantity}</div></Card>
         <Card className="p-2"><div className="text-xs text-slate-500">Agora</div><div className="text-xl font-extrabold text-blue-600">{current}</div></Card>
@@ -205,50 +301,177 @@ function VariantSheet({ row, onClose, locked }: { row: StockRow | null; onClose:
   );
 }
 
-function MoveList({ moves, locked, names }: { moves: StockMovement[]; locked: boolean; names?: Map<string, string> }) {
+const MOVE_ICON: Record<MovementType, string> = {
+  venda: '🛍️', entrada: '📥', saida: '📤', perda: '💔', ajuste: '✏️', correcao: '↩️', reserva: '📌', cancelamento: '✖️',
+};
+
+/** Frase curta e direta: "Vendeu 2", "Entrou 5", "Ajustou para 10"... */
+function moveText(m: StockMovement) {
+  const n = Math.abs(m.quantity);
+  switch (m.type) {
+    case 'venda': return `Vendeu ${n}`;
+    case 'entrada': return `Entrou ${n}`;
+    case 'saida': return `Saiu ${n}`;
+    case 'perda': return `Perdeu ${n}`;
+    case 'ajuste': return `Ajustou para ${m.newBalance}`;
+    case 'correcao': return m.reversedMovementId ? `Desfeito (${m.quantity > 0 ? '+' : '−'}${n})` : `Correção ${m.quantity > 0 ? '+' : '−'}${n}`;
+    case 'cancelamento': return `Venda cancelada (+${n} de volta)`;
+    case 'reserva': return m.description || 'Reserva';
+  }
+}
+
+type Piece = { group: string; icon: string; groupColor: string; name: string; color?: string };
+
+const MOVE_TONE: Record<MovementType, string> = {
+  venda: 'bg-blue-100 text-blue-800', entrada: 'bg-emerald-100 text-emerald-800', saida: 'bg-red-100 text-red-700', perda: 'bg-red-100 text-red-700',
+  ajuste: 'bg-slate-200 text-slate-700', correcao: 'bg-slate-200 text-slate-700', reserva: 'bg-purple-100 text-purple-800', cancelamento: 'bg-amber-100 text-amber-800',
+};
+
+/** Toques seguidos na mesma peça (ex.: “Saiu 1” quatro vezes) viram uma linha só. */
+function groupMoves(moves: StockMovement[], undone: Set<string | null | undefined>) {
+  const out: StockMovement[][] = [];
+  for (const m of moves) {
+    const last = out[out.length - 1];
+    const head = last?.[0];
+    const sameKind = head && head.variantId === m.variantId && head.type === m.type && ['entrada', 'saida', 'perda'].includes(m.type)
+      && !m.orderId && !head.orderId && !m.reversedMovementId && !head.reversedMovementId && undone.has(m.id) === undone.has(head.id)
+      && Math.abs(Date.parse(head.createdAt) - Date.parse(m.createdAt)) < 10 * 60_000;
+    if (sameKind) last.push(m); else out.push([m]);
+  }
+  return out;
+}
+
+function MoveList({ moves, locked, pieces }: { moves: StockMovement[]; locked: boolean; pieces?: Map<string, Piece> }) {
   const { run, confirm } = useUi();
-  const reversed = new Set(moves.map((m) => m.reversedMovementId).filter(Boolean));
-  if (!moves.length) return <p className="text-sm text-slate-400">Nenhum movimento.</p>;
+  const undone = new Set(moves.map((m) => m.reversedMovementId).filter(Boolean));
+  if (!moves.length) return <Empty icon="🧾" title="Nenhum movimento aqui">Vendas, entradas e ajustes do dia aparecem aqui.</Empty>;
   return (
-    <div className="space-y-1.5">
-      {moves.map((m) => (
-        <div key={m.id} className="flex items-center gap-2 bg-white rounded-xl border border-slate-200 px-3 py-2 text-sm">
-          <span className="text-slate-400 tabular-nums text-xs w-10">{new Date(m.createdAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</span>
-          <span className="flex-1 min-w-0">
-            <span className="font-semibold">{MOVE_LABEL[m.type]}</span>
-            {names && <span className="text-slate-600"> · {names.get(m.variantId)}</span>}
-            {m.description && <span className="block text-xs text-slate-500 truncate">{m.description}</span>}
-          </span>
-          <span className={`font-bold tabular-nums ${m.quantity > 0 ? 'text-emerald-600' : m.quantity < 0 ? 'text-red-600' : 'text-purple-600'}`}>
-            {m.quantity > 0 ? '+' : ''}{m.quantity || '—'}
-          </span>
-          <span className="text-xs text-slate-400 tabular-nums w-12 text-right">{m.previousBalance}→{m.newBalance}</span>
-          {!locked && m.quantity !== 0 && !m.orderId && !m.reversedMovementId && !reversed.has(m.id) && (
-            <button className="text-xs text-blue-600 font-semibold" onClick={async () => {
-              if (await confirm({ title: 'Desfazer movimento?', message: 'Será lançada uma correção inversa. Nada é apagado.', confirm: 'Desfazer' }))
-                run(() => undoMovement(m.id), 'Desfeito');
-            }}>Desfazer</button>
-          )}
-        </div>
-      ))}
+    <div className="space-y-2">
+      {groupMoves(moves, undone).map((grp) => {
+        const m = grp[0]; // mais recente
+        const oldest = grp[grp.length - 1];
+        const total = grp.reduce((s, x) => s + x.quantity, 0);
+        const shown = { ...m, quantity: total, previousBalance: oldest.previousBalance };
+        const isUndone = undone.has(m.id);
+        const pc = pieces?.get(m.variantId);
+        const canUndo = !locked && m.quantity !== 0 && !m.orderId && !m.reversedMovementId && !isUndone;
+        return (
+          <div key={m.id} className={`bg-white rounded-2xl border border-slate-200 px-3 py-2.5 ${isUndone ? 'opacity-50' : ''}`}>
+            <div className="flex items-center gap-2">
+              <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[13px] font-bold ${MOVE_TONE[m.type]} ${isUndone ? 'line-through' : ''}`}>
+                {MOVE_ICON[m.type]} {moveText(shown)}
+              </span>
+              {grp.length > 1 && <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-500">{grp.length} toques</span>}
+              {isUndone && <span className="text-[11px] font-semibold text-slate-500">desfeito</span>}
+              <span className="flex-1" />
+              <span className="text-[12px] text-slate-400 tabular-nums">🕒 {new Date(m.createdAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</span>
+            </div>
+            <div className="flex items-center gap-2 mt-2">
+              {pc ? (
+                <span className="flex items-center gap-1.5 min-w-0 flex-1">
+                  <span>{pc.icon}</span>
+                  <span className="text-[13px] font-bold shrink-0" style={{ color: pc.groupColor }}>{pc.group}</span>
+                  <span className="text-slate-300">›</span>
+                  <Swatch color={pc.color} size={14} />
+                  <span className="text-[14px] font-semibold text-slate-800 break-words">{pc.name}</span>
+                </span>
+              ) : <span className="flex-1 text-[12px] text-slate-500 break-words">{m.type !== 'reserva' && m.description && m.description !== 'Desfazer movimentação' ? m.description : ''}</span>}
+              {shown.quantity !== 0 && (
+                <span className="flex items-center gap-1 text-[13px] tabular-nums shrink-0" title="Estoque antes → depois">
+                  <span className="rounded-md bg-slate-100 px-1.5 py-0.5 text-slate-500">{shown.previousBalance}</span>
+                  <span className="text-slate-400">→</span>
+                  <span className={`rounded-md px-1.5 py-0.5 font-bold ${shown.quantity > 0 ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-700'}`}>{m.newBalance}</span>
+                </span>
+              )}
+              {canUndo && (
+                <button aria-label={`Desfazer ${moveText(m)}`} className="h-10 px-2.5 rounded-lg bg-slate-100 text-[12px] text-slate-700 font-semibold active:bg-slate-200 shrink-0" onClick={async () => {
+                  if (await confirm({ title: grp.length > 1 ? 'Desfazer o último toque?' : 'Desfazer este movimento?',
+                    message: `“${moveText(m)}” volta atrás${grp.length > 1 ? ` (os outros ${grp.length - 1} continuam)` : ''}. Fica registrado como desfeito; nada é apagado.`, confirm: 'Desfazer' }))
+                    run(() => undoMovement(m.id), 'Desfeito');
+                }}>↩️ {grp.length > 1 ? 'Desfazer 1' : 'Desfazer'}</button>
+              )}
+            </div>
+            {pc && m.type !== 'reserva' && m.description && m.description !== 'Desfazer movimentação' && (
+              <div className="text-[12px] text-slate-500 mt-1 break-words">📝 {m.description}</div>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }
 
+type MoveFilter = 'todos' | 'venda' | 'entrada' | 'saida' | 'ajuste';
+const MOVE_FILTERS: [MoveFilter, string, MovementType[]][] = [
+  ['todos', 'Todos', []], ['venda', '🛍️ Vendas', ['venda', 'cancelamento']], ['entrada', '📥 Entradas', ['entrada']],
+  ['saida', '📤 Saídas e perdas', ['saida', 'perda']], ['ajuste', '✏️ Ajustes', ['ajuste', 'correcao']],
+];
+
 function MovesSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { day } = useApp();
+  const [filter, setFilter] = useState<MoveFilter>('todos');
+  const [q, setQ] = useState('');
   const data = useLiveQuery(async () => {
     if (!day || !open) return null;
     const [moves, variants, groups] = await Promise.all([
       db.stockMovements.where('dailyRecordId').equals(day.id).reverse().sortBy('createdAt'),
       db.variants.toArray(), db.groups.toArray(),
     ]);
-    const g = new Map(groups.map((x) => [x.id, x.name]));
-    return { moves, names: new Map(variants.map((v) => [v.id, `${g.get(v.groupId)} ${v.name}`])) };
+    const gr = new Map(groups.map((x) => [x.id, x]));
+    const pieces = new Map<string, Piece>(variants.map((v) => {
+      const gg = gr.get(v.groupId);
+      return [v.id, { group: gg?.name ?? '—', icon: gg?.icon ?? '📦', groupColor: gg?.color ?? '#94a3b8', name: v.name, color: v.color }];
+    }));
+    return { moves, pieces };
   }, [day?.id, open]);
+  const moves = data?.moves ?? [];
+  const eff = effectiveMovements(moves);
+  const sum = (types: MovementType[]) => eff.filter((m) => types.includes(m.type)).reduce((s, m) => s + m.quantity, 0);
+  const types = MOVE_FILTERS.find((f) => f[0] === filter)![2];
+  const nq = normalize(q);
+  const shown = moves
+    .filter((m) => filter === 'todos' || types.includes(m.type))
+    .filter((m) => { if (!nq) return true; const pc = data?.pieces.get(m.variantId); return normalize(`${pc?.group ?? ''} ${pc?.name ?? ''}`).includes(nq); });
+  const tiles: [MoveFilter, string, number, string][] = [
+    ['todos', 'Todos', moves.length, 'text-slate-800'],
+    ['venda', 'Vendidas', -sum(['venda', 'cancelamento']), 'text-blue-700'],
+    ['entrada', 'Entraram', sum(['entrada']), 'text-emerald-600'],
+    ['saida', 'Saíram', -sum(['saida', 'perda']), 'text-red-600'],
+    ['ajuste', 'Ajustes', sum(['ajuste', 'correcao']), 'text-slate-700'],
+  ];
   return (
-    <Sheet open={open} onClose={onClose} title="Movimentos do dia" tall>
-      <MoveList moves={data?.moves ?? []} locked={day?.status !== 'open'} names={data?.names} />
+    <Sheet open={open} onClose={onClose} title="🧾 Movimentos do dia" tall>
+      <div className="flex items-center gap-2 mb-3 text-[12px] text-emerald-700 font-semibold">
+        <span className="w-4 h-4 rounded-full bg-emerald-500 text-white text-[10px] flex items-center justify-center">✓</span>
+        Tudo aqui já está salvo no sistema
+      </div>
+      {/* os números são os filtros: toque para ver só aquele tipo */}
+      <div className="grid grid-cols-5 gap-1.5 mb-2.5">
+        {tiles.map(([k, l, v, c]) => (
+          <button key={k} onClick={() => setFilter(k)} aria-pressed={filter === k}
+            className={`rounded-xl border py-2 text-center transition ${filter === k ? 'bg-slate-800 border-slate-800' : 'bg-white border-slate-200 active:bg-slate-50'}`}>
+            <div className={`text-[18px] font-extrabold tabular-nums leading-tight ${filter === k ? 'text-white' : c}`}>{k === 'ajuste' && v > 0 ? '+' : ''}{v}</div>
+            <div className={`text-[10px] font-semibold ${filter === k ? 'text-slate-200' : 'text-slate-500'}`}>{l}</div>
+          </button>
+        ))}
+      </div>
+      <Input placeholder="🔍 Buscar peça ou cor..." value={q} onChange={(e) => setQ(e.target.value)} className="mb-3" />
+      <MoveList moves={shown} locked={day?.status !== 'open'} pieces={data?.pieces} />
+      <div className="mt-4 flex items-start gap-3 rounded-2xl bg-blue-50 border border-blue-200 px-3.5 py-3">
+        <span className="text-2xl">↩️</span>
+        <div className="flex-1 text-[14px] text-blue-900 leading-snug">
+          <b>Errou um + ou −?</b> Toque em <b>Desfazer</b> no movimento.
+          <span className="block text-[13px] text-blue-800/80 mt-0.5">Venda errada se cancela na aba <b>Caixa</b> (as peças voltam sozinhas).</span>
+        </div>
+        <InfoTip title="Como corrigir um erro" example={[
+          ['👆', 'Tocou 2× no + mas chegou só 1 peça'],
+          ['↩️', <>Movimentos do dia › no “Entrou 1” a mais › <b>Desfazer</b></>],
+          ['🛍️', 'Lançou uma venda que não aconteceu'],
+          ['💰', <>Caixa › na venda › <b>Cancelar venda</b></>],
+        ]}>
+          Nada é apagado: o desfazer lança o contrário e o movimento fica riscado como “desfeito”, para você conferir depois.
+        </InfoTip>
+      </div>
     </Sheet>
   );
 }

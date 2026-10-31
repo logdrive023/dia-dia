@@ -29,17 +29,25 @@ export function fmtDate(s: string, withWeekday = true): string {
 }
 export const weekday = (s: string) => WEEK[parseDate(s).getDay()];
 
+// ---------- limites (protegem contra digitação absurda e perda de precisão) ----------
+/** 1 bilhão em centavos */
+export const MAX_CENTS = 100_000_000_000;
+export const MAX_QTY = 100_000;
+export const isCents = (v: unknown): v is number => Number.isInteger(v) && (v as number) >= 0 && (v as number) <= MAX_CENTS;
+export const isQty = (v: unknown): v is number => Number.isInteger(v) && (v as number) > 0 && (v as number) <= MAX_QTY;
+
 // ---------- dinheiro (centavos inteiros) ----------
 export function toCents(input: string | number): number | null {
-  if (typeof input === 'number') return Number.isFinite(input) ? Math.round(input * 100) : null;
+  if (typeof input === 'number') return Number.isFinite(input) && input >= 0 && input * 100 <= MAX_CENTS ? Math.round(input * 100) : null;
   const t = input.trim().replace(/\s/g, '');
   if (!t) return null;
   // aceita 1.230,50 | 1230,5 | 1230.50 | 70 | 1.230 (ponto com 3 dígitos = milhar)
   let norm = t;
   if (t.includes(',')) norm = t.replace(/\./g, '').replace(',', '.');
   else if (/^\d{1,3}(\.\d{3})+$/.test(t)) norm = t.replace(/\./g, '');
+  if (!/^\d*\.?\d*$/.test(norm)) return null; // nada de "1e5", "+70", "0x10"
   const n = Number(norm);
-  if (!Number.isFinite(n) || n < 0) return null;
+  if (!Number.isFinite(n) || n < 0 || n * 100 > MAX_CENTS) return null;
   return Math.round(n * 100);
 }
 
@@ -58,16 +66,18 @@ export function money(cents: number | null | undefined, symbol = ''): string {
 export const PAYMENT_LABEL: Record<PaymentMethod, string> = {
   dinheiro: 'Dinheiro',
   pix: 'Pix',
-  cartao: 'Cartão',
+  cartao: 'Crédito',
+  debito: 'Débito',
   outro: 'Outro',
 };
 export const PAYMENT_EMOJI: Record<PaymentMethod, string> = {
   dinheiro: '💵',
   pix: '⚡',
   cartao: '💳',
+  debito: '🏧',
   outro: '🔹',
 };
-export const PAYMENTS: PaymentMethod[] = ['dinheiro', 'pix', 'cartao', 'outro'];
+export const PAYMENTS: PaymentMethod[] = ['dinheiro', 'pix', 'cartao', 'debito', 'outro'];
 
 export const COLORS = [
   '#ef4444', '#f97316', '#f59e0b', '#eab308', '#22c55e', '#14b8a6', '#06b6d4',

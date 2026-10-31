@@ -1,7 +1,6 @@
 import { db } from '../db/db';
 import type { CashMovement, DailyStockItem, Group, MovementType, Order, PaymentMethod, Sale, StockMovement, Variant } from '../db/types';
 import { todayStr } from '../lib/util';
-import { getSetting } from './settings';
 
 export interface CashSummary {
   opening: number;
@@ -25,6 +24,9 @@ export interface CashSummary {
   /** Parte do saldo que não é dinheiro vivo (Pix, Cartão, Outro). */
   otherBalance: number;
   counted: number | null;
+  /** Vendas copiadas do caderno (sem peça): quantas e quantas peças. */
+  notebookCount: number;
+  notebookUnits: number;
   /** Contado - dinheiro em mãos */
   difference: number | null;
   /** true quando o "Ontem" foi digitado à mão em vez de vir do dia anterior */
@@ -41,15 +43,17 @@ export async function cashChain(uptoDate?: string): Promise<Map<string, CashSumm
   const days = uptoDate
     ? await db.dailyRecords.where('date').belowOrEqual(uptoDate).sortBy('date')
     : await db.dailyRecords.orderBy('date').toArray();
-  const ids = days.map((d) => d.id);
-  const [recs, moves] = await Promise.all([
-    db.cashRecords.where('dailyRecordId').anyOf(ids).toArray(),
-    db.cashMovements.where('dailyRecordId').anyOf(ids).toArray(),
-  ]);
+  // uma leitura de cada tabela (bem mais rápido que buscar dia por dia quando há meses de uso)
+  const ids = new Set(days.map((d) => d.id));
+  const [allRecs, allMoves] = await Promise.all([db.cashRecords.toArray(), db.cashMovements.toArray()]);
+  const recs = allRecs.filter((r) => ids.has(r.dailyRecordId));
+  const moves = allMoves.filter((m) => ids.has(m.dailyRecordId));
   const recBy = new Map(recs.map((r) => [r.dailyRecordId, r]));
   const movesBy = new Map<string, CashMovement[]>();
-  for (const m of moves.sort((a, b) => a.createdAt.localeCompare(b.createdAt)))
-    movesBy.set(m.dailyRecordId, [...(movesBy.get(m.dailyRecordId) ?? []), m]);
+  for (const m of moves.sort((a, b) => (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0))) {
+    const list = movesBy.get(m.dailyRecordId);
+    if (list) list.push(m); else movesBy.set(m.dailyRecordId, [m]);
+  }
   const out = new Map<string, CashSummary>();
   let prev = 0, prevCash = 0;
   for (const d of days) {
@@ -73,7 +77,7 @@ export async function computeCash(dailyRecordId: string): Promise<CashSummary> {
 }
 
 function summarizeCash(opening: number, openingCash: number, openingManual: boolean, counted: number | null, movements: CashMovement[]): CashSummary {
-  const salesByMethod: Record<PaymentMethod, number> = { dinheiro: 0, pix: 0, cartao: 0, outro: 0 };
+  const salesByMethod: Record<PaymentMethod, number> = { dinheiro: 0, pix: 0, cartao: 0, debito: 0, outro: 0 };
   let entradas = 0, darTotal = 0, despesas = 0, retiradas = 0;
   const dar: CashMovement[] = [];
   let cashDelta = 0;
@@ -89,6 +93,7 @@ function summarizeCash(opening: number, openingCash: number, openingManual: bool
     }
   }
   const salesTotal = Object.values(salesByMethod).reduce((a, b) => a + b, 0);
+  const notebook = movements.filter((m) => m.type === 'venda' && !m.relatedOrderId);
   const todayNet = salesTotal + entradas - darTotal - despesas;
   const subtotal = opening + todayNet;
   const accumulated = subtotal - retiradas;
@@ -97,6 +102,7 @@ function summarizeCash(opening: number, openingCash: number, openingManual: bool
     opening, salesByMethod, salesTotal, entradas, dar, darTotal, despesas, retiradas, todayNet, subtotal,
     accumulated, cashOnHand, openingCash, otherBalance: accumulated - cashOnHand,
     counted, difference: counted === null ? null : counted - cashOnHand, openingManual, movements,
+    notebookCount: notebook.length, notebookUnits: notebook.reduce((n, m) => n + (m.quantity ?? 1), 0),
   };
 }
 
@@ -106,17 +112,23 @@ export interface StockRow {
   group: Group;
   reserved: number;
   available: number;
-  min: number;
+  /** estoque ideal (cadastro ou definido à mão) */
+  ideal: number;
+  /** quantas peças faltam para chegar no ideal */
+  restock: number;
+  /** falta repor, mas ainda tem peça */
   low: boolean;
   out: boolean;
 }
 
+/** Estoque ideal da variação: o que foi definido à mão ou, se não, a quantidade do cadastro. */
+export const idealOf = (v: Variant) => v.idealStock ?? v.startQuantity;
+
 export async function loadStockRows(dailyRecordId: string, date: string): Promise<StockRow[]> {
-  const [items, variants, groups, lowDefault, res] = await Promise.all([
+  const [items, variants, groups, res] = await Promise.all([
     db.dailyStockItems.where('dailyRecordId').equals(dailyRecordId).toArray(),
     db.variants.toArray(),
     db.groups.toArray(),
-    getSetting('lowStockDefault'),
     db.reservations.where('status').equals('active').toArray(),
   ]);
   const vMap = new Map(variants.map((v) => [v.id, v]));
@@ -135,9 +147,10 @@ export async function loadStockRows(dailyRecordId: string, date: string): Promis
     const group = variant && gMap.get(variant.groupId);
     if (!variant || !group) continue;
     const r = reserved.get(variant.id) ?? 0;
-    const min = variant.minimumStock ?? lowDefault;
+    const ideal = idealOf(variant);
     const available = item.currentQuantity - r;
-    rows.push({ item, variant, group, reserved: r, available, min, out: available <= 0, low: available > 0 && available <= min });
+    const restock = Math.max(0, ideal - item.currentQuantity);
+    rows.push({ item, variant, group, reserved: r, available, ideal, restock, out: available <= 0, low: available > 0 && restock > 0 });
   }
   rows.sort((a, b) => a.group.displayOrder - b.group.displayOrder || a.variant.displayOrder - b.variant.displayOrder);
   return rows;
@@ -154,7 +167,12 @@ export interface DaySummary {
   sales: Sale[];
   soldByVariant: { variant: Variant; group: Group; qty: number }[];
   enteredByVariant: { variant: Variant; group: Group; qty: number }[];
+  /** variações para repor (falta peça para o ideal, ou esgotadas) */
   restock: StockRow[];
+  /** vendas do dia (inclui as do caderno) */
+  salesCount: number;
+  /** total de peças para repor */
+  restockUnits: number;
   cash: CashSummary;
 }
 
@@ -186,12 +204,14 @@ export async function daySummary(dailyRecordId: string, date: string): Promise<D
   return {
     totalUnits: rows.reduce((s, r) => s + r.item.currentQuantity, 0),
     initialUnits: rows.reduce((s, r) => s + r.item.initialQuantity, 0),
-    soldUnits: okSales.reduce((s, x) => s + x.quantity, 0),
+    soldUnits: okSales.reduce((s, x) => s + x.quantity, 0) + cash.notebookUnits,
+    salesCount: okOrders.length + cash.notebookCount,
     enteredUnits, outUnits, adjustUnits,
     orders: okOrders, sales: okSales,
     soldByVariant: toList(sold),
     enteredByVariant: toList(entered),
-    restock: rows.filter((r) => !r.variant.archivedAt && r.variant.active && !r.group.archivedAt && r.group.active && (r.out || r.low)),
+    restock: rows.filter((r) => !r.variant.archivedAt && r.variant.active && !r.group.archivedAt && r.group.active && (r.restock > 0 || r.out)),
+    restockUnits: rows.filter((r) => !r.variant.archivedAt && r.variant.active && !r.group.archivedAt && r.group.active).reduce((s, r) => s + r.restock, 0),
     cash,
   };
 }

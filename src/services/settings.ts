@@ -12,7 +12,6 @@ export interface SellEntry {
 export interface AppSettings {
   sellGroups: SellEntry[];
   currencySymbol: string;
-  lowStockDefault: number;
   paymentMethods: PaymentMethod[];
   defaultPayment: PaymentMethod;
   lastBackupAt: string | null;
@@ -23,8 +22,7 @@ export interface AppSettings {
 export const DEFAULT_SETTINGS: AppSettings = {
   sellGroups: [],
   currencySymbol: '',
-  lowStockDefault: 1,
-  paymentMethods: ['dinheiro', 'pix', 'cartao'],
+  paymentMethods: ['dinheiro', 'pix', 'cartao', 'debito'],
   defaultPayment: 'dinheiro',
   lastBackupAt: null,
   backupReminderDays: 7,
