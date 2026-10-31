@@ -30,5 +30,5 @@ export default defineConfig({
       workbox: { globPatterns: ['**/*.{js,css,html,svg,png,ico,webmanifest}'] },
     }),
   ],
-  test: { environment: 'node', setupFiles: ['fake-indexeddb/auto'] },
+  test: { environment: 'node', setupFiles: ['./src/__tests__/setup.ts'] },
 });

@@ -22,7 +22,12 @@ beforeAll(() => {
   window.addEventListener('unhandledrejection', (e) => errors.push(`promise: ${(e as PromiseRejectionEvent).reason}`));
   Object.defineProperty(navigator, 'clipboard', { value: { writeText: vi.fn().mockResolvedValue(undefined) }, configurable: true });
 });
-afterEach(cleanup);
+// desmonta a tela e espera gravações que o último toque deixou em andamento antes do próximo teste trocar de banco
+afterEach(async () => {
+  cleanup();
+  await new Promise((r) => setTimeout(r, 150));
+  db.close();
+});
 
 const JUNK = ['', '0', '-1', '70', '1.230', '99999999999', 'abc', '😀', ' ', '70,5', 'x'.repeat(60), '<b>oi</b>', '1e5', 'Ana'];
 const FLOW = /Iniciar o dia|^Vender |Fechar venda|Confirmar|Mais 1|Tirar 1|Reservar|Lançar|Dei dinheiro|Retirada|Despesa|Entrada|Corrigir|Cancelar venda|Salvar|Desfazer|Encerrar|Reabrir|Entrou 1|Saiu 1|Vender sem preço|Continuar mesmo assim|Dividir|Pix|Cartão|Dinheiro/;

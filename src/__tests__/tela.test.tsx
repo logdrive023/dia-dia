@@ -15,7 +15,12 @@ beforeAll(() => {
   window.open = vi.fn() as never;
   Element.prototype.scrollIntoView = vi.fn();
 });
-afterEach(cleanup);
+// desmonta a tela e espera gravações que o último toque deixou em andamento antes do próximo teste trocar de banco
+afterEach(async () => {
+  cleanup();
+  await new Promise((r) => setTimeout(r, 150));
+  db.close();
+});
 
 const click = (el: HTMLElement) => fireEvent.click(el);
 const btn = (name: RegExp | string) => screen.getByRole('button', { name });

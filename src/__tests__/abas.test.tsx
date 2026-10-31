@@ -20,7 +20,12 @@ beforeEach(async () => {
   await seedIfNeeded();
   await db.settings.where('key').equals('initialOpening').delete(); // caixa começa zerado nos testes de tela
 });
-afterEach(cleanup);
+// desmonta a tela e espera gravações que o último toque deixou em andamento antes do próximo teste trocar de banco
+afterEach(async () => {
+  cleanup();
+  await new Promise((r) => setTimeout(r, 150));
+  db.close();
+});
 
 const click = (el: Element) => fireEvent.click(el);
 const type = (el: Element, value: string) => fireEvent.change(el, { target: { value } });
