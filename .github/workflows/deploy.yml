@@ -1,5 +1,6 @@
 # Publica o app no GitHub Pages a cada push na branch main.
-# Configuração única no GitHub: Settings → Pages → Source: "GitHub Actions".
+# Configuração única no GitHub: Settings → Pages → Build and deployment → Source: "GitHub Actions".
+# Sem isso o deploy falha com "HttpError: Not Found" (404).
 name: Publicar no GitHub Pages
 
 on:
@@ -21,6 +22,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # Confere se o Pages está ligado com "GitHub Actions" antes de gastar tempo no build.
+      - uses: actions/configure-pages@v5
       - uses: actions/setup-node@v4
         with:
           node-version: 20
