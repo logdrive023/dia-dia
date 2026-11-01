@@ -29,7 +29,7 @@ export function pixPayloadOk(p: string = PIX.payload) {
 
 export type Platform = 'ios' | 'android' | 'outro';
 
-/** Qual celular: iPhone/iPad (sem o app Neon) ou Android (Samsung, com o app Neon). */
+/** Qual celular: iPhone/iPad (sem o app Neon) ou Android (Samsung, com o app Neon). Teste */
 export function detectPlatform(ua = typeof navigator !== 'undefined' ? navigator.userAgent : '', touch = typeof navigator !== 'undefined' ? navigator.maxTouchPoints : 0): Platform {
   if (/iPhone|iPad|iPod/i.test(ua)) return 'ios';
   if (/Macintosh/i.test(ua) && touch > 1) return 'ios'; // iPad com “versão para computador”
