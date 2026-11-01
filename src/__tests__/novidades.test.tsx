@@ -1,13 +1,14 @@
 // @vitest-environment jsdom
 /** Armazenamento permanente, Menu › Atualizações e a tela de Juntar celulares (pela tela). */
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import App from '../App';
 import { seedIfNeeded } from '../db/seed';
 import { AppDB, db, useDatabase } from '../db/db';
 import { requestPersist, storageStatus, writeTest } from '../services/storage';
 import { CHANGELOG, LATEST_CHANGE } from '../lib/changelog';
 import { buildBackup, encodeTextBackup } from '../services/backup';
+import { setUpdateState } from '../lib/updateState';
 
 beforeAll(() => {
   window.scrollTo = vi.fn() as never;
@@ -58,6 +59,22 @@ describe('Menu › Atualizações', () => {
     await screen.findByText(CHANGELOG[0].title);
     expect(screen.getByText('mais nova')).toBeTruthy();
     await waitFor(() => expect(localStorage.getItem('changelogSeen')).toBe(LATEST_CHANGE));
+  }, 30000);
+});
+
+describe('selo da versão no cabeçalho', () => {
+  it('"✓ Atualizado" na última versão; "🆕 Atualizar" quando sai uma nova (tocar atualiza)', async () => {
+    render(<App />);
+    await screen.findByRole('button', { name: /Abrir menu/ }, { timeout: 5000 });
+    expect(screen.queryByText('✓ Atualizado')).toBeNull(); // sem service worker: não mostra nada
+    act(() => setUpdateState({ ready: true }));
+    expect(await screen.findByText('✓ Atualizado')).toBeTruthy();
+    const apply = vi.fn();
+    act(() => setUpdateState({ needRefresh: true, apply }));
+    click(await screen.findByRole('button', { name: /Atualizar o app para a versão nova/ }));
+    expect(apply).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText('✓ Atualizado')).toBeNull();
+    act(() => setUpdateState({ ready: false, needRefresh: false }));
   }, 30000);
 });
 

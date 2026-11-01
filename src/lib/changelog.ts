@@ -14,6 +14,8 @@ export const CHANGELOG: ChangeEntry[] = [
       ['💼', 'A diária entra sozinha só no dia de hoje (dia antigo esquecido aberto não recebe mais)'],
       ['⚡', 'Pix conferido e depois com valor corrigido: aparece “Pix mudou” para conferir de novo'],
       ['🆕', 'Esta tela de Atualizações'],
+      ['✓', 'Selo no topo: “✓ Atualizado” na última versão, “🆕 Atualizar” quando sai uma nova'],
+      ['⌨️', 'Fechar venda não abre mais o teclado sozinho'],
     ],
   },
   {

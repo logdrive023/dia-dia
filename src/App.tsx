@@ -2,6 +2,7 @@ import { Component, lazy, Suspense, useEffect, useState, type ReactNode } from '
 import { db } from './db/db';
 import { useRegisterSW } from 'virtual:pwa-register/react';
 import { seedIfNeeded } from './db/seed';
+import { setUpdateState, useUpdateState } from './lib/updateState';
 import { CHANGELOG, LATEST_CHANGE } from './lib/changelog';
 import { requestPersist } from './services/storage';
 import { PixSheet } from './components/Pix';
@@ -62,7 +63,10 @@ function Shell() {
             <img src="./icon-192.png" alt="" className="w-10 h-10 rounded-xl shadow-sm shrink-0" />
           )}
           <div className="flex-1 min-w-0">
-            <h1 className="text-[19px] font-extrabold text-slate-800 leading-tight break-words">{TITLES[tab]}</h1>
+            <div className="flex items-center gap-2 min-w-0">
+              <h1 className="text-[19px] font-extrabold text-slate-800 leading-tight break-words min-w-0">{TITLES[tab]}</h1>
+              <VersionBadge />
+            </div>
             <SavedBadge />
           </div>
           <button className="h-11 pl-3 pr-3.5 shrink-0 rounded-xl bg-slate-100 text-[15px] font-semibold text-slate-700 active:bg-slate-200 flex items-center gap-1.5"
@@ -117,6 +121,20 @@ function Shell() {
       <UpdateBanner />
     </div>
   );
+}
+
+/** Selo da versão: "✓ Atualizado" na última versão; "🆕 Atualizar" (toque) quando saiu uma nova. */
+function VersionBadge() {
+  const { ready, needRefresh, apply } = useUpdateState();
+  if (needRefresh)
+    return (
+      <button onClick={apply} aria-label="Atualizar o app para a versão nova"
+        className="shrink-0 rounded-full bg-amber-100 text-amber-800 border border-amber-300 px-2 py-0.5 text-[11px] font-bold active:bg-amber-200 animate-pulse">
+        🆕 Atualizar
+      </button>
+    );
+  if (!ready) return null; // sem service worker (ex.: aberto no computador em teste): não dá para saber
+  return <span className="shrink-0 rounded-full bg-slate-100 text-slate-500 px-2 py-0.5 text-[11px] font-semibold" title="Este celular está na última versão do app">✓ Atualizado</span>;
 }
 
 /** "✓ Salvo 14:32": horário do último registro gravado no banco (prova de que está tudo lá). */
@@ -298,11 +316,14 @@ function UpdateBanner() {
   const { needRefresh: [needRefresh], updateServiceWorker } = useRegisterSW({
     onRegisteredSW(_url, reg) {
       if (!reg) return;
+      setUpdateState({ ready: true });
       const check = () => { if (navigator.onLine !== false) reg.update().catch(() => undefined); };
       setInterval(check, 60 * 60 * 1000);
       document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') check(); });
     },
   });
+  // o selo do cabeçalho mostra a mesma situação
+  useEffect(() => { setUpdateState({ needRefresh, apply: () => updateServiceWorker(true) }); }, [needRefresh, updateServiceWorker]);
   if (!needRefresh) return null;
   return (
     <div className="fixed bottom-[calc(72px+env(safe-area-inset-bottom))] inset-x-4 z-[45] max-w-lg mx-auto bg-slate-800 text-white rounded-xl p-3 flex items-center gap-3 shadow-xl">
