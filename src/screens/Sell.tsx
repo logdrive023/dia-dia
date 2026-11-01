@@ -493,8 +493,8 @@ export function CheckoutSheet({ open, onClose }: { open: boolean; onClose: () =>
                     </div>
                   )}
                 </div>
-                <PriceInput cents={l.unitPriceInCents} onChange={(c) => update(i, { unitPriceInCents: c })} quick={quick}
-                  autoFocus={l.unitPriceInCents === null && cart.findIndex((x) => x.unitPriceInCents === null) === i} />
+                {/* sem foco automático: o teclado só abre quando a pessoa toca no preço */}
+                <PriceInput cents={l.unitPriceInCents} onChange={(c) => update(i, { unitPriceInCents: c })} quick={quick} />
               </div>
             </Card>
           );
