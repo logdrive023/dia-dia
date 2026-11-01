@@ -2,10 +2,12 @@ import { Component, lazy, Suspense, useEffect, useState, type ReactNode } from '
 import { db } from './db/db';
 import { useRegisterSW } from 'virtual:pwa-register/react';
 import { seedIfNeeded } from './db/seed';
+import { CHANGELOG, LATEST_CHANGE } from './lib/changelog';
+import { requestPersist } from './services/storage';
 import { PixSheet } from './components/Pix';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { AppProvider, useApp, type Tab } from './state';
-import { closeTopSheet, InfoTip, Sheet, UiProvider } from './components/ui';
+import { Card, closeTopSheet, InfoTip, Sheet, UiProvider } from './components/ui';
 import { todayStr } from './lib/util';
 import Home from './screens/Home';
 import Stock from './screens/Stock';
@@ -39,6 +41,7 @@ const CatalogSheet = lazyRetry(() => import('./screens/Catalog'));
 const BackupSheet = lazyRetry(() => import('./screens/Backup'));
 const SettingsSheet = lazyRetry(() => import('./screens/Settings'));
 const TransferSheet = lazyRetry(() => import('./screens/Transfer'));
+const SyncSheet = lazyRetry(() => import('./screens/Sync'));
 
 // Navegação: 4 abas embaixo (Vender no meio, em destaque) + um único Menu no topo para o resto.
 const TABS: [Tab, string, string][] = [['inicio', '🏠', 'Início'], ['vender', '🛍️', 'Vender'], ['estoque', '📦', 'Estoque'], ['caixa', '💰', 'Caixa']];
@@ -105,9 +108,11 @@ function Shell() {
         {overlay === 'backup' && <BackupSheet open onClose={close} />}
         {overlay === 'config' && <SettingsSheet open onClose={close} />}
         {overlay === 'transferir' && <TransferSheet open onClose={close} />}
+        {overlay === 'juntar' && <SyncSheet open onClose={close} />}
       </Suspense>
       <AboutSheet open={overlay === 'sobre'} onClose={close} />
       <PixSheet open={overlay === 'pix'} onClose={close} />
+      <ChangelogSheet open={overlay === 'novidades'} onClose={close} />
       <BackButton />
       <UpdateBanner />
     </div>
@@ -183,7 +188,8 @@ const tabRef = { current: 'inicio' as Tab };
 function MenuSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { setTab, setOverlay } = useApp();
   if (!open) return null;
-  type Item = { icon: string; tint: string; title: string; desc: string; go: () => void };
+  type Item = { icon: string; tint: string; title: string; desc: string; go: () => void; badge?: string };
+  const unseen = (() => { try { return localStorage.getItem('changelogSeen') !== LATEST_CHANGE; } catch { return false; } })();
   const sections: { label: string; items: Item[] }[] = [
     { label: 'Dia a dia', items: [
       { icon: '✏️', tint: 'bg-blue-100', title: 'Produtos e grupos', desc: 'Criar, renomear, preço e estoque ideal', go: () => setOverlay('cadastro') },
@@ -191,10 +197,12 @@ function MenuSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
       { icon: '🗓️', tint: 'bg-indigo-100', title: 'Histórico', desc: 'Dias anteriores e comparar dias', go: () => { setTab('historico'); onClose(); } },
     ] },
     { label: 'Seus dados', items: [
+      { icon: '🔄', tint: 'bg-sky-100', title: 'Juntar com outro celular', desc: 'Vendeu nos dois? Gera um código e soma tudo', go: () => setOverlay('juntar') },
       { icon: '📲', tint: 'bg-emerald-100', title: 'Passar para outro celular', desc: 'Enviar tudo e receber no outro', go: () => setOverlay('transferir') },
       { icon: '💾', tint: 'bg-orange-100', title: 'Backup', desc: 'Cópia de segurança, texto e planilhas', go: () => setOverlay('backup') },
     ] },
     { label: 'App', items: [
+      { icon: '🆕', tint: 'bg-violet-100', title: 'Atualizações', desc: 'O que mudou no app', go: () => setOverlay('novidades'), badge: unseen ? 'Novo' : undefined },
       { icon: '⚙️', tint: 'bg-slate-200', title: 'Configurações', desc: 'Moeda, pagamentos, verificar dados', go: () => setOverlay('config') },
       { icon: '💕', tint: 'bg-pink-100', title: 'Sobre', desc: 'Sobre o Dia a Dia', go: () => setOverlay('sobre') },
     ] },
@@ -210,7 +218,10 @@ function MenuSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
                 <button key={it.title} onClick={it.go} className="w-full min-w-0 flex items-center gap-3 px-3.5 py-3 text-left active:bg-slate-50">
                   <span className={`w-11 h-11 rounded-xl flex items-center justify-center text-[22px] shrink-0 ${it.tint}`}>{it.icon}</span>
                   <span className="flex-1 min-w-0">
-                    <span className="block font-bold text-slate-800 text-[16px] leading-tight break-words">{it.title}</span>
+                    <span className="flex flex-wrap items-center gap-1.5">
+                      <span className="font-bold text-slate-800 text-[16px] leading-tight break-words">{it.title}</span>
+                      {it.badge && <span className="rounded-full bg-violet-600 text-white px-2 py-0.5 text-[11px] font-bold">{it.badge}</span>}
+                    </span>
                     <span className="block text-[13px] text-slate-500 leading-tight mt-0.5 break-words">{it.desc}</span>
                   </span>
                   <span className="shrink-0 text-slate-300 text-xl">›</span>
@@ -218,6 +229,33 @@ function MenuSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
               ))}
             </div>
           </div>
+        ))}
+      </div>
+    </Sheet>
+  );
+}
+
+/** Menu › Atualizações: o que mudou em cada versão. Abrir marca como visto. */
+function ChangelogSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
+  useEffect(() => { if (open) try { localStorage.setItem('changelogSeen', LATEST_CHANGE); } catch { /* ok */ } }, [open]);
+  if (!open) return null;
+  return (
+    <Sheet open onClose={onClose} title="🆕 Atualizações" tall>
+      <div className="space-y-3">
+        {CHANGELOG.map((e, i) => (
+          <Card key={e.id} className="p-3.5">
+            <div className="flex items-center gap-2 mb-1.5">
+              <span className="font-extrabold text-slate-800">{e.title}</span>
+              {i === 0 && <span className="rounded-full bg-violet-600 text-white px-2 py-0.5 text-[11px] font-bold">mais nova</span>}
+              <span className="flex-1" />
+              <span className="text-[12px] text-slate-500">{e.date}</span>
+            </div>
+            <ul className="space-y-1">
+              {e.items.map(([icon, t], j) => (
+                <li key={j} className="flex gap-2 text-[14px] text-slate-700"><span className="shrink-0">{icon}</span><span className="min-w-0">{t}</span></li>
+              ))}
+            </ul>
+          </Card>
         ))}
       </div>
     </Sheet>
@@ -255,12 +293,21 @@ function AboutSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
 }
 
 function UpdateBanner() {
-  const { needRefresh: [needRefresh], updateServiceWorker } = useRegisterSW();
+  // procura versão nova toda hora e sempre que o app volta para a tela
+  // (app instalado na tela inicial também atualiza; antes só via ao abrir do zero)
+  const { needRefresh: [needRefresh], updateServiceWorker } = useRegisterSW({
+    onRegisteredSW(_url, reg) {
+      if (!reg) return;
+      const check = () => { if (navigator.onLine !== false) reg.update().catch(() => undefined); };
+      setInterval(check, 60 * 60 * 1000);
+      document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') check(); });
+    },
+  });
   if (!needRefresh) return null;
   return (
     <div className="fixed bottom-[calc(72px+env(safe-area-inset-bottom))] inset-x-4 z-[45] max-w-lg mx-auto bg-slate-800 text-white rounded-xl p-3 flex items-center gap-3 shadow-xl">
-      <span className="flex-1 text-sm">Nova versão disponível. Seus dados continuam salvos.</span>
-      <button className="font-semibold text-sm bg-blue-600 px-3 h-9 rounded-lg" onClick={() => updateServiceWorker(true)}>Atualizar</button>
+      <span className="flex-1 text-sm">🆕 Nova versão do app. Seus dados continuam salvos. Veja o que mudou em Menu › Atualizações.</span>
+      <button className="font-semibold text-sm bg-blue-600 px-3 h-10 rounded-lg shrink-0" onClick={() => updateServiceWorker(true)}>Atualizar</button>
     </div>
   );
 }
@@ -278,7 +325,7 @@ export default function App() {
       .then(() => seedIfNeeded())
       .then(() => { done = true; clearTimeout(timer); setState('ready'); })
       .catch((e) => { done = true; clearTimeout(timer); setError(String(e?.message ?? e)); setState('error'); });
-    navigator.storage?.persist?.().catch(() => {});
+    requestPersist().catch(() => undefined); // pede para o navegador nunca apagar os dados
     return () => clearTimeout(timer);
   }, []);
   if (state === 'loading') return <Splash />;

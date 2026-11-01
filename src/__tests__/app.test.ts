@@ -537,22 +537,22 @@ describe('dados iniciais oficiais (caderno 30/10 e 31/10)', () => {
     useDatabase(new AppDB(`auto-${Math.random()}`));
     await seedIfNeeded();
     const d31 = await startDay('2026-10-31');
-    expect(await ensureDailyPay(d31.id)).toBeNull(); // 31/10 já tem a diária do caderno
+    expect(await ensureDailyPay(d31.id, '2026-10-31')).toBeNull(); // 31/10 já tem a diária do caderno
     const pays31 = (await db.cashMovements.where('dailyRecordId').equals(d31.id).toArray()).filter((m) => m.type === 'pagamento');
     expect(pays31.map((m) => [m.description, m.amountInCents]).sort()).toEqual([['diária de 30/10', 15000], ['diária de 31/10', 15000]]);
     const d1 = await startDay('2026-11-01');
-    await ensureDailyPay(d1.id); await ensureDailyPay(d1.id); // duas vezes: entra uma só
+    await ensureDailyPay(d1.id, '2026-11-01'); await ensureDailyPay(d1.id, '2026-11-01'); // duas vezes: entra uma só
     let c = await computeCash(d1.id);
     expect([c.openingCash, c.pagamentos, c.cashOnHand, c.dayResult]).toEqual([123000, 15000, 108000, -15000]);
     const { cashStatement } = await import('../services/summary');
     expect(cashStatement(c).map((x) => x.label)).toContain('Pagamento da diária de 01/11');
     await setSetting('dailyPayInCents', 20000);
     const d2 = await startDay('2026-11-02');
-    await ensureDailyPay(d2.id);
+    await ensureDailyPay(d2.id, '2026-11-02'); // como se fosse o dia 02/11
     expect((await computeCash(d2.id)).pagamentos).toBe(20000);
     await setSetting('autoDailyPay', false);
     const d3 = await startDay('2026-11-03');
-    expect(await ensureDailyPay(d3.id)).toBeNull();
+    expect(await ensureDailyPay(d3.id, '2026-11-03')).toBeNull();
     c = await computeCash(d3.id);
     expect(c.pagamentos).toBe(0);
     expect((await runDiagnostics()).findings.filter((f) => f.level === 'erro')).toEqual([]);
@@ -566,12 +566,16 @@ describe('dados iniciais oficiais (caderno 30/10 e 31/10)', () => {
     const v = (await db.variants.toArray()).find((x) => x.forSale !== false && x.startQuantity >= 1)!;
     await createOrder({ orderId: uid(), dailyRecordId: d.id, paymentMethod: 'dinheiro', lines: [{ variantId: v.id, quantity: 1, unitPriceInCents: 35000 }] });
     expect((await computeCash(d.id)).pagamentos).toBe(0);
-    const m = await ensureDailyPay(d.id); // o app abre nesse dia
+    const m = await ensureDailyPay(d.id, '2026-11-05'); // o app abre nesse dia (05/11)
     let c = await computeCash(d.id);
     expect([c.pagamentos, c.dayResult, c.cashOnHand]).toEqual([15000, 20000, 20000]);
-    expect(await ensureDailyPay(d.id)).toBeNull(); // abrir de novo não duplica
+    expect(await ensureDailyPay(d.id, '2026-11-05')).toBeNull(); // abrir de novo não duplica
     await removeCashMovement(m!.id); // não recebeu nesse dia
-    expect(await ensureDailyPay(d.id)).toBeNull(); // e não volta
+    expect(await ensureDailyPay(d.id, '2026-11-05')).toBeNull(); // e não volta
+    // dia antigo esquecido aberto: olhar hoje (06/11) não lança diária nele
+    const old = await startDay('2026-11-04');
+    expect(await ensureDailyPay(old.id, '2026-11-06')).toBeNull();
+    expect((await computeCash(old.id)).pagamentos).toBe(0);
     c = await computeCash(d.id);
     expect(c.pagamentos).toBe(0);
     // dia encerrado não recebe diária

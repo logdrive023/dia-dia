@@ -2,6 +2,12 @@
 import 'fake-indexeddb/auto';
 import Dexie from 'dexie';
 import { configure } from '@testing-library/dom';
+import { vi } from 'vitest';
+
+// relógio fixo: os testes não dependem do dia em que rodam (no GitHub ou no PC).
+// O tempo continua andando a partir desse instante. HOJE=2026-12-31 roda a suíte em outra data.
+const HOJE = (globalThis as { process?: { env: Record<string, string | undefined> } }).process?.env.HOJE || '2026-11-01';
+vi.useFakeTimers({ toFake: ['Date'], shouldAdvanceTime: true, now: new Date(`${HOJE}T12:00:00`) });
 
 // a máquina do GitHub Actions é bem mais lenta que um PC: espera até 10 s pela tela (padrão é 1 s)
 configure({ asyncUtilTimeout: 10000 });

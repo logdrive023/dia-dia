@@ -8,7 +8,7 @@ import { DEFAULT_SETTINGS, getAllSettings, type AppSettings } from './services/s
 import type { CartLine } from './services/sales';
 
 export type Tab = 'inicio' | 'estoque' | 'vender' | 'caixa' | 'historico';
-export type Overlay = null | 'menu' | 'sobre' | 'transferir' | 'cadastro' | 'backup' | 'config' | 'fechar' | 'checkout' | 'comparar' | 'pix';
+export type Overlay = null | 'menu' | 'sobre' | 'transferir' | 'cadastro' | 'backup' | 'config' | 'fechar' | 'checkout' | 'comparar' | 'pix' | 'juntar' | 'novidades';
 
 interface Ctx {
   date: string;

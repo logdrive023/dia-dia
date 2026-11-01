@@ -1,9 +1,10 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { runDiagnostics, type Finding } from '../services/diagnostics';
 import { money, PAYMENT_EMOJI, PAYMENT_LABEL, PAYMENTS, toCents } from '../lib/util';
 import type { PaymentMethod } from '../db/types';
 import { setSetting } from '../services/settings';
 import { resetToInitialData, resetToZero } from '../services/backup';
+import { requestPersist, storageStatus } from '../services/storage';
 import { useApp } from '../state';
 import { Button, Card, InfoTip, Input, Sheet, Toggle, useUi } from '../components/ui';
 
@@ -133,6 +134,16 @@ export default function SettingsSheet({ open, onClose }: { open: boolean; onClos
         <Input value={title} onChange={(e) => setTitle(e.target.value)} onBlur={saveTitle} placeholder="Check List" />
       </Section>
 
+      <Section icon="🛡️" title="Dados guardados neste celular" tip={
+        <InfoTip title="Dados guardados" example={[
+          ['🛡️', <><b>Protegido</b>: o navegador não apaga os dados, nem com o celular cheio</>],
+          ['📲', 'Instale o app na tela inicial: o Android (Samsung e Chrome) protege na hora'],
+          ['⚠️', 'Abra sempre pelo mesmo ícone: Chrome e Samsung Internet guardam dados separados'],
+          ['🕵️', 'Não use aba anônima/secreta: ao fechar, apaga tudo'],
+        ]}>Os dados ficam só neste celular. Faça backup de vez em quando.</InfoTip>}>
+        <StorageBox />
+      </Section>
+
       <Section icon="🩺" title="Verificar dados" tip={
         <InfoTip title="Verificar dados" example={[
           ['✅', '“Tudo certo” = estoque, vendas e caixa batem entre si'],
@@ -217,6 +228,30 @@ function ResetButtons() {
           <span className="block text-[12px] text-slate-600 break-words">App vazio: sem grupos, sem peças, sem dias, caixa em 0</span>
         </span>
       </button>
+    </div>
+  );
+}
+
+function StorageBox() {
+  const { run } = useUi();
+  const [tick, setTick] = useState(0);
+  const [st, setSt] = useState<Awaited<ReturnType<typeof storageStatus>> | null>(null);
+  // o teste de gravação escreve no banco: roda fora do useLiveQuery (que só pode ler)
+  useEffect(() => { let on = true; storageStatus().then((x) => { if (on) setSt(x); }); return () => { on = false; }; }, [tick]);
+  if (!st) return <p className="text-sm text-slate-500">Conferindo…</p>;
+  const mb = (n: number | null) => (n === null ? '—' : `${(n / 1024 / 1024).toFixed(1).replace('.', ',')} MB`);
+  return (
+    <div className="space-y-2">
+      <div className={`rounded-xl px-3 py-2.5 text-[14px] font-semibold ${st.persisted ? 'bg-emerald-50 text-emerald-800' : 'bg-amber-50 text-amber-800'}`}>
+        {st.persisted ? '🛡️ Protegido: o navegador não apaga os dados' : st.supported ? '⚠️ Ainda não protegido: o navegador pode apagar se faltar espaço' : '⚠️ Este navegador não permite proteger: faça backup com frequência'}
+      </div>
+      <div className={`rounded-xl px-3 py-2 text-[13px] ${st.writeOk ? 'bg-slate-50 text-slate-700' : 'bg-red-50 text-red-700 font-semibold'}`}>
+        {st.writeOk ? '✅ Teste de gravação: salvando normalmente' : '❌ Teste de gravação falhou: o celular não está salvando (saia da aba anônima / libere espaço)'}
+      </div>
+      <div className="text-[12px] text-slate-500">Usando {mb(st.usage)}{st.quota ? ` de ${mb(st.quota)} disponíveis` : ''}</div>
+      {!st.persisted && st.supported && (
+        <Button variant="outline" className="w-full" onClick={() => run(async () => { await requestPersist(); setTick((t) => t + 1); })}>🛡️ Proteger agora</Button>
+      )}
     </div>
   );
 }

@@ -11,7 +11,7 @@ import { describe, expect, it } from 'vitest';
 import { AppDB, db, useDatabase } from '../db/db';
 import { seedIfNeeded } from '../db/seed';
 import type { MovementType, PaymentMethod } from '../db/types';
-import { addDays, uid } from '../lib/util';
+import { addDays, todayStr, uid } from '../lib/util';
 import {
   archiveGroup, archiveVariant, createGroup, createVariant, deleteVariant, moveVariant, setForSale, transferVariants, updateGroup, updateVariant, UserError,
 } from '../services/catalog';
@@ -226,11 +226,11 @@ describe('D) relógio do celular errado', () => {
     await seedIfNeeded();
     await db.variants.toCollection().modify({ forSale: true }); await db.settings.where('key').equals('initialOpening').delete();
     const v = (await db.variants.toArray()).find((x) => x.startQuantity >= 2)!.id; // peça com estoque
-    // usou com a data errada (2027) e depois corrigiu para 2026
-    const wrong = await startDay('2027-05-10');
+    // usou com a data errada (meses no futuro) e depois corrigiu para hoje
+    const wrong = await startDay(addDays(todayStr(), 200));
     await createOrder({ orderId: uid(), dailyRecordId: wrong.id, paymentMethod: 'pix', lines: [{ variantId: v, quantity: 1, unitPriceInCents: 7000 }] });
-    const right = await startDay('2026-10-31');
-    expect(right.sourceDate).toBeNull(); // nada antes de 31/10/2026 → começa da carga do cadastro
+    const right = await startDay(todayStr());
+    expect(right.sourceDate).toBeNull(); // nada antes de hoje → começa da carga do cadastro
     expect((await computeCash(right.id)).opening).toBe(0);
     await createOrder({ orderId: uid(), dailyRecordId: right.id, paymentMethod: 'dinheiro', lines: [{ variantId: v, quantity: 1, unitPriceInCents: 7000 }] });
     await invariants('relógio');

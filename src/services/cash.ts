@@ -1,10 +1,11 @@
 import { db } from '../db/db';
 import type { CashType, PaymentMethod } from '../db/types';
-import { isCents, nowIso, PAYMENTS, uid } from '../lib/util';
+import { isCents, nowIso, PAYMENTS, todayStr, uid } from '../lib/util';
 import { audit } from './audit';
 import { UserError } from './catalog';
 import { assertOpen } from './days';
 import { getSetting } from './settings';
+import { addTombstones } from './sync';
 
 export const CASH_LABEL: Record<CashType, string> = {
   venda: 'Venda',
@@ -44,28 +45,30 @@ export async function addCashMovement(p: {
 
 /** Remove um lançamento manual (vendas só saem cancelando a venda). Fica registrado na auditoria. */
 export async function removeCashMovement(id: string) {
-  await db.transaction('rw', db.dailyRecords, db.cashMovements, db.auditLogs, async () => {
+  await db.transaction('rw', db.dailyRecords, db.cashMovements, db.auditLogs, db.settings, async () => {
     const m = await db.cashMovements.get(id);
     if (!m) return;
     // venda do caderno (sem peça) pode ser removida aqui; venda do app se cancela
     if ((m.type === 'venda' && m.relatedOrderId) || m.type === 'estorno') throw new UserError('Para tirar uma venda, cancele a venda.');
     await assertOpen(m.dailyRecordId);
     await db.cashMovements.delete(id);
+    await addTombstones([id]); // ao juntar com outro celular, não volta
     await audit('cashMovement', id, 'delete', m, null);
   });
 }
 
 /**
  * Lança a diária do dia ("diária de 31/10", em dinheiro), se estiver ligado em Configurações.
+ * Só no dia de HOJE: um dia antigo esquecido aberto não recebe diária só por ser aberto.
  * Não duplica: se o dia já tem a diária dele (ex.: veio do caderno), não faz nada.
  */
-export async function ensureDailyPay(dailyRecordId: string) {
+export async function ensureDailyPay(dailyRecordId: string, today = todayStr()) {
   if (!(await getSetting('autoDailyPay'))) return null;
   const cents = await getSetting('dailyPayInCents');
   if (!isCents(cents) || cents <= 0) return null;
   return db.transaction('rw', db.dailyRecords, db.cashMovements, db.cashRecords, async () => {
     const day = await db.dailyRecords.get(dailyRecordId);
-    if (!day || day.status !== 'open') return null;
+    if (!day || day.status !== 'open' || day.date !== today) return null;
     // cada dia é conferido uma vez só: se a diária foi tirada no ✕, não volta
     const rec = await db.cashRecords.where('dailyRecordId').equals(day.id).first();
     if (!rec || rec.dailyPayDone) return null;

@@ -5,6 +5,7 @@ import { addDays, fmtDate, money, parseDate, todayStr, weekday } from '../lib/ut
 import { dayIsEmpty, previousDay, reopenDay, resyncFromPrevious, startDay, undoStartDay } from '../services/days';
 import { computeCash, syncGap } from '../services/summary';
 import { ensureDailyPay } from '../services/cash';
+import { requestPersist } from '../services/storage';
 import { useApp } from '../state';
 import { Button, Card, InfoTip, useBusy, useUi } from './ui';
 
@@ -139,6 +140,7 @@ export function StartDayCard() {
   const start = (mode: 'copy' | 'blank') => wrap(async () => {
     if (mode === 'blank' && !(await confirm({ title: 'Começar com estoque zerado?', tone: 'danger', confirm: 'Começar zerado',
       message: 'Todas as quantidades começam em 0 e o caixa em 0. Normalmente o certo é “Iniciar o dia”, que copia o estoque do último dia.' }))) return;
+    requestPersist().catch(() => undefined); // um toque da pessoa: alguns navegadores só protegem assim
     await run(async () => { const d = await startDay(date, mode); await ensureDailyPay(d.id); return d; }, mode === 'copy' ? 'Dia iniciado!' : 'Dia criado zerado');
   });
   const fromLabel = info?.prev ? fmtDate(info.prev.date, false) : null;

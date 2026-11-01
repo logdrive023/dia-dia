@@ -112,6 +112,8 @@ export interface Order {
   payByLine?: boolean;
   /** Quando a usuária conferiu que o Pix caiu na conta. */
   pixConfirmedAt?: string | null;
+  /** Valor do Pix que foi conferido (se o valor mudar depois, precisa conferir de novo). */
+  pixConfirmedCents?: number | null;
   createdAt: string;
   notes?: string;
 }

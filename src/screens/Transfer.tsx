@@ -97,7 +97,7 @@ export default function TransferSheet({ open, onClose }: { open: boolean; onClos
   );
 }
 
-function UndoRestoreCard() {
+export function UndoRestoreCard() {
   const { run, confirm } = useUi();
   const saved = useLiveQuery(() => getSafetyCopy(), []);
   if (!saved) return null;

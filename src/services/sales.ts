@@ -4,6 +4,7 @@ import { isCents, isQty, MAX_QTY, nowIso, PAYMENTS, uid } from '../lib/util';
 import { audit } from './audit';
 import { UserError } from './catalog';
 import { applyStockDelta, assertOpen, ensureItem } from './days';
+import { addTombstones } from './sync';
 
 export interface CartLine {
   variantId: string;
@@ -25,7 +26,7 @@ export async function activeReservedByVariant(date: string, exceptIds: string[] 
 
 const SALE_TABLES = () => [
   db.dailyRecords, db.dailyStockItems, db.stockMovements, db.variants, db.orders, db.sales,
-  db.cashMovements, db.reservations, db.auditLogs,
+  db.cashMovements, db.reservations, db.auditLogs, db.settings,
 ];
 
 function validateLine(l: CartLine) {
@@ -331,7 +332,7 @@ export async function swapSaleItem(saleId: string, newVariantId: string, quantit
     const total = (n: number) => (s.unitPriceInCents ?? 0) * n;
     if (qty === s.quantity && !same) await db.sales.update(s.id, { variantId: newVariantId });
     else {
-      if (qty === s.quantity) await db.sales.delete(s.id);
+      if (qty === s.quantity) { await db.sales.delete(s.id); await addTombstones([s.id]); }
       else await db.sales.update(s.id, { quantity: s.quantity - qty, totalInCents: total(s.quantity - qty) });
       if (same) await db.sales.update(same.id, { quantity: same.quantity + qty, totalInCents: total(same.quantity + qty) });
       else await db.sales.add({ ...s, id: uid(), variantId: newVariantId, quantity: qty, totalInCents: total(qty) });
@@ -346,6 +347,19 @@ export function pixAmountOf(o: Pick<Order, 'paymentMethod' | 'payments' | 'total
   return o.paymentMethod === 'pix' ? o.totalInCents : 0;
 }
 
+/**
+ * Situação do Pix da venda: sem Pix · a conferir · conferido · valor mudou depois de conferido
+ * (ex.: conferiu 70 e depois corrigiu para 90 → precisa conferir de novo).
+ */
+export function pixStatus(o: Pick<Order, 'paymentMethod' | 'payments' | 'totalInCents' | 'status' | 'pixConfirmedAt' | 'pixConfirmedCents'>):
+  { kind: 'none' } | { kind: 'pending'; cents: number } | { kind: 'ok'; cents: number } | { kind: 'changed'; cents: number; was: number } {
+  const cents = pixAmountOf(o);
+  if (o.status !== 'ok' || !cents) return { kind: 'none' };
+  if (!o.pixConfirmedAt) return { kind: 'pending', cents };
+  const was = o.pixConfirmedCents ?? cents; // conferido antes desta versão: vale o valor atual
+  return was === cents ? { kind: 'ok', cents } : { kind: 'changed', cents, was };
+}
+
 /** Marca que o Pix desta venda caiu na conta (ou desmarca). */
 export async function confirmPix(orderId: string, confirmed = true) {
   await db.transaction('rw', db.orders, db.auditLogs, async () => {
@@ -353,7 +367,7 @@ export async function confirmPix(orderId: string, confirmed = true) {
     if (!o) throw new UserError('Venda não encontrada.');
     if (o.status !== 'ok') throw new UserError('Venda cancelada.');
     if (!pixAmountOf(o)) throw new UserError('Esta venda não tem Pix.');
-    await db.orders.update(orderId, { pixConfirmedAt: confirmed ? nowIso() : null });
+    await db.orders.update(orderId, { pixConfirmedAt: confirmed ? nowIso() : null, pixConfirmedCents: confirmed ? pixAmountOf(o) : null });
     await audit('order', orderId, confirmed ? 'pix_ok' : 'pix_undo', null, null);
   });
 }

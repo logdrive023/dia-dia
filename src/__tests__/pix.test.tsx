@@ -10,7 +10,7 @@ import { seedIfNeeded } from '../db/seed';
 import { AppDB, db, useDatabase } from '../db/db';
 import { detectPlatform, PIX, PIX_QR_PNG, pixCrc, pixPayloadOk } from '../lib/pix';
 import { startDay } from '../services/days';
-import { confirmPix, createOrder, pixAmountOf } from '../services/sales';
+import { cancelOrder, confirmPix, correctOrderPrices, createOrder, pixAmountOf, pixStatus } from '../services/sales';
 import { UserError } from '../services/catalog';
 import { todayStr, uid } from '../lib/util';
 
@@ -69,7 +69,7 @@ describe('Pix: dados', () => {
   });
   it('conferir Pix: só venda com Pix; Pix dividido conta só a parte do Pix', async () => {
     const d = await startDay('2026-11-01');
-    const [a, b] = (await db.variants.toArray()).filter((v) => v.startQuantity >= 2);
+    const [a, b] = (await db.variants.toArray()).filter((v) => v.startQuantity >= 5); // a vende 3 vezes
     const pix = await createOrder({ orderId: uid(), dailyRecordId: d.id, paymentMethod: 'pix', lines: [{ variantId: a.id, quantity: 1, unitPriceInCents: 7000 }] });
     const cash = await createOrder({ orderId: uid(), dailyRecordId: d.id, paymentMethod: 'dinheiro', lines: [{ variantId: a.id, quantity: 1, unitPriceInCents: 7000 }] });
     const mixed = await createOrder({ orderId: uid(), dailyRecordId: d.id, paymentMethod: 'dinheiro', lines: [
@@ -81,6 +81,17 @@ describe('Pix: dados', () => {
     await confirmPix(pix.id, false);
     expect((await db.orders.get(pix.id))!.pixConfirmedAt).toBeNull();
     await expect(confirmPix(cash.id)).rejects.toThrow(UserError);
+    // conferiu 70 e depois corrigiu para 90: precisa conferir de novo
+    await confirmPix(pix.id);
+    expect(pixStatus((await db.orders.get(pix.id))!)).toEqual({ kind: 'ok', cents: 7000 });
+    const line = (await db.sales.where('orderId').equals(pix.id).first())!;
+    await correctOrderPrices(pix.id, { [line.id]: 9000 });
+    expect(pixStatus((await db.orders.get(pix.id))!)).toEqual({ kind: 'changed', cents: 9000, was: 7000 });
+    await confirmPix(pix.id);
+    expect(pixStatus((await db.orders.get(pix.id))!)).toEqual({ kind: 'ok', cents: 9000 });
+    // cancelou: some o Pix
+    await cancelOrder(pix.id);
+    expect(pixStatus((await db.orders.get(pix.id))!)).toEqual({ kind: 'none' });
   });
 });
 
@@ -133,7 +144,7 @@ describe('Pix: pela tela', () => {
     render(<App />);
     click(await screen.findByRole('button', { name: /Caixa/ }, { timeout: 5000 }));
     click(await screen.findByRole('button', { name: /Conferir Pix/ }));
-    expect(await screen.findByText('✅ Pix caiu')).toBeTruthy();
+    expect(await screen.findByText(/✅ Pix caiu/)).toBeTruthy();
   }, 30000);
 
   it('no Samsung (Android) manda conferir no Neon; no iPhone avisa que não tem o Neon', async () => {

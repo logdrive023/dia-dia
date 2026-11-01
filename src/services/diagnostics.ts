@@ -42,7 +42,9 @@ export async function runDiagnostics(): Promise<{ findings: Finding[]; checked: 
     if (expected !== i.currentQuantity)
       f.push({ level: 'erro', title: `Estoque não bate com os movimentos: ${name(i.variantId)} em ${dName(i.dailyRecordId)}`,
         detail: `Gravado ${i.currentQuantity}, pelos movimentos deveria ser ${expected}.` });
-    if (i.currentQuantity < 0) f.push({ level: 'erro', title: `Estoque negativo: ${name(i.variantId)} em ${dName(i.dailyRecordId)}` });
+    // só acontece ao juntar celulares que venderam a mesma última peça: é aviso para conferir, não erro do banco
+    if (i.currentQuantity < 0) f.push({ level: 'aviso', title: `Vendeu mais do que tinha: ${name(i.variantId)} em ${dName(i.dailyRecordId)} (${i.currentQuantity})`,
+      detail: 'Os dois celulares venderam a mesma peça. Confira a peça e ajuste no Estoque.' });
   }
   const itemKeys = new Set(items.map((i) => `${i.dailyRecordId}|${i.variantId}`));
   for (const key of delta.keys()) if (!itemKeys.has(key) && delta.get(key)) {
