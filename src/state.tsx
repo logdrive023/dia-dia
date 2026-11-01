@@ -37,6 +37,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [cartId, setCartId] = useState(uid());
   const day = useLiveQuery(async () => (await db.dailyRecords.where('date').equals(date).first()) ?? null, [date]);
   const settings = useLiveQuery(getAllSettings, []) ?? DEFAULT_SETTINGS;
+  // carrinho nunca fica com peça que não existe mais (recomeçar, restaurar, juntar, peça apagada) nem sem dia
+  const variantIds = useLiveQuery(async () => new Set(await db.variants.toCollection().primaryKeys() as string[]), []);
+  useEffect(() => {
+    if (!variantIds) return;
+    setCart((c) => {
+      const ok = day ? c.filter((l) => variantIds.has(l.variantId)) : [];
+      return ok.length === c.length ? c : ok;
+    });
+  }, [variantIds, day]);
   // dia aberto sem a diária (ex.: iniciado antes desta versão): lança uma vez só
   useEffect(() => {
     if (day && day.status === 'open') ensureDailyPay(day.id).catch(() => undefined);

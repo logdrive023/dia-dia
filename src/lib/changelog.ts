@@ -16,6 +16,7 @@ export const CHANGELOG: ChangeEntry[] = [
       ['🆕', 'Esta tela de Atualizações'],
       ['✓', 'Selo no topo: “✓ Atualizado” na última versão, “🆕 Atualizar” quando sai uma nova'],
       ['⌨️', 'Fechar venda não abre mais o teclado sozinho'],
+      ['🧹', 'Recomeçar com uma venda aberta: o carrinho some junto (antes ficava o número na tela)'],
     ],
   },
   {

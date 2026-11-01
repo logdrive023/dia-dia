@@ -78,6 +78,38 @@ describe('selo da versão no cabeçalho', () => {
   }, 30000);
 });
 
+describe('recomeçar com venda aberta (bug do carrinho)', () => {
+  it('abre venda com 2 peças, vai em Configurações e zera tudo: o carrinho some', async () => {
+    render(<App />);
+    click(await screen.findByRole('button', { name: /Iniciar o dia/ }, { timeout: 5000 }));
+    await screen.findByRole('button', { name: /Nova venda/ });
+    const navBtn = () => within(screen.getByRole('navigation')).getByRole('button', { name: /Vender/ });
+    click(navBtn());
+    click((await screen.findAllByRole('button', { name: /^Vender / }))[0]);
+    click((await screen.findAllByRole('button', { name: /^Mais 1 / }))[0]);
+    await waitFor(() => expect(navBtn().textContent).toContain('2'));
+    click(screen.getByRole('button', { name: /Abrir menu/ }));
+    click(await screen.findByRole('button', { name: /Configurações/ }));
+    click(await screen.findByRole('button', { name: /Reiniciar tudo do 0/ }));
+    click(await screen.findByRole('button', { name: /Sim, apagar tudo/ }));
+    await waitFor(async () => expect(await db.variants.count()).toBe(0));
+    await waitFor(() => expect(navBtn().textContent).not.toMatch(/\d/)); // sem o "2"
+    expect(screen.queryByRole('button', { name: /Fechar venda/ })).toBeNull();
+  }, 30000);
+
+  it('carrinho se limpa sozinho quando a peça deixa de existir (restaurar, juntar, apagar)', async () => {
+    render(<App />);
+    click(await screen.findByRole('button', { name: /Iniciar o dia/ }, { timeout: 5000 }));
+    await screen.findByRole('button', { name: /Nova venda/ });
+    const navBtn = () => within(screen.getByRole('navigation')).getByRole('button', { name: /Vender/ });
+    click(navBtn());
+    click((await screen.findAllByRole('button', { name: /^Vender / }))[0]);
+    await waitFor(() => expect(navBtn().textContent).toContain('1'));
+    await db.variants.clear(); // a peça sumiu por fora (ex.: restaurou outro backup)
+    await waitFor(() => expect(navBtn().textContent).not.toMatch(/\d/));
+  }, 30000);
+});
+
 describe('Juntar com outro celular (pela tela)', () => {
   it('gera o código e, colando o código de outro celular, junta as vendas', async () => {
     // código "do outro celular": um banco separado com uma venda

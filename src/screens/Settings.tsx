@@ -200,6 +200,7 @@ function Diagnostics() {
 /** Duas formas de recomeçar: com os dados iniciais oficiais ou do zero (app vazio). */
 function ResetButtons() {
   const { run, confirm } = useUi();
+  const { resetCart } = useApp();
   const go = async (kind: 'inicial' | 'zero') => {
     const zero = kind === 'zero';
     if (!(await confirm({
@@ -209,8 +210,9 @@ function ResetButtons() {
         ? 'O app fica vazio: sem grupos, sem peças, sem dias e caixa em 0. O app guarda uma cópia antes (dá para voltar em Backup).'
         : 'Volta o estoque da lista oficial e os cadernos de 30/10 e 31/10. Tudo o que foi lançado é apagado. O app guarda uma cópia antes (dá para voltar em Backup).',
     }))) return;
-    const ok = await run(() => (zero ? resetToZero() : resetToInitialData()), zero ? 'Pronto! App zerado.' : 'Pronto! Dados iniciais carregados.');
-    if (ok !== undefined) setTimeout(() => location.reload(), 600);
+    // as funções não devolvem nada: devolve true para saber que deu certo (antes não recarregava e o carrinho ficava na tela)
+    const ok = await run(async () => { await (zero ? resetToZero() : resetToInitialData()); return true; }, zero ? 'Pronto! App zerado.' : 'Pronto! Dados iniciais carregados.');
+    if (ok) { resetCart(); setTimeout(() => location.reload(), 600); }
   };
   return (
     <div className="space-y-2">
