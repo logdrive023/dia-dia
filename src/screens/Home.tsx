@@ -68,6 +68,10 @@ export default function Home() {
               <div className="grid grid-cols-2 gap-2.5">
                 <Button size="lg" className="text-base" onClick={() => setTab('vender')}>🛍️ Nova venda</Button>
                 <Button size="lg" variant="outline" className="text-base" onClick={() => setOverlay('fechar')}>🌙 Encerrar o dia</Button>
+                <button onClick={() => setOverlay('pix')}
+                  className="col-span-2 min-h-12 rounded-xl bg-amber-50 border-2 border-amber-300 text-[15px] font-bold text-amber-800 active:bg-amber-100">
+                  ⚡ Mostrar Pix (QR code)
+                </button>
               </div>
             )}
 

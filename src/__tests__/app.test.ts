@@ -13,7 +13,7 @@ import { runDiagnostics } from '../services/diagnostics';
 import { buildBackup, decodeTextBackup, encodeTextBackup, restoreBackup } from '../services/backup';
 import { notebookReport, whatsappReport } from '../services/report';
 import { getSetting } from '../services/settings';
-import { money, toCents, uid } from '../lib/util';
+import { money, toCents, todayStr, uid } from '../lib/util';
 
 let n = 0;
 beforeEach(async () => {
@@ -337,7 +337,7 @@ describe('gaps corrigidos', () => {
     expect(await qty(d3.id, v.id)).toBe(0);
   });
   it('variação criada depois do início do dia aparece no estoque do dia (com 0)', async () => {
-    const d = await startDay('2026-10-31');
+    const d = await startDay(todayStr()); // o dia de hoje: a cor é criada agora, depois do início
     const g = await createGroup({ name: 'Extra' });
     const v = await createVariant({ groupId: g.id, name: 'Azul' });
     const row = (await loadStockRows(d.id, d.date)).find((r) => r.variant.id === v.id);

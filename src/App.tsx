@@ -2,6 +2,7 @@ import { Component, lazy, Suspense, useEffect, useState, type ReactNode } from '
 import { db } from './db/db';
 import { useRegisterSW } from 'virtual:pwa-register/react';
 import { seedIfNeeded } from './db/seed';
+import { PixSheet } from './components/Pix';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { AppProvider, useApp, type Tab } from './state';
 import { closeTopSheet, InfoTip, Sheet, UiProvider } from './components/ui';
@@ -106,6 +107,7 @@ function Shell() {
         {overlay === 'transferir' && <TransferSheet open onClose={close} />}
       </Suspense>
       <AboutSheet open={overlay === 'sobre'} onClose={close} />
+      <PixSheet open={overlay === 'pix'} onClose={close} />
       <BackButton />
       <UpdateBanner />
     </div>
@@ -185,6 +187,7 @@ function MenuSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
   const sections: { label: string; items: Item[] }[] = [
     { label: 'Dia a dia', items: [
       { icon: '✏️', tint: 'bg-blue-100', title: 'Produtos e grupos', desc: 'Criar, renomear, preço e estoque ideal', go: () => setOverlay('cadastro') },
+      { icon: '⚡', tint: 'bg-amber-100', title: 'Mostrar meu Pix', desc: 'QR code na tela para a cliente pagar', go: () => setOverlay('pix') },
       { icon: '🗓️', tint: 'bg-indigo-100', title: 'Histórico', desc: 'Dias anteriores e comparar dias', go: () => { setTab('historico'); onClose(); } },
     ] },
     { label: 'Seus dados', items: [

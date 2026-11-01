@@ -4,7 +4,8 @@ import { db } from '../db/db';
 import type { PaymentMethod, Reservation } from '../db/types';
 import { money, normalize, PAYMENT_EMOJI, PAYMENT_LABEL, PAYMENTS, toCents, uid } from '../lib/util';
 import { setForSale } from '../services/catalog';
-import { cancelReservation, convertReservation, createOrder, createReservation, type CartLine } from '../services/sales';
+import { cancelReservation, confirmPix, convertReservation, createOrder, createReservation, pixAmountOf, type CartLine } from '../services/sales';
+import { PixQr } from '../components/Pix';
 import { orderLine } from '../services/report';
 import { setSetting, type SellEntry } from '../services/settings';
 import { loadStockRows, type StockRow } from '../services/summary';
@@ -421,6 +422,7 @@ export function CheckoutSheet({ open, onClose }: { open: boolean; onClose: () =>
   const pieces = cart.reduce((s, l) => s + l.quantity, 0);
   // linhas que vão para a venda: com a forma de cada peça (ou sem, quando é tudo igual)
   const lines: CartLine[] = perLine ? cart.map((l) => ({ ...l, paymentMethod: l.paymentMethod ?? payment })) : cart.map(({ paymentMethod: _m, ...l }) => l);
+  const pixTotal = lines.filter((l) => (l.paymentMethod ?? payment) === 'pix').reduce((n, l) => n + (l.unitPriceInCents ?? 0) * l.quantity, 0);
   const missingPrice = cart.some((l) => l.unitPriceInCents === null);
   const firstPrice = cart.find((l) => l.unitPriceInCents !== null)?.unitPriceInCents ?? null;
   const setMode = (each: boolean) => {
@@ -446,7 +448,10 @@ export function CheckoutSheet({ open, onClose }: { open: boolean; onClose: () =>
       message: 'As peças sem preço saem do estoque, mas não entram no caixa nem no relatório de vendas.' }))) return;
     const o = await run(() => createOrder({ orderId: cartId, dailyRecordId: day.id, lines, paymentMethod: payment, customer }));
     if (o) {
-      toast(`Venda: ${orderLine(lines, o.totalInCents, o.paymentMethod, o.payments)}`);
+      const pix = pixAmountOf(o);
+      if (pix > 0) toast(`⚡ Venda salva · Pix de ${money(pix)}: já caiu?`, 'info',
+        { label: '✅ Caiu', fn: () => run(() => confirmPix(o.id), `✅ Pix de ${money(pix)} confirmado`) });
+      else toast(`Venda: ${orderLine(lines, o.totalInCents, o.paymentMethod, o.payments)}`);
       setPerLine(false);
       resetCart(); setCustomer(''); onClose();
     }
@@ -513,6 +518,8 @@ export function CheckoutSheet({ open, onClose }: { open: boolean; onClose: () =>
       ) : (
         <PaymentPicker value={payment} onChange={setPayment} />
       )}
+      {/* escolheu Pix: o QR code já fica na tela para a cliente pagar */}
+      {pixTotal > 0 && <div className="mt-3"><PixQr amount={pixTotal} compact /></div>}
       <div className="mt-4"><Field label="Cliente (opcional)"><Input value={customer} onChange={(e) => setCustomer(e.target.value)} placeholder="Nome" /></Field></div>
       {cart.length > 0 && (
         <SaleSummary total={total} pieces={pieces}

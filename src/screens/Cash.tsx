@@ -4,7 +4,7 @@ import { db } from '../db/db';
 import type { CashMovement, CashType, PaymentMethod, Sale } from '../db/types';
 import { addDays, money, PAYMENT_EMOJI, PAYMENT_LABEL, PAYMENTS, toCents, todayStr } from '../lib/util';
 import { addCashMovement, CASH_IN, CASH_LABEL, removeCashMovement, setCountedBalance, setOpeningBalance, updateNotebookSale } from '../services/cash';
-import { activeReservedByVariant, cancelOrder, correctOrderPrices, reservationsOfOrder, swapSaleItem } from '../services/sales';
+import { activeReservedByVariant, cancelOrder, confirmPix, correctOrderPrices, pixAmountOf, reservationsOfOrder, swapSaleItem } from '../services/sales';
 import { cashStatement, daySummary, loadStockRows } from '../services/summary';
 import { useApp } from '../state';
 import { DayNotices, DayBar, StartDayCard } from '../components/day';
@@ -281,6 +281,10 @@ export default function Cash() {
                         <span key={m} className="rounded-full bg-blue-50 text-blue-800 px-2 py-0.5 text-[12px] font-bold">{PAYMENT_EMOJI[m]} {PAYMENT_LABEL[m]}{o.payments && o.payments.length > 1 ? ` ${money(v)}` : ''}</span>
                       ))}
                       {cancelled && <span className="rounded-full bg-red-100 text-red-700 px-2 py-0.5 text-[12px] font-bold">✖️ cancelada</span>}
+                      {!cancelled && pixAmountOf(o) > 0 && (o.pixConfirmedAt
+                        ? <span className="rounded-full bg-emerald-100 text-emerald-800 px-2 py-0.5 text-[12px] font-bold">✅ Pix caiu</span>
+                        : <button onClick={() => run(() => confirmPix(o.id), `✅ Pix de ${money(pixAmountOf(o))} confirmado`)}
+                            className="rounded-full bg-amber-100 text-amber-800 px-2 py-0.5 text-[12px] font-bold active:bg-amber-200">⏳ Conferir Pix · tocar quando cair</button>)}
                     </div>
                     {/* de onde veio: uma linha por peça (grupo › cor × quantidade) */}
                     <div className="mx-3 mt-2 rounded-xl bg-slate-50 border border-slate-100 divide-y divide-slate-100">

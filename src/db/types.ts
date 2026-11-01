@@ -110,6 +110,8 @@ export interface Order {
   payments?: Payment[];
   /** Cada peça tem a sua forma de pagamento (Sale.paymentMethod); `payments` é a soma por forma. */
   payByLine?: boolean;
+  /** Quando a usuária conferiu que o Pix caiu na conta. */
+  pixConfirmedAt?: string | null;
   createdAt: string;
   notes?: string;
 }

@@ -339,3 +339,21 @@ export async function swapSaleItem(saleId: string, newVariantId: string, quantit
     await audit('order', order.id, 'swapItem', { saleId, variantId: s.variantId, quantity: qty }, { variantId: newVariantId });
   });
 }
+
+/** Quanto da venda foi no Pix (0 = não tem Pix). */
+export function pixAmountOf(o: Pick<Order, 'paymentMethod' | 'payments' | 'totalInCents'>) {
+  if (o.payments?.length) return o.payments.filter((p) => p.method === 'pix').reduce((n, p) => n + p.amountInCents, 0);
+  return o.paymentMethod === 'pix' ? o.totalInCents : 0;
+}
+
+/** Marca que o Pix desta venda caiu na conta (ou desmarca). */
+export async function confirmPix(orderId: string, confirmed = true) {
+  await db.transaction('rw', db.orders, db.auditLogs, async () => {
+    const o = await db.orders.get(orderId);
+    if (!o) throw new UserError('Venda não encontrada.');
+    if (o.status !== 'ok') throw new UserError('Venda cancelada.');
+    if (!pixAmountOf(o)) throw new UserError('Esta venda não tem Pix.');
+    await db.orders.update(orderId, { pixConfirmedAt: confirmed ? nowIso() : null });
+    await audit('order', orderId, confirmed ? 'pix_ok' : 'pix_undo', null, null);
+  });
+}
