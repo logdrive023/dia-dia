@@ -3,6 +3,8 @@ import type { Group, Variant } from '../db/types';
 import { isCents, MAX_QTY, normalize, nowIso, uid } from '../lib/util';
 import { audit } from './audit';
 import { getSetting, setSetting } from './settings';
+// import normal (nunca `await import` dentro de transação: a espera encerra a transação do IndexedDB antes da hora)
+import { addTombstones } from './sync';
 
 /** Recusa com mensagem para a pessoa (em português). O nome fixo sobrevive à compactação do build. */
 export class UserError extends Error { name = 'UserError'; }
@@ -13,7 +15,7 @@ const MAX_NAME = 40;
 function validateNumbers(p: { idealStock?: number | null; minimumStock?: number | null; optionalPriceInCents?: number | null }) {
   for (const k of ['idealStock', 'minimumStock'] as const) {
     const v = p[k];
-    if (v !== undefined && v !== null && !(Number.isInteger(v) && v >= 0 && v <= MAX_QTY)) throw new UserError('Estoque ideal inválido.');
+    if (v !== undefined && v !== null && !(Number.isInteger(v) && v >= 0 && v <= MAX_QTY)) throw new UserError(k === 'minimumStock' ? 'Estoque mínimo inválido.' : 'Estoque ideal inválido.');
   }
   const pr = p.optionalPriceInCents;
   if (pr !== undefined && pr !== null && !isCents(pr)) throw new UserError('Preço inválido.');
@@ -179,7 +181,7 @@ export async function createVariant(input: {
 }
 
 export async function updateVariant(id: string, patch: Partial<Pick<Variant,
-  'name' | 'description' | 'color' | 'minimumStock' | 'idealStock' | 'optionalPriceInCents' | 'notes'>>) {
+  'name' | 'description' | 'color' | 'minimumStock' | 'idealStock' | 'optionalPriceInCents' | 'notes' | 'restockOff'>>) {
   return db.transaction('rw', db.variants, db.auditLogs, async () => {
     const v = await db.variants.get(id);
     if (!v) throw new UserError('Variação não encontrada.');
@@ -256,7 +258,6 @@ export async function deleteVariant(id: string): Promise<'apagada' | 'escondida'
     await db.stockMovements.bulkDelete(moves);
     await db.dailyStockItems.where('variantId').equals(id).delete();
     await db.variants.delete(id);
-    const { addTombstones } = await import('./sync');
     await addTombstones([id, ...(moves as string[])]); // ao juntar com outro celular, não volta
     await audit('variant', id, 'delete', v.name, null);
     return 'apagada';

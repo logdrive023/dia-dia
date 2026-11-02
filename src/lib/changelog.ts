@@ -14,6 +14,10 @@ export const CHANGELOG: ChangeEntry[] = [
       ['🚫', 'Cores arquivadas não entram mais no relatório do WhatsApp (Entrou, Repor e total do estoque)'],
       ['🔧', 'Dados antigos consertados sozinhos ao abrir: o “Entrou” do cadastro virou estoque inicial (o estoque final não muda)'],
       ['💬', 'Mensagem muito grande não trava mais o WhatsApp: vai pelo compartilhar do celular ou é copiada'],
+      ['📦', 'Mensagem do WhatsApp mostra o estoque de agora, cor por cor, com “⚠️ repor” ou “🚫 esgotado” ao lado (chave “Mostrar o estoque” no Encerrar o dia)'],
+      ['🔁', 'Em cada produto: “Precisa repor?” (sim/não) e “Tem estoque mínimo?” — só aparece para repor quando chega no mínimo'],
+      ['✂️', '“Precisa repor” no WhatsApp mais simples: só a cor e o número (ex.: “Cor Blanco: 1”)'],
+      ['🔢', 'Chave “Repor com tem X de Y” no Encerrar o dia: liga para mostrar “(tem 14 de 15)” ao lado do número'],
     ],
   },
   {

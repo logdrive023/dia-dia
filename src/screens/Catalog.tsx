@@ -9,6 +9,7 @@ import {
   updateGroup, updateVariant,
 } from '../services/catalog';
 import { setStock } from '../services/days';
+import { restockOf } from '../services/summary';
 import { useApp } from '../state';
 import { Badge, Button, Card, ColorField, Field, InfoTip, Input, Sheet, Swatch, Toggle, useBusy, useUi } from '../components/ui';
 
@@ -358,11 +359,35 @@ function VariantEditor({ id, onClose }: { id: string | null; onClose: () => void
           </div>
         </Field>
       )}
-      {/* 2) meta: só serve para o “repor”, não muda o estoque */}
-      <NumberField key={'i' + v.id + v.idealStock} label="🎯 Meta para o “repor” (estoque ideal)"
-        hint={`Não muda o estoque. “Repor” = meta − o que tem${data.item ? `: hoje ${data.item.currentQuantity} · meta ${v.idealStock ?? v.startQuantity} → repor ${Math.max(0, (v.idealStock ?? v.startQuantity) - data.item.currentQuantity)}` : ''}. Vazio = usa a quantidade do cadastro (${v.startQuantity}).`}
-        value={v.idealStock === null || v.idealStock === undefined ? '' : String(v.idealStock)}
-        onSave={(t) => run(() => updateVariant(v.id, { idealStock: t === '' ? null : Number(t) }), 'Salvo')} />
+      {/* 2) repor: configurado em cada produto (vai direto para o relatório do WhatsApp) */}
+      <div className="rounded-2xl bg-white border border-slate-200 px-3 py-1 mb-4">
+        <div className="flex items-center gap-2">
+          <div className="flex-1"><Toggle label="🔁 Precisa repor?" checked={!v.restockOff} onChange={(on) => run(() => updateVariant(v.id, { restockOff: !on }), on ? 'Repor ligado' : 'Não aparece mais em “repor”')} /></div>
+          <InfoTip title="Precisa repor?" example={[
+            ['✅', <><b>Ligado:</b> aparece em “repor” quando faltar peça para a meta</>],
+            ['🚫', <><b>Desligado:</b> nunca aparece em “repor” (ex.: peça que não vai comprar de novo)</>],
+            ['📏', <><b>Estoque mínimo 3:</b> só aparece para repor quando tiver 3 ou menos, e repõe até a meta</>],
+          ]}>Vale para o Estoque e para a mensagem do WhatsApp.</InfoTip>
+        </div>
+        {!v.restockOff && (
+          <>
+            <div className="border-t border-slate-100">
+              <Toggle label="📏 Tem estoque mínimo?" checked={v.minimumStock !== null && v.minimumStock !== undefined}
+                onChange={(on) => run(() => updateVariant(v.id, { minimumStock: on ? Math.min(3, v.idealStock ?? v.startQuantity) : null }), on ? 'Mínimo ligado' : 'Sem mínimo')} />
+            </div>
+            {v.minimumStock !== null && v.minimumStock !== undefined && (
+              <NumberField key={'m' + v.id + v.minimumStock} label="Estoque mínimo"
+                hint={`Aparece para repor quando tiver ${v.minimumStock} ou menos.`}
+                value={String(v.minimumStock)}
+                onSave={(t) => run(() => updateVariant(v.id, { minimumStock: t === '' ? null : Number(t) }), 'Salvo')} />
+            )}
+            <NumberField key={'i' + v.id + v.idealStock} label="🎯 Meta (repõe até quanto)"
+              hint={`Não muda o estoque.${data.item ? ` Hoje ${data.item.currentQuantity} · meta ${v.idealStock ?? v.startQuantity} → repor ${restockOf(v, data.item.currentQuantity, v.idealStock ?? v.startQuantity)}.` : ''} Vazio = usa a quantidade do cadastro (${v.startQuantity}).`}
+              value={v.idealStock === null || v.idealStock === undefined ? '' : String(v.idealStock)}
+              onSave={(t) => run(() => updateVariant(v.id, { idealStock: t === '' ? null : Number(t) }), 'Salvo')} />
+          </>
+        )}
+      </div>
       <NumberField key={'p' + v.id + v.optionalPriceInCents} label="Preço de venda (opcional)" hint="Já vem preenchido na venda. Vazio = digitar na hora." decimal
         value={v.optionalPriceInCents ? money(v.optionalPriceInCents) : ''}
         onSave={(t) => run(() => updateVariant(v.id, { optionalPriceInCents: t === '' ? null : toCents(t) }), 'Salvo')} />

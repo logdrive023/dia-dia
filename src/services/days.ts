@@ -3,6 +3,7 @@ import type { DailyRecord, DailyStockItem, MovementType, PaymentMethod, StockMov
 import { isQty, MAX_QTY, money, nowIso, uid } from '../lib/util';
 import { audit } from './audit';
 import { UserError } from './catalog';
+import { addTombstones } from './sync';
 
 export async function getDayByDate(date: string) {
   return db.dailyRecords.where('date').equals(date).first();
@@ -314,7 +315,6 @@ export async function migrateCadastroEntries() {
       await db.stockMovements.delete(m.id);
       ids.push(m.id); n++;
     }
-    const { addTombstones } = await import('./sync');
     await addTombstones(ids);
     await db.settings.add({ id: uid(), key: 'migrCadastroV1', value: { at: nowIso(), fixed: n } });
     return n;

@@ -106,6 +106,10 @@ O app substitui o caderno sem mudar o jeito de pensar:
 - Resumo (vendeu, entrou, repor), formas de pagamento, **✅ Total (ontem + hoje)**.
 - **Dinheiro vivo contado**: a mensagem muda na hora (faltam/sobram/bateu).
 - Relatório **WhatsApp** (padrão) ou **Caderno**; “Editar mensagem” opcional; **Enviar no WhatsApp**, **Copiar texto**, **Outros apps**.
+- Chaves do WhatsApp (ficam salvas e valem também para o Início):
+  - **📦 Mostrar o estoque** (ligada): lista o que tem agora, cor por cor, com “⚠️ repor N” / “🚫 esgotado” ao lado; desligada mostra só o total;
+  - **🔢 Repor com “tem X de Y”** (desligada): “Precisa repor” fica só “Cor Blanco: 1”; ligada vira “Cor Blanco: 1 (tem 14 de 15)”.
+- O repor de cada cor vem do cadastro: **🔁 Precisa repor?** (desligado = nunca aparece), **📏 Tem estoque mínimo?** (só aparece quando chega no mínimo) e **🎯 Meta** (repõe até quanto).
 - Encerrar bloqueia o dia contra mudanças acidentais (dá para reabrir).
 
 ### Menu
@@ -414,7 +418,7 @@ Configuração (`vite.config.ts`): 60 s por teste, **um arquivo por vez** (os te
 | `tela.test.tsx` | 2 | um dia completo pela tela (iniciar, vender, lançar, encerrar, relatório) |
 | `rolagem.test.ts` | 2 | impede `overflow` em html/body (travava a rolagem no Android) e altura das janelas |
 | `macaco-tela.test.tsx` | 1 (×4 sorteios) | toques aleatórios na tela sem quebrar |
-| `cadastro-relatorio.test.ts` | 8 | cadastro não é “entrou”, meta não mexe no estoque, arquivadas fora do relatório, excluir, conserto dos dados antigos, WhatsApp grande; **dados reais** (opcional) |
+| `cadastro-relatorio.test.ts` | 12 | cadastro não é “entrou”, meta não mexe no estoque, arquivadas fora do relatório, excluir, conserto dos dados antigos, WhatsApp grande; **dados reais** (opcional) |
 
 ### Testar com os dados reais do celular
 Exporte em Menu › Passar para outro celular › Enviar tudo e rode (o arquivo **não** vai para o repositório):

@@ -160,6 +160,39 @@ describe('cor arquivada: botão Excluir na lista (pela tela)', () => {
   }, 30000);
 });
 
+describe('chaves do repor e do estoque na mensagem (pela tela)', () => {
+  it('na cor: "Precisa repor?" e "Tem estoque mínimo?" salvam; no Encerrar: "Mostrar o estoque" liga e desliga a lista', async () => {
+    render(<App />);
+    click(await screen.findByRole('button', { name: /Iniciar o dia/ }, { timeout: 5000 }));
+    await screen.findByRole('button', { name: /Nova venda/ });
+    const v = (await db.variants.toArray()).find((x) => x.name === 'Verde Piscina')!;
+    const g = (await db.groups.get(v.groupId))!;
+    click(screen.getByRole('button', { name: /Abrir menu/ }));
+    click(await screen.findByRole('button', { name: /Produtos e grupos/ }));
+    const sheet = () => [...document.querySelectorAll('div.fixed.inset-0')].pop() as HTMLElement;
+    click((await waitFor(() => within(sheet()).getAllByRole('button', { name: new RegExp(g.name) })))[0]);
+    // a linha da cor (tem “ideal”), não o botão de cor do grupo que também se chama Verde Piscina
+    click(await waitFor(() => {
+      const b = within(sheet()).getAllByRole('button').find((x) => /Verde Piscina/.test(x.textContent ?? '') && /ideal/.test(x.textContent ?? ''));
+      if (!b) throw new Error('linha da cor ainda não apareceu');
+      return b;
+    }));
+    click(await screen.findByRole('switch', { name: /Tem estoque mínimo/ }));
+    await waitFor(async () => expect((await db.variants.get(v.id))!.minimumStock).not.toBeNull());
+    click(screen.getByRole('switch', { name: /Precisa repor/ }));
+    await waitFor(async () => expect((await db.variants.get(v.id))!.restockOff).toBe(true));
+    expect(screen.queryByRole('switch', { name: /Tem estoque mínimo/ })).toBeNull(); // sem repor, some o mínimo
+    for (let i = 0; i < 4; i++) { fireEvent.keyDown(document, { key: 'Escape' }); await new Promise((r) => setTimeout(r, 80)); }
+    click(await screen.findByRole('button', { name: /Encerrar o dia/ }));
+    const sw = await screen.findByRole('switch', { name: /Mostrar o estoque/ });
+    expect(sw.getAttribute('aria-checked')).toBe('true');
+    await screen.findByText(/Estoque agora/);
+    click(sw);
+    await waitFor(() => expect(screen.queryByText(/Estoque agora/)).toBeNull());
+    await waitFor(async () => expect((await db.settings.where('key').equals('reportShowStock').first())?.value).toBe(false));
+  }, 30000);
+});
+
 describe('Juntar com outro celular (pela tela)', () => {
   it('gera o código e, colando o código de outro celular, junta as vendas', async () => {
     // código "do outro celular": um banco separado com uma venda

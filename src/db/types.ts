@@ -28,8 +28,10 @@ export interface Variant {
   archivedAt?: string | null;
   /** Excluída: tinha vendas, então não some do histórico, mas não aparece em mais nada. */
   deletedAt?: string | null;
-  /** (antigo, não usado) */
+  /** Estoque mínimo: com valor, só aparece para repor quando chega nele (ou abaixo). null = sem mínimo. */
   minimumStock: number | null;
+  /** true = esta cor não precisa de repor (nunca aparece em “repor”). */
+  restockOff?: boolean;
   /**
    * Estoque ideal: quantas peças você quer ter. "Repor" = ideal - quantidade atual.
    * null = usa a quantidade do cadastro (startQuantity). Ex.: cadastrou 15, vendeu 1 → repor 1.

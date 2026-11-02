@@ -2,7 +2,8 @@ import type { PaymentMethod } from '../db/types';
 import { fmtDate, money, PAYMENT_LABEL } from '../lib/util';
 import { cashStatement, type DaySummary } from './summary';
 
-type Opts = { symbol?: string; title?: string };
+type Opts = { symbol?: string; title?: string; /** mostrar o estoque de agora (cor por cor) na mensagem do WhatsApp */ showStock?: boolean;
+  /** em “Precisa repor”, mostrar “(tem 14 de 15)” ao lado do número */ restockDetail?: boolean };
 
 /** Linha do caderno para uma venda: "2x70 = 140 Dinheiro" ou "1x70 + 1x85 = 155 Pix". */
 export function orderLine(lines: { quantity: number; unitPriceInCents: number | null; paymentMethod?: PaymentMethod }[], total: number, method: PaymentMethod,
@@ -145,14 +146,20 @@ export function whatsappReport(date: string, s: DaySummary, opts: Opts = {}) {
   const soldOut = s.restock.filter((r) => r.out && r.restock === 0);
   if (toRestock.length) {
     section(`🔁 *Precisa repor (${plural(s.restockUnits, 'peça', 'peças')})*`);
-    L.push(...byGroup(toRestock, (r) => `Cor ${r.variant.name}: repor ${r.restock} (tem ${r.item.currentQuantity} de ${r.ideal})`));
+    L.push(...byGroup(toRestock, (r) => `Cor ${r.variant.name}: ${r.restock}${opts.restockDetail ? ` (tem ${r.item.currentQuantity} de ${r.ideal})` : ''}`));
   }
   if (soldOut.length) {
     section(`🚫 *Esgotados (${soldOut.length})*`);
     L.push(...byGroup(soldOut, (r) => `Cor ${r.variant.name}`));
   }
 
-  section(`📊 Estoque no fim do dia: *${plural(s.totalUnits, 'peça', 'peças')}*`);
+  if (opts.showStock && s.stockNow.length) {
+    // o que tem agora, cor por cor; ao lado, o aviso de repor/esgotado (a seção "Precisa repor" continua acima)
+    section(`📦 *Estoque agora (${plural(s.totalUnits, 'peça', 'peças')})*`);
+    L.push(...byGroup(s.stockNow, (r) => `Cor ${r.variant.name}: ${r.item.currentQuantity}${r.out ? ' 🚫 esgotado' : r.restock > 0 ? ` ⚠️ repor ${r.restock}` : ''}`));
+  } else {
+    section(`📊 Estoque no fim do dia: *${plural(s.totalUnits, 'peça', 'peças')}*`);
+  }
   return L.join('\n');
 }
 

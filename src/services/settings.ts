@@ -17,6 +17,10 @@ export interface AppSettings {
   lastBackupAt: string | null;
   backupReminderDays: number;
   reportTitle: string;
+  /** relatório do WhatsApp mostra o estoque de agora, cor por cor */
+  reportShowStock: boolean;
+  /** em “Precisa repor”, mostrar “(tem 14 de 15)” */
+  reportRestockDetail: boolean;
   /** Diária de quem vende (centavos). Sugestão ao lançar “Pagamento”. */
   dailyPayInCents: number;
   /** Ao iniciar o dia, já lança a diária daquele dia. */
@@ -31,6 +35,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   lastBackupAt: null,
   backupReminderDays: 7,
   reportTitle: 'Check List',
+  reportShowStock: true,
+  reportRestockDetail: false,
   dailyPayInCents: 15000,
   autoDailyPay: true,
 };

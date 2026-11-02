@@ -4,6 +4,7 @@ import { fmtDate, money, PAYMENT_EMOJI, PAYMENT_LABEL, PAYMENTS, toCents } from 
 import { closeDay } from '../services/days';
 import { copyText, notebookReport, openWhatsApp, shareText, whatsappReport } from '../services/report';
 import { daySummary } from '../services/summary';
+import { setSetting } from '../services/settings';
 import { useApp } from '../state';
 import { Button, Card, Field, InfoTip, Input, Sheet, Toggle, useBusy, useUi } from '../components/ui';
 
@@ -20,7 +21,7 @@ export default function CloseDaySheet({ open, onClose }: { open: boolean; onClos
   const [copied, setCopied] = useState(false);
   const s = useLiveQuery(async () => (day && open ? daySummary(day.id, day.date) : null), [day?.id, open]);
   if (!open || !day) return null;
-  const opts = { symbol: settings.currencySymbol, title: settings.reportTitle };
+  const opts = { symbol: settings.currencySymbol, title: settings.reportTitle, showStock: settings.reportShowStock, restockDetail: settings.reportRestockDetail };
   // o que for digitado em "Dinheiro vivo contado" já aparece no relatório (antes de encerrar)
   const typed = counted.trim() ? toCents(counted) : null;
   const view = s && typed !== null ? { ...s, cash: { ...s.cash, counted: typed, difference: typed - s.cash.cashOnHand } } : s;
@@ -81,6 +82,35 @@ export default function CloseDaySheet({ open, onClose }: { open: boolean; onClos
             <button onClick={() => pickFmt('whats')} className={`h-11 rounded-lg text-sm font-semibold ${fmt === 'whats' ? 'bg-white shadow' : 'text-slate-500'}`}>💬 WhatsApp</button>
             <button onClick={() => pickFmt('caderno')} className={`h-11 rounded-lg text-sm font-semibold ${fmt === 'caderno' ? 'bg-white shadow' : 'text-slate-500'}`}>📒 Caderno</button>
           </div>
+          {fmt === 'whats' && (
+            <div className="flex items-center gap-2 mb-2 bg-white rounded-xl border border-slate-200 px-3 py-1">
+              <div className="flex-1">
+                <Toggle label="📦 Mostrar o estoque" checked={settings.reportShowStock}
+                  onChange={(on) => { setSetting('reportShowStock', on).catch(() => undefined); setDraft(null); setEditing(false); }} />
+              </div>
+              <InfoTip title="Mostrar o estoque" example={[
+                ['✅', <><b>Ligado:</b> a mensagem lista o que tem agora, cor por cor</>],
+                ['⚠️', '“Cor Branco: 3 ⚠️ repor 2” · “Cor Rosa: 0 🚫 esgotado”'],
+                ['🚫', <><b>Desligado:</b> só o total (“Estoque no fim do dia: 233 peças”)</>],
+              ]}>
+                Fica salvo: vale também para o “Enviar relatório” do Início. A parte “Precisa repor” continua igual.
+              </InfoTip>
+            </div>
+          )}
+          {fmt === 'whats' && (
+            <div className="flex items-center gap-2 mb-2 bg-white rounded-xl border border-slate-200 px-3 py-1">
+              <div className="flex-1">
+                <Toggle label="🔢 Repor com “tem X de Y”" checked={settings.reportRestockDetail}
+                  onChange={(on) => { setSetting('reportRestockDetail', on).catch(() => undefined); setDraft(null); setEditing(false); }} />
+              </div>
+              <InfoTip title="Repor com “tem X de Y”" example={[
+                ['🚫', <><b>Desligado:</b> “Cor Blanco: 1” (só o número)</>],
+                ['✅', <><b>Ligado:</b> “Cor Blanco: 1 (tem 14 de 15)”</>],
+              ]}>
+                Só muda a parte “Precisa repor” da mensagem. Fica salvo.
+              </InfoTip>
+            </div>
+          )}
           <div className="flex items-center gap-2 mb-2 bg-white rounded-xl border border-slate-200 px-3 py-1">
             <div className="flex-1">
               <Toggle label="✏️ Editar mensagem" checked={editing}

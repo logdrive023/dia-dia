@@ -49,7 +49,10 @@ describe('cadastro: quantidade inicial e meta do repor', () => {
     expect([row.item.currentQuantity, row.restock]).toEqual([15, 3]);
     const s = await daySummary(d.id, d.date);
     expect([s.enteredUnits, await db.stockMovements.where('variantId').equals(v.id).count()]).toEqual([0, 0]);
-    expect(whatsappReport(d.date, s)).toContain('Cor Rojo: repor 3 (tem 15 de 18)'); // em "Precisa repor"
+    expect(whatsappReport(d.date, s)).toContain('   • Cor Rojo: 3\n'); // em "Precisa repor": só o número
+    expect(whatsappReport(d.date, s)).not.toMatch(/\(tem \d+ de \d+\)/);
+    // chave ligada: mostra “(tem X de Y)” só no repor
+    expect(whatsappReport(d.date, s, { restockDetail: true })).toContain('Cor Rojo: 3 (tem 15 de 18)');
   });
   it('entrada de verdade (+) continua aparecendo em "Entrou"', async () => {
     const d = await setup('cad3');
@@ -98,6 +101,95 @@ describe('arquivadas e excluídas fora do relatório', () => {
     const w = whatsappReport(d.date, s);
     expect(entrouSection(w)).not.toContain('Nunca');
     expect(w).not.toContain('Nunca');
+    expect(await erros()).toEqual([]);
+  });
+});
+
+/** Lê a seção "Estoque agora" da mensagem: { 'Grupo Cor': quantidade } e as notas. */
+function stockSection(w: string) {
+  const i = w.indexOf('📦 *Estoque agora');
+  if (i < 0) return null;
+  const out: Record<string, { qty: number; note: string }> = {};
+  let group = '';
+  for (const line of w.slice(i).split('\n').slice(1)) {
+    const g = line.match(/^\S+ \*(.+)\*$/);
+    if (g) { group = g[1]; continue; }
+    const m = line.match(/^ {3}• Cor (.+): (\d+)(.*)$/);
+    if (m) out[`${group} ${m[1]}`] = { qty: Number(m[2]), note: m[3].trim() };
+  }
+  return out;
+}
+
+describe('mensagem com o estoque de agora (configurável)', () => {
+  it('ligado: lista cada cor ativa com a quantidade exata; repor/esgotado ao lado; arquivada fora', async () => {
+    const d = await setup('estq1');
+    const vs = (await db.variants.toArray()).filter((v) => !v.archivedAt);
+    // vende tudo de uma cor (esgota) e uma de outra (repor 1)
+    const sell = vs.filter((v) => v.forSale !== false); // só dá para vender o que está à venda
+    const a = sell.find((v) => v.startQuantity === 2)!, b = sell.find((v) => v.startQuantity >= 5 && v.id !== a.id)!;
+    await createOrder({ orderId: uid(), dailyRecordId: d.id, paymentMethod: 'pix', lines: [{ variantId: a.id, quantity: 2, unitPriceInCents: 7000 }, { variantId: b.id, quantity: 1, unitPriceInCents: 7000 }] });
+    const arch = vs.find((v) => v.id !== a.id && v.id !== b.id && v.startQuantity > 0)!;
+    await archiveVariant(arch.id, true);
+    const s = await daySummary(d.id, d.date);
+    const w = whatsappReport(d.date, s, { showStock: true });
+    const st = stockSection(w)!;
+    const groups = new Map((await db.groups.toArray()).map((g) => [g.id, g.name]));
+    const rows = (await loadStockRows(d.id, d.date)).filter((r) => !r.variant.archivedAt && !r.group.archivedAt);
+    // exatamente o que tem no estoque: mesmas cores, mesmas quantidades, mesmo total
+    expect(Object.keys(st).length).toBe(rows.length);
+    for (const r of rows) expect(st[`${groups.get(r.variant.groupId)} ${r.variant.name}`]?.qty, r.variant.name).toBe(r.item.currentQuantity);
+    expect(Object.values(st).reduce((n, x) => n + x.qty, 0)).toBe(s.totalUnits);
+    expect(w).toContain(`📦 *Estoque agora (${s.totalUnits} peças)*`);
+    expect(st[`${groups.get(a.groupId)} ${a.name}`].note).toBe('🚫 esgotado');
+    expect(st[`${groups.get(b.groupId)} ${b.name}`].note).toBe('⚠️ repor 1');
+    expect(st[`${groups.get(arch.groupId)} ${arch.name}`]).toBeUndefined(); // nome exato (Broche ≠ Broche Médio)
+    // a parte "Precisa repor" continua
+    expect(w).toContain('🔁 *Precisa repor');
+  });
+  it('desligado: só o total, sem a lista', async () => {
+    const d = await setup('estq2');
+    const s = await daySummary(d.id, d.date);
+    const w = whatsappReport(d.date, s, { showStock: false });
+    expect(stockSection(w)).toBeNull();
+    expect(w).toContain(`📊 Estoque no fim do dia: *${s.totalUnits} peças*`);
+    expect((await (await import('../services/settings')).getSetting('reportShowStock'))).toBe(true); // padrão: mostra
+  });
+});
+
+describe('repor configurado em cada produto', () => {
+  it('"Precisa repor?" desligado: nunca aparece em repor (Estoque nem WhatsApp)', async () => {
+    const d = await setup('rep1');
+    const g = await createGroup({ name: 'Extra' });
+    const v = await createVariant({ groupId: g.id, name: 'Unica', startQuantity: 5, dailyRecordId: d.id });
+    await updateVariant(v.id, { idealStock: 10 });
+    let row = (await loadStockRows(d.id, d.date)).find((r) => r.variant.id === v.id)!;
+    expect(row.restock).toBe(5);
+    await updateVariant(v.id, { restockOff: true });
+    row = (await loadStockRows(d.id, d.date)).find((r) => r.variant.id === v.id)!;
+    expect(row.restock).toBe(0);
+    const s = await daySummary(d.id, d.date);
+    expect(s.restock.some((r) => r.variant.id === v.id)).toBe(false);
+    const w = whatsappReport(d.date, s, { showStock: true });
+    expect(w).toMatch(/^ {3}• Cor Unica: 5$/m); // no estoque, sem aviso (última linha da mensagem)
+    expect(w).not.toContain('Cor Unica: 5 ⚠️');
+  });
+  it('estoque mínimo 3 (meta 10): com 5 não repõe; com 3 repõe 7; esgotado repõe 10', async () => {
+    const d = await setup('rep2');
+    const g = await createGroup({ name: 'Extra' });
+    const v = await createVariant({ groupId: g.id, name: 'Minima', startQuantity: 5, dailyRecordId: d.id });
+    await updateVariant(v.id, { idealStock: 10, minimumStock: 3 });
+    const at = async () => (await loadStockRows(d.id, d.date)).find((r) => r.variant.id === v.id)!;
+    expect((await at()).restock).toBe(0);
+    let w = whatsappReport(d.date, await daySummary(d.id, d.date), { showStock: true });
+    expect(w).not.toContain('Cor Minima: 5 ⚠️');
+    await moveStock(d.id, v.id, -2, 'saida');
+    expect((await at()).restock).toBe(7);
+    w = whatsappReport(d.date, await daySummary(d.id, d.date), { showStock: true });
+    expect(w).toContain('   • Cor Minima: 7\n'); // em "Precisa repor"
+    expect(w).toContain('Cor Minima: 3 ⚠️ repor 7'); // no estoque
+    await moveStock(d.id, v.id, -3, 'saida');
+    expect((await at()).restock).toBe(10);
+    await expect(updateVariant(v.id, { minimumStock: -1 })).rejects.toThrow(/mínimo inválido/);
     expect(await erros()).toEqual([]);
   });
 });
@@ -173,6 +265,12 @@ describe.skipIf(!REAL)('dados reais do celular (02/11)', () => {
     for (const v of archived) expect(entrouSection(w), `arquivada ${v.name} no relatório`).not.toMatch(new RegExp(`Cor ${v.name}: \\+`));
     expect(after.totalUnits).toBe(before.totalUnits);
     expect(after.cash.accumulated).toBe(before.cash.accumulated); // dinheiro não muda
+    // estoque de agora na mensagem = exatamente o que tem
+    const ws = whatsappReport(day.date, after, { showStock: true });
+    const st = stockSection(ws)!;
+    expect(Object.values(st).reduce((n, x) => n + x.qty, 0)).toBe(after.totalUnits);
+    expect(Object.keys(st).length).toBe(after.stockNow.length);
+    console.log(`dados reais: estoque na mensagem ${Object.keys(st).length} cores · ${after.totalUnits} peças · ${Object.values(st).filter((x) => x.note).length} com aviso · mensagem ${ws.length} letras`);
     expect(await erros()).toEqual([]);
     console.log(`dados reais: excluídas ${apagadas} de vez + ${escondidas} com vendas (histórico mantido) · mensagem ${w.length} letras`);
   });

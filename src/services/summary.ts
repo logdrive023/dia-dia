@@ -138,6 +138,18 @@ export interface StockRow {
 /** Estoque ideal da variação: o que foi definido à mão ou, se não, a quantidade do cadastro. */
 export const idealOf = (v: Variant) => v.idealStock ?? v.startQuantity;
 
+/**
+ * Quanto repor de uma cor (configurado no cadastro de cada produto):
+ *  - “Precisa repor?” desligado → 0 (nunca aparece em repor);
+ *  - com estoque mínimo → só quando chega no mínimo (ou abaixo), e repõe até a meta;
+ *  - sem mínimo → meta − o que tem.
+ */
+export function restockOf(v: Pick<Variant, 'restockOff' | 'minimumStock'>, current: number, ideal: number) {
+  if (v.restockOff) return 0;
+  if (v.minimumStock !== null && v.minimumStock !== undefined) return current <= v.minimumStock ? Math.max(ideal - current, 1) : 0;
+  return Math.max(0, ideal - current);
+}
+
 export async function loadStockRows(dailyRecordId: string, date: string): Promise<StockRow[]> {
   const [items, variants, groups, res] = await Promise.all([
     db.dailyStockItems.where('dailyRecordId').equals(dailyRecordId).toArray(),
@@ -163,7 +175,7 @@ export async function loadStockRows(dailyRecordId: string, date: string): Promis
     const r = reserved.get(variant.id) ?? 0;
     const ideal = idealOf(variant);
     const available = item.currentQuantity - r;
-    const restock = Math.max(0, ideal - item.currentQuantity);
+    const restock = restockOf(variant, item.currentQuantity, ideal);
     rows.push({ item, variant, group, reserved: r, available, ideal, restock, out: available <= 0, low: available > 0 && restock > 0 });
   }
   rows.sort((a, b) => a.group.displayOrder - b.group.displayOrder || a.variant.displayOrder - b.variant.displayOrder);
@@ -183,6 +195,8 @@ export interface DaySummary {
   enteredByVariant: { variant: Variant; group: Group; qty: number }[];
   /** variações para repor (falta peça para o ideal, ou esgotadas) */
   restock: StockRow[];
+  /** estoque de agora: todas as cores ativas (sem arquivadas/excluídas), na ordem do catálogo */
+  stockNow: StockRow[];
   /** vendas do dia (inclui as do caderno) */
   salesCount: number;
   /** total de peças para repor */
@@ -230,6 +244,8 @@ export async function daySummary(dailyRecordId: string, date: string): Promise<D
     soldByVariant: toList(sold),
     enteredByVariant: toList(entered),
     restock: rows.filter((r) => !r.variant.archivedAt && r.variant.active && !r.group.archivedAt && r.group.active && (r.restock > 0 || r.out)),
+    stockNow: liveRows.filter((r) => r.variant.active && r.group.active)
+      .sort((a, b) => a.group.displayOrder - b.group.displayOrder || a.variant.displayOrder - b.variant.displayOrder),
     restockUnits: rows.filter((r) => !r.variant.archivedAt && r.variant.active && !r.group.archivedAt && r.group.active).reduce((s, r) => s + r.restock, 0),
     cash,
   };
