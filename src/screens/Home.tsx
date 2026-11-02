@@ -9,10 +9,11 @@ import { openWhatsApp, whatsappReport } from '../services/report';
 import { previousDay } from '../services/days';
 import { useApp } from '../state';
 import { DayNotices, DayBar, StartDayCard } from '../components/day';
-import { Button, InfoTip, SectionTitle } from '../components/ui';
+import { Button, InfoTip, SectionTitle, useUi } from '../components/ui';
 
 export default function Home() {
   const { day, date, setTab, setOverlay, settings } = useApp();
+  const { toast } = useUi();
   const sym = settings.currencySymbol;
   const isToday = date === todayStr();
   const [groupFilter, setGroupFilterRaw] = useState<'todos' | 'venda' | 'guardado'>(() => {
@@ -77,7 +78,7 @@ export default function Home() {
 
             {/* exportar: um toque manda o relatório do dia para o WhatsApp */}
             <div className="mt-2.5 flex gap-2">
-              <button onClick={() => openWhatsApp(whatsappReport(day.date, s, { symbol: sym, title: settings.reportTitle }))}
+              <button onClick={async () => { if ((await openWhatsApp(whatsappReport(day.date, s, { symbol: sym, title: settings.reportTitle }))) === 'copied') toast('📋 Mensagem grande: copiada. Abra o WhatsApp e cole.'); }}
                 className="flex-1 flex items-center gap-3 rounded-2xl bg-[#25D366] text-white px-4 py-3 text-left shadow-sm shadow-emerald-600/30 active:brightness-95">
                 <span className="text-3xl">💬</span>
                 <span className="min-w-0">

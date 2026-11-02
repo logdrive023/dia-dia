@@ -6,8 +6,9 @@ import { colorName, COLORS, money, NAMED_COLORS, normalize, toCents } from '../l
 import {
   archiveGroup, archiveVariant, createCategory, createGroup, createVariant, deleteCategory, deleteGroup, deleteVariant,
   groupHasHistory, moveVariant, reorderGroups, reorderVariants, setGroupActive, setVariantActive, transferVariants,
-  updateGroup, updateVariant, variantHasHistory,
+  updateGroup, updateVariant,
 } from '../services/catalog';
+import { setStock } from '../services/days';
 import { useApp } from '../state';
 import { Badge, Button, Card, ColorField, Field, InfoTip, Input, Sheet, Swatch, Toggle, useBusy, useUi } from '../components/ui';
 
@@ -195,7 +196,7 @@ function QuickAdd({ kind, onClose, groups, onCreatedGroup }: { kind: 'group' | '
 
 function GroupEditor({ id, onClose }: { id: string | null; onClose: () => void }) {
   const { day } = useApp();
-  const { run, confirm } = useUi();
+  const { run, confirm, toast } = useUi();
   const [editVar, setEditVar] = useState<string | null>(null);
   const [newVar, setNewVar] = useState('');
   const [newQty, setNewQty] = useState('');
@@ -210,7 +211,13 @@ function GroupEditor({ id, onClose }: { id: string | null; onClose: () => void }
   if (!id || !data?.g) return null;
   const g = data.g;
   const active = data.variants.filter((v) => !v.archivedAt);
-  const archivedV = data.variants.filter((v) => v.archivedAt);
+  const archivedV = data.variants.filter((v) => v.archivedAt && !v.deletedAt);
+  const excluirCor = async (v: Variant) => {
+    if (!(await confirm({ title: `Excluir ${v.name}?`, tone: 'danger', confirm: 'Excluir',
+      message: 'Some do cadastro, do estoque e do relatório. Se ela já teve vendas, as vendas antigas continuam no histórico.' }))) return;
+    const r = await run(() => deleteVariant(v.id));
+    if (r) toast(r === 'apagada' ? `🗑️ ${v.name} excluída` : `🗑️ ${v.name} excluída (as vendas antigas ficam no histórico)`);
+  };
   const moveV = (i: number, d: number) => {
     const j = i + d;
     if (j < 0 || j >= active.length) return;
@@ -266,8 +273,9 @@ function GroupEditor({ id, onClose }: { id: string | null; onClose: () => void }
         {archivedV.map((v) => (
           <Card key={v.id} className="flex items-center gap-2 p-2 pl-3 opacity-60">
             <Swatch color={v.color} />
-            <button className="flex-1 text-left" onClick={() => setEditVar(v.id)}>{v.name} <Badge>arquivada</Badge></button>
+            <button className="flex-1 text-left min-w-0 break-words" onClick={() => setEditVar(v.id)}>{v.name} <Badge>arquivada</Badge></button>
             <Button size="sm" variant="soft" onClick={() => run(() => archiveVariant(v.id, false), 'Reativada')}>Reativar</Button>
+            <Button size="sm" variant="soft" className="!text-red-600" aria-label={`Excluir ${v.name}`} onClick={() => excluirCor(v)}>🗑️ Excluir</Button>
           </Card>
         ))}
       </div>
@@ -320,14 +328,17 @@ function GroupEditor({ id, onClose }: { id: string | null; onClose: () => void }
 }
 
 function VariantEditor({ id, onClose }: { id: string | null; onClose: () => void }) {
-  const { run, confirm } = useUi();
+  const { run, confirm, toast } = useUi();
+  const { day } = useApp();
   const [dest, setDest] = useState('');
+  const [qtyText, setQtyText] = useState<string | null>(null);
   const data = useLiveQuery(async () => {
     if (!id) return null;
     const v = await db.variants.get(id);
     const groups = await db.groups.toArray();
-    return { v, groups };
-  }, [id]);
+    const item = day ? await db.dailyStockItems.where('[dailyRecordId+variantId]').equals([day.id, id]).first() : undefined;
+    return { v, groups, item };
+  }, [id, day?.id]);
   if (!id || !data?.v) return null;
   const v: Variant = data.v;
   const group = data.groups.find((g) => g.id === v.groupId);
@@ -336,8 +347,20 @@ function VariantEditor({ id, onClose }: { id: string | null; onClose: () => void
     <Sheet open onClose={onClose} title={<span className="flex items-center gap-2"><Swatch color={v.color} />{group?.name} · {v.name}</span>} tall>
       <NameField key={v.id + v.name} value={v.name} onSave={(name) => run(() => updateVariant(v.id, { name }), 'Nome alterado')} />
       <ColorField value={v.color} onChange={(c) => run(() => updateVariant(v.id, { color: c }))} />
-      <NumberField key={'i' + v.id + v.idealStock} label="Estoque ideal"
-        hint={`Quantas peças você quer ter. “Repor” = ideal − o que tem. Ex.: ideal 15, vendeu 1 → repor 1. Vazio = usa a quantidade do cadastro (${v.startQuantity}).`}
+      {/* 1) quantas peças tem hoje: muda o estoque (ajuste), não é “entrou” nem “repor” */}
+      {day && !v.archivedAt && (
+        <Field label="📦 No estoque hoje" hint={day.status === 'open' ? 'Corrige a quantidade de hoje (conta como ajuste, não como “entrou”).' : 'Dia encerrado: reabra o dia para corrigir.'}>
+          <div className="flex gap-2">
+            <Input inputMode="numeric" value={qtyText ?? String(data.item?.currentQuantity ?? 0)} disabled={day.status !== 'open'}
+              onChange={(e) => setQtyText(e.target.value.replace(/\D/g, ''))} />
+            <Button disabled={qtyText === null || qtyText === '' || Number(qtyText) === (data.item?.currentQuantity ?? 0) || day.status !== 'open'}
+              onClick={async () => { const r = await run(() => setStock(day.id, v.id, Number(qtyText)), `${v.name}: agora ${qtyText} no estoque`); if (r !== undefined) setQtyText(null); }}>Salvar</Button>
+          </div>
+        </Field>
+      )}
+      {/* 2) meta: só serve para o “repor”, não muda o estoque */}
+      <NumberField key={'i' + v.id + v.idealStock} label="🎯 Meta para o “repor” (estoque ideal)"
+        hint={`Não muda o estoque. “Repor” = meta − o que tem${data.item ? `: hoje ${data.item.currentQuantity} · meta ${v.idealStock ?? v.startQuantity} → repor ${Math.max(0, (v.idealStock ?? v.startQuantity) - data.item.currentQuantity)}` : ''}. Vazio = usa a quantidade do cadastro (${v.startQuantity}).`}
         value={v.idealStock === null || v.idealStock === undefined ? '' : String(v.idealStock)}
         onSave={(t) => run(() => updateVariant(v.id, { idealStock: t === '' ? null : Number(t) }), 'Salvo')} />
       <NumberField key={'p' + v.id + v.optionalPriceInCents} label="Preço de venda (opcional)" hint="Já vem preenchido na venda. Vazio = digitar na hora." decimal
@@ -366,15 +389,10 @@ function VariantEditor({ id, onClose }: { id: string | null; onClose: () => void
           await run(() => archiveVariant(v.id, !v.archivedAt), v.archivedAt ? 'Reativada' : 'Arquivada'); onClose();
         }}>{v.archivedAt ? 'Reativar' : '🗄️ Arquivar'}</Button>
         <Button variant="soft" className="!text-red-600" onClick={async () => {
-          if (await variantHasHistory(v.id)) {
-            if (await confirm({ title: 'Não dá para excluir', message: 'Esta variação tem histórico. Quer arquivar em vez disso?', confirm: 'Arquivar', tone: 'warning' })) {
-              await run(() => archiveVariant(v.id, true), 'Arquivada'); onClose();
-            }
-            return;
-          }
-          if (await confirm({ title: `Excluir ${v.name}?`, confirm: 'Excluir', tone: 'danger' })) {
-            const r = await run(() => deleteVariant(v.id), 'Excluída'); if (r !== undefined) onClose();
-          }
+          if (!(await confirm({ title: `Excluir ${v.name}?`, confirm: 'Excluir', tone: 'danger',
+            message: 'Some do cadastro, do estoque e do relatório. Se ela já teve vendas, as vendas antigas continuam no histórico.' }))) return;
+          const r = await run(() => deleteVariant(v.id));
+          if (r) { toast(r === 'apagada' ? `🗑️ ${v.name} excluída` : `🗑️ ${v.name} excluída (as vendas antigas ficam no histórico)`); onClose(); }
         }}>🗑️ Excluir</Button>
       </div>
     </Sheet>

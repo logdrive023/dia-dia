@@ -33,7 +33,7 @@ export default function CloseDaySheet({ open, onClose }: { open: boolean; onClos
     <Sheet open onClose={() => { setEditing(false); setDraft(null); onClose(); }} title={closed ? `Relatório · ${fmtDate(day.date, false)}` : '🌙 Encerrar o dia'} tall
       footer={
         <div className="space-y-2">
-          <Button className="w-full !bg-[#25D366]" onClick={() => openWhatsApp(text)}>💬 Enviar no WhatsApp</Button>
+          <Button className="w-full !bg-[#25D366]" onClick={async () => { if ((await openWhatsApp(text)) === 'copied') toast('📋 Mensagem grande: copiada. Abra o WhatsApp e cole.'); }}>💬 Enviar no WhatsApp</Button>
           <div className="grid grid-cols-2 gap-2">
             <Button variant={copied ? 'success' : 'outline'} onClick={async () => {
               if (await copyText(text)) { setCopied(true); setTimeout(() => setCopied(false), 2000); } else toast('Não foi possível copiar', 'err');

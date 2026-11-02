@@ -166,9 +166,23 @@ export async function shareText(text: string, title = 'Relatório') {
   return 'whatsapp';
 }
 
-export function openWhatsApp(text: string) {
-  window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank');
+/**
+ * Abre o WhatsApp com o texto. Link muito comprido trava/corta no celular: aí usa o compartilhar
+ * do celular (aceita texto grande); sem ele, copia para colar. Devolve o que fez.
+ */
+export async function openWhatsApp(text: string): Promise<'whatsapp' | 'shared' | 'copied' | 'aborted'> {
+  const url = `https://wa.me/?text=${encodeURIComponent(text)}`;
+  if (url.length > WHATSAPP_URL_MAX) {
+    if (navigator.share) {
+      try { await navigator.share({ text }); return 'shared'; } catch (e) { if ((e as Error).name === 'AbortError') return 'aborted'; }
+    }
+    await copyText(text);
+    return 'copied';
+  }
+  window.open(url, '_blank');
+  return 'whatsapp';
 }
+export const WHATSAPP_URL_MAX = 7000;
 
 export async function copyText(text: string) {
   try { await navigator.clipboard.writeText(text); return true; } catch {

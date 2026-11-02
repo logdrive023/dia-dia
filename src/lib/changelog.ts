@@ -6,6 +6,17 @@ export interface ChangeEntry { id: string; date: string; title: string; items: [
 
 export const CHANGELOG: ChangeEntry[] = [
   {
+    id: '2026-11-02a', date: '02/11/2026', title: 'Cadastro e relatório corrigidos',
+    items: [
+      ['🗑️', 'Cor arquivada agora tem “Excluir” direto na lista (se já teve vendas, as vendas antigas ficam no histórico)'],
+      ['📦', 'A quantidade do cadastro é o estoque com que a cor começa o dia — não aparece mais em “Entrou no estoque”'],
+      ['🎯', 'Na cor: “No estoque hoje” (corrige a quantidade) separado da “Meta para o repor” (não mexe no estoque)'],
+      ['🚫', 'Cores arquivadas não entram mais no relatório do WhatsApp (Entrou, Repor e total do estoque)'],
+      ['🔧', 'Dados antigos consertados sozinhos ao abrir: o “Entrou” do cadastro virou estoque inicial (o estoque final não muda)'],
+      ['💬', 'Mensagem muito grande não trava mais o WhatsApp: vai pelo compartilhar do celular ou é copiada'],
+    ],
+  },
+  {
     id: '2026-11-01b', date: '01/11/2026', title: 'Dois celulares e mais segurança',
     items: [
       ['🔄', 'Juntar celulares: um celular gera um código com tudo, o outro importa e as vendas se somam (Menu › Juntar com outro celular)'],

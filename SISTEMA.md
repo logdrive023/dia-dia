@@ -134,6 +134,7 @@ valores absurdos (`MAX_CENTS`, `MAX_QTY`). Digitação aceita “1.474,80”, �
 - **Iniciar o dia (continuar)** copia o `currentQuantity` do último dia anterior. Primeiro dia: usa a quantidade do cadastro.
 - **Do zero**: todas as peças em 0 e caixa 0 (para recontar tudo).
 - Se um dia anterior for corrigido depois que o seguinte começou, aparece o aviso **“o dia anterior mudou”** com botão para acertar.
+- **Cor nova cadastrada com quantidade**: a quantidade é o estoque com que a cor **começa** o dia (não é “Entrou”). Dados antigos que registravam como entrada são convertidos sozinhos ao abrir o app (`migrateCadastroEntries`), sem mudar o estoque final.
 
 ### 4.3 Todo movimento de estoque é registrado
 Venda, entrada, saída, perda, ajuste, cancelamento, troca: cada um vira um `stockMovement` com saldo antes/depois.
@@ -146,8 +147,13 @@ pode ser vendida/reservada (exceto convertendo uma reserva que já existia). **G
 e o grupo entra em ⭐ Para vender.
 
 ### 4.5 Estoque ideal e “repor”
-`ideal = estoque ideal da cor (ou a quantidade do cadastro)`; **repor = ideal − agora** (nunca negativo).
-Ex.: cadastrou 15, vendeu 1 → repor 1.
+`ideal = meta da cor (ou a quantidade do cadastro)`; **repor = meta − agora** (nunca negativo).
+Ex.: cadastrou 15, vendeu 1 → repor 1. Mudar a **meta** (ex.: 15 → 18) **não mexe no estoque**: só muda o repor (3).
+Para corrigir quantas peças tem, use **“No estoque hoje”** na cor (vira ajuste).
+
+### 4.5b Arquivar e excluir
+- **Arquivar**: some do Vender, do Estoque e do **relatório** (Entrou, Repor, total do estoque); dá para reativar.
+- **Excluir** (também direto na lista de arquivadas): nunca vendida → apaga de vez; já vendida → some de tudo, mas as vendas antigas continuam no histórico com o nome.
 
 ### 4.6 Reservas
 Reserva separa peças para uma cliente: **disponível = estoque − reservado**. Vale para o dia da reserva e os seguintes.
@@ -390,7 +396,7 @@ HOJE=2028-07-15 npm test
 O setup também: banco em memória (`fake-indexeddb`), espera de até 10 s pelas telas (GitHub é lento), simula download de arquivo no jsdom.
 Configuração (`vite.config.ts`): 60 s por teste, **um arquivo por vez** (os testes pesados não atrasam os de tela).
 
-### Arquivos de teste (124 testes)
+### Arquivos de teste (134 testes + 1 com dados reais)
 
 | Arquivo | Testes | O que garante |
 |---|---|---|
@@ -408,6 +414,14 @@ Configuração (`vite.config.ts`): 60 s por teste, **um arquivo por vez** (os te
 | `tela.test.tsx` | 2 | um dia completo pela tela (iniciar, vender, lançar, encerrar, relatório) |
 | `rolagem.test.ts` | 2 | impede `overflow` em html/body (travava a rolagem no Android) e altura das janelas |
 | `macaco-tela.test.tsx` | 1 (×4 sorteios) | toques aleatórios na tela sem quebrar |
+| `cadastro-relatorio.test.ts` | 8 | cadastro não é “entrou”, meta não mexe no estoque, arquivadas fora do relatório, excluir, conserto dos dados antigos, WhatsApp grande; **dados reais** (opcional) |
+
+### Testar com os dados reais do celular
+Exporte em Menu › Passar para outro celular › Enviar tudo e rode (o arquivo **não** vai para o repositório):
+```bash
+DADOS_REAIS="C:/caminho/dia-dia_passar-para-outro-celular.json" npm test
+```
+O teste restaura os dados num banco de teste, confere o relatório, conserta os dados antigos, exclui as arquivadas e confere que o estoque e o dinheiro não mudaram.
 
 ### Testes “malucos” em tamanho grande
 Os backtests rodam em tamanho menor na suíte normal (para o GitHub ser rápido). Para rodar pesado:

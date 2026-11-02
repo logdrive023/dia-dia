@@ -26,6 +26,8 @@ export interface Variant {
   displayOrder: number;
   active: boolean;
   archivedAt?: string | null;
+  /** Excluída: tinha vendas, então não some do histórico, mas não aparece em mais nada. */
+  deletedAt?: string | null;
   /** (antigo, não usado) */
   minimumStock: number | null;
   /**

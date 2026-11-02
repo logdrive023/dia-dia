@@ -169,10 +169,8 @@ export async function createVariant(input: {
       const day = await db.dailyRecords.get(input.dailyRecordId);
       if (day && day.status === 'closed') throw new UserError('O dia está encerrado. Reabra para lançar a quantidade.');
       if (day) {
-        await db.dailyStockItems.add({ id: uid(), dailyRecordId: day.id, variantId: v.id, initialQuantity: 0, currentQuantity: qty });
-        if (qty > 0)
-          await db.stockMovements.add({ id: uid(), dailyRecordId: day.id, variantId: v.id, type: 'entrada', quantity: qty,
-            previousBalance: 0, newBalance: qty, createdAt: now, description: 'Quantidade inicial do cadastro' });
+        // a quantidade do cadastro é o estoque com que a cor COMEÇA o dia (não é mercadoria que "entrou")
+        await db.dailyStockItems.add({ id: uid(), dailyRecordId: day.id, variantId: v.id, initialQuantity: qty, currentQuantity: qty });
       }
     }
     await audit('variant', v.id, 'create', null, { name, groupId: input.groupId, qty });
@@ -208,6 +206,7 @@ export async function setVariantActive(id: string, active: boolean) {
 export async function archiveVariant(id: string, archived: boolean) {
   if (!archived) {
     const v = await db.variants.get(id);
+    if (v?.deletedAt) throw new UserError('Esta cor foi excluída.');
     const sib = v ? await db.variants.where('groupId').equals(v.groupId).toArray() : [];
     if (v && sib.some((x) => x.id !== id && !x.archivedAt && normalize(x.name) === normalize(v.name)))
       throw new UserError(`O grupo já tem outra "${v.name}" ativa. Renomeie uma delas antes.`);
@@ -235,13 +234,32 @@ export async function moveVariant(id: string, toGroupId: string) {
   });
 }
 
-export async function deleteVariant(id: string) {
-  if (await variantHasHistory(id)) throw new UserError('Esta variação tem histórico. Arquive em vez de excluir.');
-  await db.transaction('rw', db.variants, db.dailyStockItems, db.auditLogs, async () => {
+/**
+ * Excluir uma cor. Nunca vendida nem reservada → apaga de vez (estoque e movimentos dela).
+ * Com vendas → some de tudo (cadastro, estoque, relatório), mas as vendas antigas continuam no histórico com o nome.
+ */
+export async function deleteVariant(id: string): Promise<'apagada' | 'escondida'> {
+  const [sales, res] = await Promise.all([
+    db.sales.where('variantId').equals(id).count(),
+    db.reservations.where('variantId').equals(id).count(),
+  ]);
+  return db.transaction('rw', [db.variants, db.dailyStockItems, db.stockMovements, db.auditLogs, db.settings], async () => {
     const v = await db.variants.get(id);
+    if (!v) throw new UserError('Variação não encontrada.');
+    const now = nowIso();
+    if (sales + res > 0) {
+      await db.variants.update(id, { deletedAt: now, archivedAt: v.archivedAt ?? now, active: false, updatedAt: now });
+      await audit('variant', id, 'delete_soft', v.name, null);
+      return 'escondida';
+    }
+    const moves = await db.stockMovements.where('variantId').equals(id).primaryKeys();
+    await db.stockMovements.bulkDelete(moves);
     await db.dailyStockItems.where('variantId').equals(id).delete();
     await db.variants.delete(id);
-    await audit('variant', id, 'delete', v?.name);
+    const { addTombstones } = await import('./sync');
+    await addTombstones([id, ...(moves as string[])]); // ao juntar com outro celular, não volta
+    await audit('variant', id, 'delete', v.name, null);
+    return 'apagada';
   });
 }
 

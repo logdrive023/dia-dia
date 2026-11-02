@@ -293,3 +293,30 @@ export async function reopenDay(dailyRecordId: string) {
 export async function setDayNotes(dailyRecordId: string, notes: string) {
   await db.dailyRecords.update(dailyRecordId, { notes, updatedAt: nowIso() });
 }
+
+/**
+ * Conserta dados gravados antes: a quantidade do cadastro era lançada como "entrada" (aparecia em
+ * "Entrou no estoque"). Vira o estoque com que a cor começou o dia. O estoque final não muda.
+ * Roda uma vez (marca em configurações); roda de novo sem efeito.
+ */
+export async function migrateCadastroEntries() {
+  return db.transaction('rw', [db.stockMovements, db.dailyStockItems, db.settings], async () => {
+    if (await db.settings.where('key').equals('migrCadastroV1').first()) return 0;
+    const all = await db.stockMovements.where('type').equals('entrada').toArray();
+    const undone = new Set((await db.stockMovements.toArray()).map((m) => m.reversedMovementId).filter(Boolean));
+    let n = 0;
+    const ids: string[] = [];
+    for (const m of all) {
+      if (m.description !== 'Quantidade inicial do cadastro' || undone.has(m.id)) continue;
+      const it = await db.dailyStockItems.where('[dailyRecordId+variantId]').equals([m.dailyRecordId, m.variantId]).first();
+      if (!it) continue;
+      await db.dailyStockItems.update(it.id, { initialQuantity: it.initialQuantity + m.quantity });
+      await db.stockMovements.delete(m.id);
+      ids.push(m.id); n++;
+    }
+    const { addTombstones } = await import('./sync');
+    await addTombstones(ids);
+    await db.settings.add({ id: uid(), key: 'migrCadastroV1', value: { at: nowIso(), fixed: n } });
+    return n;
+  });
+}

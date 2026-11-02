@@ -2,6 +2,7 @@ import { Component, lazy, Suspense, useEffect, useState, type ReactNode } from '
 import { db } from './db/db';
 import { useRegisterSW } from 'virtual:pwa-register/react';
 import { seedIfNeeded } from './db/seed';
+import { migrateCadastroEntries } from './services/days';
 import { setUpdateState, useUpdateState } from './lib/updateState';
 import { CHANGELOG, LATEST_CHANGE } from './lib/changelog';
 import { requestPersist } from './services/storage';
@@ -350,6 +351,7 @@ export default function App() {
     const timer = setTimeout(() => { if (!done) setState('slow'); }, BOOT_TIMEOUT_MS);
     db.open()
       .then(() => seedIfNeeded())
+      .then(() => migrateCadastroEntries()) // conserta o “entrou” antigo do cadastro
       .then(() => { done = true; clearTimeout(timer); setState('ready'); })
       .catch((e) => { done = true; clearTimeout(timer); setError(String(e?.message ?? e)); setState('error'); });
     requestPersist().catch(() => undefined); // pede para o navegador nunca apagar os dados

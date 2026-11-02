@@ -199,6 +199,9 @@ export async function daySummary(dailyRecordId: string, date: string): Promise<D
     computeCash(dailyRecordId),
   ]);
   const byVariant = new Map(rows.map((r) => [r.variant.id, r]));
+  // cor arquivada/excluída (ou grupo arquivado) não entra no estoque nem em "entrou" do relatório
+  const live = (r?: StockRow) => !!r && !r.variant.archivedAt && !r.variant.deletedAt && !r.group.archivedAt;
+  const liveRows = rows.filter((r) => live(r));
   const okOrders = orders.filter((o) => o.status === 'ok');
   const okSales = sales.filter((s) => s.status === 'ok');
   const sold = new Map<string, number>();
@@ -206,7 +209,9 @@ export async function daySummary(dailyRecordId: string, date: string): Promise<D
   const entered = new Map<string, number>();
   let enteredUnits = 0, outUnits = 0, adjustUnits = 0;
   for (const m of effectiveMovements(movements)) {
-    if (m.type === 'entrada') { enteredUnits += m.quantity; entered.set(m.variantId, (entered.get(m.variantId) ?? 0) + m.quantity); }
+    if (m.type === 'entrada' && m.description !== 'Quantidade inicial do cadastro' && live(byVariant.get(m.variantId))) {
+      enteredUnits += m.quantity; entered.set(m.variantId, (entered.get(m.variantId) ?? 0) + m.quantity);
+    }
     if (m.type === 'saida' || m.type === 'perda') outUnits += -m.quantity;
     if (m.type === 'ajuste' || m.type === 'correcao') adjustUnits += m.quantity;
   }
@@ -216,8 +221,8 @@ export async function daySummary(dailyRecordId: string, date: string): Promise<D
       .sort((a, b) => a.group.displayOrder - b.group.displayOrder || a.variant.displayOrder - b.variant.displayOrder)
       .map(({ variant, group, qty }) => ({ variant, group, qty }));
   return {
-    totalUnits: rows.reduce((s, r) => s + r.item.currentQuantity, 0),
-    initialUnits: rows.reduce((s, r) => s + r.item.initialQuantity, 0),
+    totalUnits: liveRows.reduce((s, r) => s + r.item.currentQuantity, 0),
+    initialUnits: liveRows.reduce((s, r) => s + r.item.initialQuantity, 0),
     soldUnits: okSales.reduce((s, x) => s + x.quantity, 0) + cash.notebookUnits,
     salesCount: okOrders.length + cash.notebookCount,
     enteredUnits, outUnits, adjustUnits,

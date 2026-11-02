@@ -140,6 +140,26 @@ describe('nova cor num app sem grupos (erro "Invalid argument to Table.get()")',
   }, 30000);
 });
 
+describe('cor arquivada: botão Excluir na lista (pela tela)', () => {
+  it('arquiva, aparece "Excluir" ao lado de "Reativar", exclui e some da lista', async () => {
+    const { archiveVariant } = await import('../services/catalog');
+    const v = (await db.variants.toArray()).find((x) => x.name === 'Rosa')!;
+    await archiveVariant(v.id, true);
+    const g = (await db.groups.get(v.groupId))!;
+    render(<App />);
+    click(await screen.findByRole('button', { name: /Abrir menu/ }, { timeout: 5000 }));
+    click(await screen.findByRole('button', { name: /Produtos e grupos/ }));
+    // dentro da janela do Cadastro (atrás dela está o Início, com cartões do mesmo grupo)
+    await screen.findByText('Cadastro', { exact: false });
+    const sheet = () => [...document.querySelectorAll('div.fixed.inset-0')].pop() as HTMLElement;
+    click((await waitFor(() => within(sheet()).getAllByRole('button', { name: new RegExp(g.name) })))[0]);
+    click(await screen.findByRole('button', { name: `Excluir ${v.name}` }));
+    click((await screen.findAllByRole('button', { name: /^Excluir$/ })).slice(-1)[0]);
+    await waitFor(async () => expect(await db.variants.get(v.id)).toBeUndefined());
+    await waitFor(() => expect(screen.queryByRole('button', { name: `Excluir ${v.name}` })).toBeNull());
+  }, 30000);
+});
+
 describe('Juntar com outro celular (pela tela)', () => {
   it('gera o código e, colando o código de outro celular, junta as vendas', async () => {
     // código "do outro celular": um banco separado com uma venda
