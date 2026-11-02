@@ -1,10 +1,16 @@
 import type { PaymentMethod } from '../db/types';
 import { fmtDate, money, PAYMENT_LABEL } from '../lib/util';
 import { cashStatement, type DaySummary } from './summary';
+import { setPendingParts } from '../lib/pendingParts';
 
 type Opts = { symbol?: string; title?: string; /** mostrar o estoque de agora (cor por cor) na mensagem do WhatsApp */ showStock?: boolean;
   /** em “Precisa repor”, mostrar “(tem 14 de 15)” ao lado do número */ restockDetail?: boolean;
-  /** no “Estoque agora”, cada cor com “começou 3 → terminou 2” */ stockStartEnd?: boolean };
+  /** no “Estoque agora”, cada cor com “começou 3 → terminou 2” */ stockStartEnd?: boolean;
+  /** no fim: total no estoque, total para repor e começo → final do dia */ totals?: boolean;
+  /** linha de divisão entre os grupos (Plomo ┈┈┈ Lila) */ dividers?: boolean };
+
+/** divisão entre os grupos na mensagem do WhatsApp */
+export const DIVIDER = '- - - - - - - -'; // só traço e espaço: ocupa pouco no link do WhatsApp
 
 /** Linha do caderno para uma venda: "2x70 = 140 Dinheiro" ou "1x70 + 1x85 = 155 Pix". */
 export function orderLine(lines: { quantity: number; unitPriceInCents: number | null; paymentMethod?: PaymentMethod }[], total: number, method: PaymentMethod,
@@ -86,7 +92,7 @@ export function notebookReport(date: string, s: DaySummary, opts: Opts = {}) {
 }
 
 /** Agrupa por grupo: título do grupo (com ícone) e as cores embaixo, uma por linha. */
-function byGroup<T extends { group: { name: string; icon?: string }; variant: { name: string } }>(list: T[], line: (x: T) => string) {
+function byGroup<T extends { group: { name: string; icon?: string }; variant: { name: string } }>(list: T[], line: (x: T) => string, divider = false) {
   const map = new Map<string, { icon?: string; items: string[] }>();
   for (const x of list) {
     const g = map.get(x.group.name) ?? { icon: x.group.icon, items: [] };
@@ -95,6 +101,7 @@ function byGroup<T extends { group: { name: string; icon?: string }; variant: { 
   }
   const out: string[] = [];
   for (const [name, g] of map) {
+    if (divider && out.length) out.push(DIVIDER);
     out.push(`${g.icon ?? '📦'} *${name}*`);
     for (const it of g.items) out.push(`   • ${it}`);
   }
@@ -111,6 +118,7 @@ export function whatsappReport(date: string, s: DaySummary, opts: Opts = {}) {
   const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
   const L: string[] = [];
   const section = (title: string) => { L.push(''); L.push(title); };
+  const div = !!opts.dividers;
 
   L.push(`📒 *Fechamento — ${WEEK_LONG[new Date(y, m - 1, d).getDay()]}, ${String(d).padStart(2, '0')}/${String(m).padStart(2, '0')}*`);
 
@@ -132,14 +140,14 @@ export function whatsappReport(date: string, s: DaySummary, opts: Opts = {}) {
 
   // peças que saíram (vendidas)
   section(`🛍️ *O que saiu (${plural(s.soldUnits, 'peça', 'peças')})*`);
-  if (s.soldByVariant.length) L.push(...byGroup(s.soldByVariant, (x) => `Cor ${x.variant.name}: ${x.qty}`));
+  if (s.soldByVariant.length) L.push(...byGroup(s.soldByVariant, (x) => `Cor ${x.variant.name}: ${x.qty}`, div));
   // vendas copiadas do caderno não dizem a cor
   if (c.notebookUnits) L.push(`• 📒 ${plural(c.notebookUnits, 'peça', 'peças')} do caderno (sem cor anotada)`);
   if (!s.soldByVariant.length && !c.notebookUnits) L.push('• Nenhuma peça vendida');
 
   // entrou
   section(`📦 *Entrou no estoque${s.enteredUnits ? ` (${plural(s.enteredUnits, 'peça', 'peças')})` : ''}*`);
-  if (s.enteredByVariant.length) L.push(...byGroup(s.enteredByVariant, (x) => `Cor ${x.variant.name}: +${x.qty}`));
+  if (s.enteredByVariant.length) L.push(...byGroup(s.enteredByVariant, (x) => `Cor ${x.variant.name}: +${x.qty}`, div));
   else L.push('• Nenhuma peça');
 
   // repor
@@ -148,19 +156,28 @@ export function whatsappReport(date: string, s: DaySummary, opts: Opts = {}) {
   const soldOut = s.restock.filter((r) => r.out);
   if (toRestock.length) {
     section(`🔁 *Precisa repor (${plural(s.restockUnits, 'peça', 'peças')})*`);
-    L.push(...byGroup(toRestock, (r) => `Cor ${r.variant.name}: ${r.restock}${opts.restockDetail ? ` (tem ${r.item.currentQuantity} de ${r.ideal})` : ''}`));
+    L.push(...byGroup(toRestock, (r) => `Cor ${r.variant.name}: ${r.restock}${opts.restockDetail ? ` (tem ${r.item.currentQuantity} de ${r.ideal})` : ''}`, div));
   }
   if (soldOut.length) {
     section(`🚫 *Esgotados (${soldOut.length})*`);
-    L.push(...byGroup(soldOut, (r) => `Cor ${r.variant.name}`));
+    L.push(...byGroup(soldOut, (r) => `Cor ${r.variant.name}`, div));
   }
 
   if (opts.showStock && s.stockNow.length) {
     // o que tem agora, cor por cor; ao lado, o aviso de repor/esgotado (a seção "Precisa repor" continua acima)
     section(`📦 *Estoque agora (${plural(s.totalUnits, 'peça', 'peças')})*`);
-    L.push(...byGroup(s.stockNow, (r) => `Cor ${r.variant.name}: ${opts.stockStartEnd ? `começou ${r.item.initialQuantity} → terminou ${r.item.currentQuantity}` : r.item.currentQuantity}${stockNote(r)}`));
+    L.push(...byGroup(s.stockNow, (r) => `Cor ${r.variant.name}: ${opts.stockStartEnd ? `começou ${r.item.initialQuantity} → terminou ${r.item.currentQuantity}` : r.item.currentQuantity}${stockNote(r)}`, div));
   } else {
     section(`📊 Estoque no fim do dia: *${plural(s.totalUnits, 'peça', 'peças')}*`);
+  }
+
+  if (opts.totals) {
+    // os números do Início: estoque, repor e quanto mudou do começo ao fim do dia
+    const diff = s.totalUnits - s.initialUnits;
+    section('🧾 *Totais*');
+    L.push(`📦 Total no estoque: *${plural(s.totalUnits, 'peça', 'peças')}*`);
+    L.push(`🔁 Total para repor: *${plural(s.restockUnits, 'peça', 'peças')}*`);
+    L.push(`🌅 Começo do dia ${s.initialUnits} → 🌙 final ${s.totalUnits} = *${diff > 0 ? '+' : diff < 0 ? '−' : ''}${Math.abs(diff)}*`);
   }
   return L.join('\n');
 }
@@ -185,6 +202,90 @@ export async function shareText(text: string, title = 'Relatório') {
   return 'whatsapp';
 }
 
+/** Cabeçalho de cada parte (conta no tamanho de cada uma). */
+export const partHeader = (i: number, n: number) => `📨 *Parte ${i} de ${n}*\n\n`;
+/** marca da linha repetida no começo da parte que continua uma seção (não é informação nova) */
+export const CONTINUES = '↪️ ';
+
+/**
+ * Divide a mensagem em partes que cabem no link direto do WhatsApp. Nunca corta uma linha:
+ * juntando as partes (sem o cabeçalho e sem as linhas “↪️ … (continua)”) tem todas as linhas, na ordem.
+ * Prefere cortar entre as seções; se cortar entre linhas der menos partes, corta entre linhas
+ * e repete o título da seção no começo da parte seguinte.
+ */
+export function splitForWhatsApp(text: string, max = WHATSAPP_URL_MAX): string[] {
+  if (whatsappSize(text).link <= max) return [text];
+  const fits = (t: string) => whatsappSize(partHeader(99, 99) + t).link <= max;
+  const bySections = splitBySections(text, fits);
+  const byLines = splitByLines(text, fits);
+  const parts = byLines.length < bySections.length ? byLines : bySections;
+  return parts.map((p, i) => partHeader(i + 1, parts.length) + p);
+}
+
+function splitBySections(text: string, fits: (t: string) => boolean) {
+  const pieces: string[] = [];
+  for (const block of text.split('\n\n')) {
+    if (fits(block)) { pieces.push(block); continue; }
+    let cur = '';
+    const title = block.split('\n')[0];
+    for (const line of block.split('\n')) {
+      const nxt = cur ? `${cur}\n${line}` : line;
+      // seção grande demais: continua na próxima parte, repetindo o título
+      if (!cur || fits(nxt)) cur = nxt; else { pieces.push(cur); cur = `${CONTINUES}${title} (continua)\n${line}`; }
+    }
+    if (cur) pieces.push(cur);
+  }
+  const parts: string[] = [];
+  let cur = '';
+  for (const p of pieces) {
+    const nxt = cur ? `${cur}\n\n${p}` : p;
+    if (cur && !fits(nxt)) { parts.push(cur); cur = p; } else cur = nxt;
+  }
+  if (cur) parts.push(cur);
+  return parts;
+}
+
+/** enche cada parte até o máximo, linha por linha (o menor número de partes) */
+function splitByLines(text: string, fits: (t: string) => boolean) {
+  const parts: string[] = [];
+  let cur = '';
+  let title = ''; // título da seção atual (linha depois de uma linha em branco)
+  let prevBlank = true;
+  for (const line of text.split('\n')) {
+    const nxt = cur ? `${cur}\n${line}` : line;
+    if (cur && !fits(nxt)) {
+      parts.push(cur.replace(/\n+$/, ''));
+      // começou no meio de uma seção: repete o título para quem lê
+      cur = line.trim() && !prevBlank && title && line !== title ? `${CONTINUES}${title} (continua)\n${line}` : line;
+    } else cur = nxt;
+    if (prevBlank && line.trim()) title = line;
+    prevBlank = !line.trim();
+  }
+  if (cur.trim()) parts.push(cur);
+  return parts.map((p) => p.replace(/^\n+/, ''));
+}
+
+const waLink = (text: string) => `https://wa.me/?text=${encodeURIComponent(text)}`;
+
+/** Abre o WhatsApp com uma parte (link direto). Usado também pelo “Mandar parte 2”. */
+export function openWhatsAppLink(text: string) { window.open(waLink(text), '_blank'); }
+
+/**
+ * Enviar no WhatsApp. Com “mandar em partes” ligado e mensagem maior que o link: manda a parte 1 e
+ * guarda as outras; ao voltar para o app aparece “Mandar parte 2”. Desligado: tudo de uma vez.
+ */
+export async function sendWhatsApp(text: string, split: boolean): Promise<'whatsapp' | 'shared' | 'copied' | 'aborted' | 'parts'> {
+  if (split) {
+    const parts = splitForWhatsApp(text);
+    if (parts.length > 1) {
+      openWhatsAppLink(parts[0]);
+      setPendingParts({ parts, next: 1 });
+      return 'parts';
+    }
+  }
+  return openWhatsApp(text);
+}
+
 /**
  * Abre o WhatsApp com o texto. Link muito comprido trava/corta no celular: aí usa o compartilhar
  * do celular (aceita texto grande); sem ele, copia para colar. Devolve o que fez.
@@ -202,6 +303,17 @@ export async function openWhatsApp(text: string): Promise<'whatsapp' | 'shared' 
   return 'whatsapp';
 }
 export const WHATSAPP_URL_MAX = 7000;
+/** limite de uma mensagem do próprio WhatsApp (letras) */
+export const WHATSAPP_TEXT_MAX = 65536;
+
+/**
+ * Tamanho da mensagem para mostrar na tela: “atual / máximo” do link direto do WhatsApp.
+ * Passou do link: vai inteira pelo compartilhar do celular (ou copiada) — nada é cortado.
+ */
+export function whatsappSize(text: string) {
+  const link = `https://wa.me/?text=${encodeURIComponent(text)}`.length;
+  return { link, max: WHATSAPP_URL_MAX, fits: link <= WHATSAPP_URL_MAX, letters: text.length, tooBig: text.length > WHATSAPP_TEXT_MAX };
+}
 
 export async function copyText(text: string) {
   try { await navigator.clipboard.writeText(text); return true; } catch {

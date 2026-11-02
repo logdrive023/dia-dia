@@ -14,7 +14,7 @@ import { migrateCadastroEntries, moveStock, startDay } from '../services/days';
 import { archiveVariant, createGroup, createVariant, deleteVariant, updateVariant } from '../services/catalog';
 import { createOrder, createReservation } from '../services/sales';
 import { daySummary, loadStockRows } from '../services/summary';
-import { openWhatsApp, whatsappReport, WHATSAPP_URL_MAX } from '../services/report';
+import { CONTINUES, DIVIDER, openWhatsApp, partHeader, splitForWhatsApp, whatsappReport, WHATSAPP_URL_MAX } from '../services/report';
 import { runDiagnostics } from '../services/diagnostics';
 import { restoreBackup } from '../services/backup';
 
@@ -178,6 +178,42 @@ describe('reserva no estoque da mensagem (bug Plomo Azul 02/11)', () => {
   });
 });
 
+/** Lê a seção “Totais”: [estoque, repor, começo, final, diferença] */
+function totalsOf(w: string) {
+  const i = w.indexOf('🧾 *Totais*');
+  if (i < 0) return null;
+  const t = w.slice(i);
+  const n = (re: RegExp) => Number(t.match(re)?.[1]);
+  const d = t.match(/= \*([+−]?)(\d+)\*/)!;
+  return [n(/Total no estoque: \*(\d+)/), n(/Total para repor: \*(\d+)/), n(/Começo do dia (\d+)/), n(/final (\d+) =/), (d[1] === '−' ? -1 : 1) * Number(d[2])];
+}
+
+describe('totais no final e divisão entre os grupos (configuráveis)', () => {
+  it('totais = números do Início; começo − final bate; desligado some', async () => {
+    const d = await setup('tot1');
+    const v = (await db.variants.toArray()).filter((x) => !x.archivedAt && x.forSale !== false && x.startQuantity >= 3)[0];
+    await createOrder({ orderId: uid(), dailyRecordId: d.id, paymentMethod: 'pix', lines: [{ variantId: v.id, quantity: 3, unitPriceInCents: 7000 }] });
+    const s = await daySummary(d.id, d.date);
+    const w = whatsappReport(d.date, s, { showStock: true, totals: true });
+    expect(totalsOf(w)).toEqual([s.totalUnits, s.restockUnits, s.initialUnits, s.totalUnits, -3]);
+    expect(w.trimEnd().endsWith(`= *−3*`)).toBe(true); // fica no final
+    expect(totalsOf(whatsappReport(d.date, s, { showStock: true }))).toBeNull();
+  });
+  it('divisão só entre os grupos (nunca antes do primeiro); desligada não aparece; lista igual', async () => {
+    const d = await setup('div1');
+    const s = await daySummary(d.id, d.date);
+    const on = whatsappReport(d.date, s, { showStock: true, dividers: true });
+    const off = whatsappReport(d.date, s, { showStock: true });
+    expect(off).not.toContain(DIVIDER);
+    const sec = on.slice(on.indexOf('📦 *Estoque agora'));
+    const groups = new Set(s.stockNow.map((r) => r.group.name)).size;
+    expect(sec.split('\n').filter((l) => l.includes(DIVIDER)).length).toBe(groups - 1);
+    expect(sec.split('\n')[1]).not.toContain(DIVIDER); // primeiro grupo sem divisão em cima
+    expect(on.split('\n').filter((l) => !l.includes(DIVIDER)).join('\n')).toBe(off); // só acrescenta a linha
+    expect(stockSection(on)).toEqual(stockSection(off));
+  });
+});
+
 describe('repor configurado em cada produto', () => {
   it('"Precisa repor?" desligado: nunca aparece em repor (Estoque nem WhatsApp)', async () => {
     const d = await setup('rep1');
@@ -239,14 +275,18 @@ describe('WhatsApp com mensagem grande não trava', () => {
   it('curta: abre o WhatsApp; comprida: compartilhar do celular; sem compartilhar: copia', async () => {
     const open = vi.fn();
     vi.stubGlobal('window', { open });
-    vi.stubGlobal('navigator', { share: vi.fn().mockResolvedValue(undefined), clipboard: { writeText: vi.fn().mockResolvedValue(undefined) } });
+    const share = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal('navigator', { share, clipboard: { writeText: vi.fn().mockResolvedValue(undefined) } });
     expect(await openWhatsApp('oi')).toBe('whatsapp');
     expect(open).toHaveBeenCalledTimes(1);
-    const big = 'linha de relatório com acento ção\n'.repeat(400);
+    const big = 'linha de relatório com acento ção\n'.repeat(400) + 'ÚLTIMA LINHA';
     expect(`https://wa.me/?text=${encodeURIComponent(big)}`.length).toBeGreaterThan(WHATSAPP_URL_MAX);
     expect(await openWhatsApp(big)).toBe('shared');
-    vi.stubGlobal('navigator', { clipboard: { writeText: vi.fn().mockResolvedValue(undefined) } });
+    expect(share.mock.calls[0][0].text).toBe(big); // inteira: nada é cortado
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal('navigator', { clipboard: { writeText } });
     expect(await openWhatsApp(big)).toBe('copied');
+    expect(writeText).toHaveBeenCalledWith(big); // copiada inteira
     expect(open).toHaveBeenCalledTimes(1);
     vi.unstubAllGlobals();
   });
@@ -298,6 +338,24 @@ describe.skipIf(!REAL)('dados reais do celular (02/11)', () => {
     expect(msgOut, 'esgotados: Início x mensagem').toBe(homeOut);
     expect(Object.values(st).filter((x) => x.note.includes('esgotado')).length).toBe(homeOut);
     console.log(`dados reais: esgotados ${homeOut} no Início = ${msgOut} na mensagem`);
+    const wt = whatsappReport(day.date, after, { showStock: true, totals: true, dividers: true });
+    expect(totalsOf(wt)).toEqual([after.totalUnits, after.restockUnits, after.initialUnits, after.totalUnits, after.totalUnits - after.initialUnits]);
+    const enc = (t: string) => encodeURIComponent(t).length;
+    console.log(`dados reais: link do WhatsApp ${enc(ws)} (antes, só estoque) · ${enc(wt)} (com começo→fim, totais e divisão) · limite ${WHATSAPP_URL_MAX}`);
+    // quanto cada chave pesa no link (para saber o que desligar)
+    const base = { showStock: true, stockStartEnd: true, totals: true, dividers: true };
+    const full = whatsappReport(day.date, after, base);
+    const cost = (k: keyof typeof base) => enc(full) - enc(whatsappReport(day.date, after, { ...base, [k]: false }));
+    console.log(`dados reais: tudo ligado ${enc('https://wa.me/?text=') + enc(full)} / ${WHATSAPP_URL_MAX}`);
+    console.log(`dados reais: cada chave pesa — começo→fim ${cost('stockStartEnd')} · divisão ${cost('dividers')} · totais ${cost('totals')} · lista do estoque ${cost('showStock')}`);
+    // em partes: cada uma cabe e juntas têm todas as linhas
+    const parts = splitForWhatsApp(full);
+    for (const p of parts) expect(enc(`https://wa.me/?text=`) + enc(p)).toBeLessThanOrEqual(WHATSAPP_URL_MAX);
+    const ls = (t: string) => t.split('\n').filter((l) => l.trim() && !l.startsWith(CONTINUES));
+    expect(parts.length, 'mensagem de verdade em 2 partes').toBe(2);
+    expect(parts.flatMap((p, i) => ls(p.slice(partHeader(i + 1, parts.length).length)))).toEqual(ls(full));
+    console.log(`dados reais: em partes ${parts.length} → ${parts.map((p) => enc('https://wa.me/?text=') + enc(p)).join(' + ')}`);
+    console.log('dados reais: ' + wt.slice(wt.indexOf('🧾')).split('\n').join(' | '));
     // “esgotado” só ao lado de 0 peças; começo → fim bate com o dia
     for (const [k, x] of Object.entries(st)) expect(x.note.includes('esgotado'), `${k}: ${x.qty} ${x.note}`).toBe(x.qty === 0);
     const se = stockSection(whatsappReport(day.date, after, { showStock: true, stockStartEnd: true }))!;

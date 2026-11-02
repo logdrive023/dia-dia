@@ -191,6 +191,18 @@ describe('chaves do repor e do estoque na mensagem (pela tela)', () => {
     const se = await screen.findByRole('switch', { name: /Começo → fim do dia/ });
     expect(se.getAttribute('aria-checked')).toBe('true');
     expect((await screen.findAllByText(/começou \d+ → terminou \d+/)).length).toBeGreaterThan(0);
+    // totais no final e divisão entre os grupos: ligados por padrão; desligando, somem da mensagem
+    const tot = await screen.findByRole('switch', { name: /Totais no final/ });
+    const dv = await screen.findByRole('switch', { name: /Divisão entre os grupos/ });
+    expect([tot.getAttribute('aria-checked'), dv.getAttribute('aria-checked')]).toEqual(['true', 'true']);
+    await screen.findByText(/Total para repor/);
+    // tamanho da mensagem: atual / máximo, bem à vista
+    const size = await screen.findByLabelText('Tamanho da mensagem');
+    expect(size.textContent).toMatch(/📏 Tamanho da mensagem[\d.]+ \/ 7\.000/);
+    click(tot);
+    await waitFor(() => expect(screen.queryByText(/Total para repor/)).toBeNull());
+    click(dv);
+    await waitFor(async () => expect((await db.settings.where('key').equals('reportDividers').first())?.value).toBe(false));
     click(se);
     await waitFor(() => expect(screen.queryByText(/começou \d+ → terminou \d+/)).toBeNull());
     await waitFor(async () => expect((await db.settings.where('key').equals('reportStockStartEnd').first())?.value).toBe(false));

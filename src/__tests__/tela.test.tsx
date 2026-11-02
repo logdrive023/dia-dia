@@ -72,9 +72,15 @@ describe('dia de trabalho completo pela tela', () => {
     await confirmDialog(/^Encerrar$/);
     await waitFor(async () => expect((await db.dailyRecords.toArray())[0].status).toBe('closed'));
 
-    // relatório pronto: um toque manda para o WhatsApp
+    // relatório pronto: um toque manda para o WhatsApp (mensagem curta: link direto; grande: menu de compartilhar do celular)
+    const share = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'share', { value: share, configurable: true });
+    const opened = (window.open as unknown as ReturnType<typeof vi.fn>);
+    opened.mockClear();
     click(await screen.findByRole('button', { name: /Enviar relatório do dia no WhatsApp/ }));
-    const url = decodeURIComponent((window.open as unknown as ReturnType<typeof vi.fn>).mock.calls.slice(-1)[0][0] as string);
+    await waitFor(() => expect(opened.mock.calls.length + share.mock.calls.length).toBe(1));
+    const url = opened.mock.calls.length ? decodeURIComponent(opened.mock.calls[0][0] as string) : (share.mock.calls[0][0] as { text: string }).text;
+    delete (navigator as { share?: unknown }).share;
     expect(url).toContain('Vendeu: *140*');
     expect(url).toContain('Dei a Chico: 50');
     expect(url).toContain('➖ 🤝 Dei a Chico: 50');

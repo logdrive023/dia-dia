@@ -114,6 +114,10 @@ O app substitui o caderno sem mudar o jeito de pensar:
   - **📦 Mostrar o estoque** (ligada): lista o que tem agora, cor por cor, com “⚠️ repor N” / “🚫 esgotado” ao lado; desligada mostra só o total;
   - **🌅 Começo → fim do dia em cada cor** (ligada, só aparece com o estoque ligado): “Cor Azul: começou 3 → terminou 2”; desligada fica “Cor Azul: 2”;
   - avisos ao lado da cor: **🚫 esgotado** só quando tem 0; **🔒 N reservadas** quando há peça guardada para alguém (continua no estoque, só não está livre para vender); **⚠️ repor N**;
+  - **🧾 Totais no final** (ligada): total no estoque, total para repor e “Começo do dia 426 → 🌙 final 385 = −41” (os mesmos números do Início);
+  - **➖ Divisão entre os grupos** (ligada): linha `- - - - - - - -` entre um grupo e outro (só traço e espaço, para pesar pouco);
+  - **📏 Tamanho da mensagem**: mostra “atual / máximo” do link direto do WhatsApp (7.000). Acento, emoji e seta pesam mais que letra comum;
+  - **✂️ Mandar em partes se passar** (ligada): passou do máximo → “Enviar” manda a parte 1 (“📨 Parte 1 de 2”); ao voltar para o app aparece **“💬 Mandar parte 2”** (um toque: o celular não deixa abrir o WhatsApp sozinho). O quadro do tamanho mostra antes quantas partes e o tamanho de cada uma. Corta entre seções ou entre linhas (nunca no meio de uma linha); a parte que continua uma seção repete o título com “↪️ … (continua)”. Desligada: vai tudo pelo compartilhar do celular (ou copiado). Nos dois casos nada é cortado;
   - **🔢 Repor com “tem X de Y”** (desligada): “Precisa repor” fica só “Cor Blanco: 1”; ligada vira “Cor Blanco: 1 (tem 14 de 15)”.
 - O repor de cada cor vem do cadastro: **🔁 Precisa repor?** (desligado = nunca aparece), **📏 Tem estoque mínimo?** (só aparece quando chega no mínimo) e **🎯 Meta** (repõe até quanto).
 - Encerrar bloqueia o dia contra mudanças acidentais (dá para reabrir).
@@ -426,6 +430,8 @@ Configuração (`vite.config.ts`): 60 s por teste, **um arquivo por vez** (os te
 | `macaco-tela.test.tsx` | 1 (×4 sorteios) | toques aleatórios na tela sem quebrar |
 | `cadastro-relatorio.test.ts` | 13 | cadastro não é “entrou”, meta não mexe no estoque, arquivadas fora do relatório, excluir, conserto dos dados antigos, WhatsApp grande; **dados reais** (opcional) |
 | `virada.test.tsx` | 6 | virada da data: dia de ontem encerra sozinho (ao abrir e à meia-noite com o app aberto), reaberto não fecha, “Bom dia” com último backup e pergunta |
+| `partes.test.tsx` | 5 | mensagem em partes: cada parte cabe, juntas têm todas as linhas na ordem, “Mandar parte 2” pela tela |
+| `atualizar.test.ts` | 5 | botão Atualizar sempre recarrega (página sem controle, outra aba, sem eventos); tamanho da mensagem |
 
 ### Testar com os dados reais do celular
 Exporte em Menu › Passar para outro celular › Enviar tudo e rode (o arquivo **não** vai para o repositório):

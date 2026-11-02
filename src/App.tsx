@@ -1,6 +1,9 @@
-import { Component, lazy, Suspense, useEffect, useState, type ReactNode } from 'react';
+import { Component, lazy, Suspense, useCallback, useEffect, useState, type ReactNode } from 'react';
 import { db } from './db/db';
 import { useRegisterSW } from 'virtual:pwa-register/react';
+import { applyUpdate } from './lib/applyUpdate';
+import { setPendingParts, usePendingParts } from './lib/pendingParts';
+import { openWhatsAppLink } from './services/report';
 import { seedIfNeeded } from './db/seed';
 import { autoCloseOldDays, migrateCadastroEntries } from './services/days';
 import { setUpdateState, useUpdateState } from './lib/updateState';
@@ -120,6 +123,7 @@ function Shell() {
       <ChangelogSheet open={overlay === 'novidades'} onClose={close} />
       <BackButton />
       <UpdateBanner />
+      <PartsBanner />
     </div>
   );
 }
@@ -311,10 +315,31 @@ function AboutSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
   );
 }
 
+/** Mensagem em partes: depois da parte 1, ao voltar para o app, um toque manda a próxima. */
+function PartsBanner() {
+  const p = usePendingParts();
+  if (!p) return null;
+  const total = p.parts.length;
+  return (
+    <div role="dialog" aria-label="Mandar a próxima parte"
+      className="fixed bottom-[calc(72px+env(safe-area-inset-bottom))] inset-x-4 z-[46] max-w-lg mx-auto bg-emerald-700 text-white rounded-2xl p-3.5 shadow-xl">
+      <div className="text-[15px] font-bold">📨 Parte {p.next} de {total} enviada</div>
+      <div className="text-[13px] text-white/90 mt-0.5">Falta {total - p.next === 1 ? 'a parte' : 'as partes'} {Array.from({ length: total - p.next }, (_, i) => p.next + 1 + i).join(' e ')}. Toque para mandar no WhatsApp.</div>
+      <div className="flex gap-2 mt-2.5">
+        <button className="flex-1 h-12 rounded-xl bg-white text-emerald-800 font-bold text-[16px]"
+          onClick={() => { openWhatsAppLink(p.parts[p.next]); setPendingParts({ ...p, next: p.next + 1 }); }}>
+          💬 Mandar parte {p.next + 1}
+        </button>
+        <button className="h-12 px-3 rounded-xl bg-white/15 text-white text-sm font-semibold" onClick={() => setPendingParts(null)}>Fechar</button>
+      </div>
+    </div>
+  );
+}
+
 function UpdateBanner() {
   // procura versão nova toda hora e sempre que o app volta para a tela
   // (app instalado na tela inicial também atualiza; antes só via ao abrir do zero)
-  const { needRefresh: [needRefresh], updateServiceWorker } = useRegisterSW({
+  const { needRefresh: [needRefresh] } = useRegisterSW({
     onRegisteredSW(_url, reg) {
       if (!reg) return;
       setUpdateState({ ready: true });
@@ -330,12 +355,14 @@ function UpdateBanner() {
     },
   });
   // o selo do cabeçalho mostra a mesma situação
-  useEffect(() => { setUpdateState({ needRefresh, apply: () => updateServiceWorker(true) }); }, [needRefresh, updateServiceWorker]);
+  const [updating, setUpdating] = useState(false);
+  const apply = useCallback(() => { setUpdating(true); applyUpdate().catch(() => location.reload()); }, []);
+  useEffect(() => { setUpdateState({ needRefresh, apply }); }, [needRefresh, apply]);
   if (!needRefresh) return null;
   return (
     <div className="fixed bottom-[calc(72px+env(safe-area-inset-bottom))] inset-x-4 z-[45] max-w-lg mx-auto bg-slate-800 text-white rounded-xl p-3 flex items-center gap-3 shadow-xl">
       <span className="flex-1 text-sm">🆕 Nova versão do app. Seus dados continuam salvos. Veja o que mudou em Menu › Atualizações.</span>
-      <button className="font-semibold text-sm bg-blue-600 px-3 h-10 rounded-lg shrink-0" onClick={() => updateServiceWorker(true)}>Atualizar</button>
+      <button className="font-semibold text-sm bg-blue-600 px-3 h-10 rounded-lg shrink-0 disabled:opacity-70" disabled={updating} onClick={apply}>{updating ? 'Atualizando…' : 'Atualizar'}</button>
     </div>
   );
 }

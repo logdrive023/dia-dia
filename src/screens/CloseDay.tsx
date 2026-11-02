@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { fmtDate, money, PAYMENT_EMOJI, PAYMENT_LABEL, PAYMENTS, toCents } from '../lib/util';
 import { closeDay } from '../services/days';
-import { copyText, notebookReport, openWhatsApp, shareText, whatsappReport } from '../services/report';
+import { copyText, notebookReport, sendWhatsApp, shareText, splitForWhatsApp, whatsappReport, whatsappSize } from '../services/report';
 import { daySummary } from '../services/summary';
 import { setSetting } from '../services/settings';
 import { useApp } from '../state';
@@ -21,7 +21,7 @@ export default function CloseDaySheet({ open, onClose }: { open: boolean; onClos
   const [copied, setCopied] = useState(false);
   const s = useLiveQuery(async () => (day && open ? daySummary(day.id, day.date) : null), [day?.id, open]);
   if (!open || !day) return null;
-  const opts = { symbol: settings.currencySymbol, title: settings.reportTitle, showStock: settings.reportShowStock, restockDetail: settings.reportRestockDetail, stockStartEnd: settings.reportStockStartEnd };
+  const opts = { symbol: settings.currencySymbol, title: settings.reportTitle, showStock: settings.reportShowStock, restockDetail: settings.reportRestockDetail, stockStartEnd: settings.reportStockStartEnd, totals: settings.reportTotals, dividers: settings.reportDividers };
   // o que for digitado em "Dinheiro vivo contado" já aparece no relatório (antes de encerrar)
   const typed = counted.trim() ? toCents(counted) : null;
   const view = s && typed !== null ? { ...s, cash: { ...s.cash, counted: typed, difference: typed - s.cash.cashOnHand } } : s;
@@ -34,7 +34,7 @@ export default function CloseDaySheet({ open, onClose }: { open: boolean; onClos
     <Sheet open onClose={() => { setEditing(false); setDraft(null); onClose(); }} title={closed ? `Relatório · ${fmtDate(day.date, false)}` : '🌙 Encerrar o dia'} tall
       footer={
         <div className="space-y-2">
-          <Button className="w-full !bg-[#25D366]" onClick={async () => { if ((await openWhatsApp(text)) === 'copied') toast('📋 Mensagem grande: copiada. Abra o WhatsApp e cole.'); }}>💬 Enviar no WhatsApp</Button>
+          <Button className="w-full !bg-[#25D366]" onClick={async () => { const r = await sendWhatsApp(text, settings.reportSplit); if (r === 'copied') toast('📋 Mensagem grande: copiada. Abra o WhatsApp e cole.'); }}>💬 Enviar no WhatsApp</Button>
           <div className="grid grid-cols-2 gap-2">
             <Button variant={copied ? 'success' : 'outline'} onClick={async () => {
               if (await copyText(text)) { setCopied(true); setTimeout(() => setCopied(false), 2000); } else toast('Não foi possível copiar', 'err');
@@ -115,6 +115,36 @@ export default function CloseDaySheet({ open, onClose }: { open: boolean; onClos
           {fmt === 'whats' && (
             <div className="flex items-center gap-2 mb-2 bg-white rounded-xl border border-slate-200 px-3 py-1">
               <div className="flex-1">
+                <Toggle label="🧾 Totais no final" checked={settings.reportTotals}
+                  onChange={(on) => { setSetting('reportTotals', on).catch(() => undefined); setDraft(null); setEditing(false); }} />
+              </div>
+              <InfoTip title="Totais no final" example={[
+                ['📦', 'Total no estoque: 385 peças'],
+                ['🔁', 'Total para repor: 41 peças'],
+                ['🌅', 'Começo do dia 399 → 🌙 final 385 = −14'],
+              ]}>
+                Os mesmos números do Início, no fim da mensagem. Fica salvo.
+              </InfoTip>
+            </div>
+          )}
+          {fmt === 'whats' && (
+            <div className="flex items-center gap-2 mb-2 bg-white rounded-xl border border-slate-200 px-3 py-1">
+              <div className="flex-1">
+                <Toggle label="➖ Divisão entre os grupos" checked={settings.reportDividers}
+                  onChange={(on) => { setSetting('reportDividers', on).catch(() => undefined); setDraft(null); setEditing(false); }} />
+              </div>
+              <InfoTip title="Divisão entre os grupos" example={[
+                ['📦', 'Plomo · Cor Rojo: 18 …'],
+                ['➖', '- - - - - - - -'],
+                ['📦', 'Lila · Cor Verde: 8 …'],
+              ]}>
+                Uma linha separando um grupo do outro, para ler mais fácil. Fica salvo.
+              </InfoTip>
+            </div>
+          )}
+          {fmt === 'whats' && (
+            <div className="flex items-center gap-2 mb-2 bg-white rounded-xl border border-slate-200 px-3 py-1">
+              <div className="flex-1">
                 <Toggle label="🔢 Repor com “tem X de Y”" checked={settings.reportRestockDetail}
                   onChange={(on) => { setSetting('reportRestockDetail', on).catch(() => undefined); setDraft(null); setEditing(false); }} />
               </div>
@@ -153,11 +183,61 @@ export default function CloseDaySheet({ open, onClose }: { open: boolean; onClos
           ) : (
             <div className="notebook rounded-2xl p-4 whitespace-pre-wrap text-[16px] shadow-sm border border-sky-200">{text}</div>
           )}
+          {fmt === 'whats' && <MessageSize text={text} split={settings.reportSplit} onSplit={(on) => { setSetting('reportSplit', on).catch(() => undefined); }} />}
           <p className="text-[12px] text-slate-400 text-center mt-2">Este é o texto que vai ser enviado ou copiado.</p>
         </>
       )}
     </Sheet>
   );
+}
+
+/** “Tamanho atual / máximo” da mensagem, bem claro, e o que acontece quando passa. */
+function MessageSize({ text, split, onSplit }: { text: string; split: boolean; onSplit: (on: boolean) => void }) {
+  const z = whatsappSize(text);
+  const parts = !z.fits && split ? splitForWhatsApp(text) : null;
+  const n = (v: number) => v.toLocaleString('pt-BR');
+  const pct = Math.min(100, Math.round((z.link / z.max) * 100));
+  return (
+    <div aria-label="Tamanho da mensagem" className={`mt-3 rounded-xl border px-3 py-2.5 ${z.tooBig ? 'border-red-300 bg-red-50' : z.fits ? 'border-emerald-200 bg-emerald-50' : 'border-amber-300 bg-amber-50'}`}>
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-[13px] font-bold text-slate-700">📏 Tamanho da mensagem</span>
+        <span className={`text-[15px] font-bold tabular-nums ${z.fits ? 'text-emerald-700' : 'text-amber-700'}`}>{n(z.link)} / {n(z.max)}</span>
+      </div>
+      <div className="h-2 rounded-full bg-white/80 mt-1.5 overflow-hidden">
+        <div className={`h-full rounded-full ${z.fits ? 'bg-emerald-500' : 'bg-amber-500'}`} style={{ width: `${pct}%` }} />
+      </div>
+      <p className="text-[12.5px] text-slate-700 mt-1.5 leading-snug">
+        {z.tooBig
+          ? <>🚫 Grande demais até para o WhatsApp ({n(z.letters)} de {n(65536)} letras). Desligue a lista do estoque.</>
+          : z.fits
+            ? <>✅ Cabe: “Enviar no WhatsApp” abre direto a conversa.</>
+            : parts
+              ? <>✂️ Passou do máximo: vai em <b>{parts.length} partes</b>. Toque em “Enviar no WhatsApp” → manda a parte 1; volte para o app e toque em <b>“Mandar parte 2”</b>. Nada é cortado.</>
+              : <>📤 Passou do máximo do link direto: ao tocar em “Enviar no WhatsApp” abre o <b>compartilhar</b> do celular (escolha o WhatsApp). A mensagem vai <b>inteira</b>, nada é cortado.</>}
+      </p>
+      {parts && (
+        <ul className="mt-1.5 space-y-0.5" aria-label="Como vai ficar">
+          {parts.map((p, i) => (
+            <li key={i} className="text-[12.5px] text-slate-700 tabular-nums">
+              📨 Parte {i + 1}: <b>{n(whatsappSize(p).link)} / {n(z.max)}</b> · começa em “{firstTitle(p)}”
+            </li>
+          ))}
+        </ul>
+      )}
+      {!z.tooBig && (
+        <div className="mt-1 border-t border-black/5">
+          <Toggle label="✂️ Mandar em partes se passar" checked={split} onChange={onSplit} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** primeira linha de conteúdo da parte (depois do “Parte 1 de 2”), sem os asteriscos */
+function firstTitle(p: string) {
+  const line = p.split('\n').slice(1).find((l) => l.trim()) ?? '';
+  const t = line.replace(/\*/g, '').trim();
+  return t.length > 34 ? t.slice(0, 33) + '…' : t;
 }
 
 function escapeAndBold(t: string) {

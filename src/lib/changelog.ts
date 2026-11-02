@@ -23,6 +23,11 @@ export const CHANGELOG: ChangeEntry[] = [
       ['🚫', 'Esgotados: o número do Início e o da mensagem agora são sempre iguais (esgotado = 0 peças)'],
       ['🌙', 'Virou a data: o dia de ontem que ficou aberto encerra sozinho (reaberto de propósito não fecha)'],
       ['💾', 'No “Bom dia”: mostra o último backup (data e hora) e pergunta se quer fazer outro agora'],
+      ['🧾', 'Mensagem do WhatsApp com “Totais” no final: estoque, repor e começo → final do dia (chave)'],
+      ['➖', 'Linha de divisão entre os grupos na mensagem (chave), simples para a mensagem ficar menor'],
+      ['📏', 'Encerrar o dia mostra o tamanho da mensagem: atual / máximo, e o que acontece se passar (vai inteira, nada é cortado)'],
+      ['🔄', 'Botão “Atualizar” sempre atualiza (antes, no computador, às vezes não recarregava)'],
+      ['✂️', 'Mensagem grande vai em partes (chave): manda a parte 1, volta para o app e toca em “Mandar parte 2”. Mostra antes como vai ficar'],
     ],
   },
   {

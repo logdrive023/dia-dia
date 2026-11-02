@@ -23,6 +23,12 @@ export interface AppSettings {
   reportRestockDetail: boolean;
   /** no “Estoque agora”, cada cor com “começou X → terminou Y” */
   reportStockStartEnd: boolean;
+  /** no fim da mensagem: totais (estoque, repor, começo → final) */
+  reportTotals: boolean;
+  /** linha de divisão entre os grupos na mensagem */
+  reportDividers: boolean;
+  /** mensagem maior que o link do WhatsApp: mandar em partes (parte 1, volta, parte 2) */
+  reportSplit: boolean;
   /** Diária de quem vende (centavos). Sugestão ao lançar “Pagamento”. */
   dailyPayInCents: number;
   /** Ao iniciar o dia, já lança a diária daquele dia. */
@@ -40,6 +46,9 @@ export const DEFAULT_SETTINGS: AppSettings = {
   reportShowStock: true,
   reportRestockDetail: false,
   reportStockStartEnd: true,
+  reportTotals: true,
+  reportDividers: true,
+  reportSplit: true,
   dailyPayInCents: 15000,
   autoDailyPay: true,
 };
