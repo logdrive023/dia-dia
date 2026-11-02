@@ -17,6 +17,8 @@ export const CHANGELOG: ChangeEntry[] = [
       ['✓', 'Selo no topo: “✓ Atualizado” na última versão, “🆕 Atualizar” quando sai uma nova'],
       ['⌨️', 'Fechar venda não abre mais o teclado sozinho'],
       ['🧹', 'Recomeçar com uma venda aberta: o carrinho some junto (antes ficava o número na tela)'],
+      ['🎨', 'Nova cor num app sem grupos: pede para criar o grupo ali mesmo (antes dava erro “Invalid argument”)'],
+      ['📶', 'Procura versão nova no máximo a cada 10 minutos (quase nada de internet)'],
     ],
   },
   {

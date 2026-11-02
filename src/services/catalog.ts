@@ -4,7 +4,8 @@ import { isCents, MAX_QTY, normalize, nowIso, uid } from '../lib/util';
 import { audit } from './audit';
 import { getSetting, setSetting } from './settings';
 
-export class UserError extends Error {}
+/** Recusa com mensagem para a pessoa (em português). O nome fixo sobrevive à compactação do build. */
+export class UserError extends Error { name = 'UserError'; }
 
 const MAX_NAME = 40;
 
@@ -139,6 +140,7 @@ export async function createVariant(input: {
   /** Se informado, a quantidade inicial entra neste dia (se existir e estiver aberto). */
   dailyRecordId?: string | null;
 }) {
+  if (!input.groupId || typeof input.groupId !== 'string') throw new UserError('Escolha o grupo da cor (ou crie um grupo primeiro).');
   const name = cleanName(input.name, 'da variação');
   const qty = input.startQuantity ?? 0;
   if (!Number.isInteger(qty) || qty < 0 || qty > MAX_QTY) throw new UserError('Quantidade inválida.');

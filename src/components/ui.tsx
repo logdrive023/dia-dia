@@ -207,6 +207,19 @@ const UiCtx = createContext<{
   run: <T>(fn: () => Promise<T>, okMsg?: string) => Promise<T | undefined>;
 } | null>(null);
 
+/**
+ * Mensagem para a tela: as recusas do app (UserError, BackupError) já vêm em português;
+ * erro técnico do banco/navegador (em inglês) vira uma frase simples, com o detalhe no fim.
+ */
+export function friendlyError(e: unknown) {
+  const err = e as Error | undefined;
+  const msg = err?.message || '';
+  if (err && (err.name === 'UserError' || err.name === 'BackupError')) return msg;
+  if (/quota|QuotaExceeded/i.test(msg + (err?.name ?? ''))) return 'O celular está sem espaço. Libere espaço e tente de novo.';
+  if (/^[ -]*$/.test(msg) && msg) return `Não deu certo. Confira se escolheu tudo e tente de novo. (${msg})`;
+  return msg || 'Não foi possível salvar.';
+}
+
 export function UiProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<ToastT[]>([]);
   const [req, setReq] = useState<ConfirmReq | null>(null);
@@ -224,7 +237,7 @@ export function UiProvider({ children }: { children: ReactNode }) {
       return r;
     } catch (e) {
       console.error(e);
-      toast((e as Error).message || 'Não foi possível salvar.', 'err');
+      toast(friendlyError(e), 'err');
       return undefined;
     }
   }, [toast]);

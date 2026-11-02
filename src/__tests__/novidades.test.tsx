@@ -110,6 +110,36 @@ describe('recomeçar com venda aberta (bug do carrinho)', () => {
   }, 30000);
 });
 
+describe('nova cor num app sem grupos (erro "Invalid argument to Table.get()")', () => {
+  it('a regra recusa cor sem grupo com mensagem em português; erro técnico vira frase simples', async () => {
+    const { createVariant, UserError } = await import('../services/catalog');
+    await expect(createVariant({ groupId: undefined as unknown as string, name: 'Vermelho' })).rejects.toThrow(UserError);
+    await expect(createVariant({ groupId: '', name: 'Vermelho' })).rejects.toThrow(/Escolha o grupo/);
+    const { friendlyError } = await import('../components/ui');
+    expect(friendlyError(new UserError('Só há 0 disponível'))).toBe('Só há 0 disponível');
+    expect(friendlyError(new Error('Invalid argument to Table.get()'))).toMatch(/^Não deu certo/);
+    expect(friendlyError(Object.assign(new Error('x'), { name: 'QuotaExceededError' }))).toMatch(/sem espaço/);
+  });
+  it('depois de zerar tudo: a janela pede para criar o grupo ali mesmo e salva a cor', async () => {
+    const { resetToZero } = await import('../services/backup');
+    await resetToZero();
+    render(<App />);
+    click(await screen.findByRole('button', { name: /Abrir menu/ }, { timeout: 5000 }));
+    click(await screen.findByRole('button', { name: /Produtos e grupos/ }));
+    click(await screen.findByRole('button', { name: /Variação/ }));
+    await screen.findByText(/Primeiro crie um grupo/);
+    fireEvent.change(screen.getByPlaceholderText('Ex.: Verde'), { target: { value: 'Vermelho escuro' } });
+    const save = () => screen.getAllByRole('button').find((b) => /Crie um grupo primeiro|Salvar Vermelho escuro/.test(b.textContent ?? ''))! as HTMLButtonElement;
+    expect(save().disabled).toBe(true); // sem grupo não deixa salvar (antes dava o erro)
+    fireEvent.change(screen.getByPlaceholderText('Nome do grupo'), { target: { value: 'Broche' } });
+    click(screen.getByRole('button', { name: 'Criar' }));
+    await waitFor(() => expect(save().textContent).toBe('Salvar Vermelho escuro em Broche'));
+    click(save());
+    await waitFor(async () => expect((await db.variants.toArray()).map((v) => v.name)).toEqual(['Vermelho escuro']));
+    expect(screen.queryByText(/Invalid argument/)).toBeNull();
+  }, 30000);
+});
+
 describe('Juntar com outro celular (pela tela)', () => {
   it('gera o código e, colando o código de outro celular, junta as vendas', async () => {
     // código "do outro celular": um banco separado com uma venda

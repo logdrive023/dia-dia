@@ -49,7 +49,7 @@ export function backupFileName(d = new Date()) {
 
 // ---------------- validação ----------------
 
-export class BackupError extends Error {}
+export class BackupError extends Error { name = 'BackupError'; }
 
 export function validateBackup(raw: unknown): BackupFile {
   const b = raw as BackupFile;

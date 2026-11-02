@@ -108,6 +108,7 @@ function QuickAdd({ kind, onClose, groups, onCreatedGroup }: { kind: 'group' | '
   const [groupId, setGroupId] = useState('');
   const [qty, setQty] = useState(0);
   const [color, setColor] = useState<string | undefined>();
+  const [newGroup, setNewGroup] = useState('');
   if (!kind) return null;
   const gid = groupId || groups[0]?.id;
   const group = groups.find((g) => g.id === gid);
@@ -133,8 +134,8 @@ function QuickAdd({ kind, onClose, groups, onCreatedGroup }: { kind: 'group' | '
   );
   return (
     <Sheet open onClose={close} title="🎨 Nova cor / variação" tall
-      footer={<Button size="lg" className="w-full" disabled={!name.trim() || busy} onClick={save}>
-        {name.trim() ? `Salvar ${name.trim()} em ${group?.name ?? ''}` : 'Salvar'}
+      footer={<Button size="lg" className="w-full" disabled={!name.trim() || !group || busy} onClick={save}>
+        {!group ? 'Crie um grupo primeiro' : name.trim() ? `Salvar ${name.trim()} em ${group.name}` : 'Salvar'}
       </Button>}>
       <div className="flex items-start gap-2 rounded-xl bg-blue-50 border border-blue-200 px-3 py-2.5 mb-4 text-[14px] text-blue-900">
         <span className="flex-1">Variação é a cor ou modelo dentro de um grupo (ex.: Plomo <b>Verde</b>).</span>
@@ -148,6 +149,19 @@ function QuickAdd({ kind, onClose, groups, onCreatedGroup }: { kind: 'group' | '
       </div>
 
       <div className="text-sm font-semibold text-slate-700 mb-1.5">1. Grupo</div>
+      {!groups.length && (
+        // app sem nenhum grupo (ex.: depois de “Reiniciar tudo do 0”): cria o grupo aqui mesmo
+        <div className="rounded-xl bg-amber-50 border border-amber-200 p-3 mb-4">
+          <div className="text-[14px] font-bold text-amber-900 mb-2">📦 Primeiro crie um grupo (ex.: Plomo, Broche)</div>
+          <div className="flex gap-2">
+            <Input value={newGroup} onChange={(e) => setNewGroup(e.target.value)} placeholder="Nome do grupo" />
+            <Button disabled={!newGroup.trim() || busy} onClick={() => wrap(async () => {
+              const g = await run(() => createGroup({ name: newGroup }), 'Grupo criado');
+              if (g) { setGroupId(g.id); setNewGroup(''); }
+            })}>Criar</Button>
+          </div>
+        </div>
+      )}
       <div className="flex gap-2 overflow-x-auto no-scrollbar -mx-5 px-5 pb-1 mb-4">
         {groups.map((g) => (
           <button key={g.id} onClick={() => setGroupId(g.id)}

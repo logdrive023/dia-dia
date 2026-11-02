@@ -317,7 +317,13 @@ function UpdateBanner() {
     onRegisteredSW(_url, reg) {
       if (!reg) return;
       setUpdateState({ ready: true });
-      const check = () => { if (navigator.onLine !== false) reg.update().catch(() => undefined); };
+      // no máximo 1 conferência a cada 10 min (cada uma baixa só ~1 KB: o arquivo sw.js)
+      let last = 0;
+      const check = () => {
+        if (navigator.onLine === false || Date.now() - last < 10 * 60 * 1000) return;
+        last = Date.now();
+        reg.update().catch(() => undefined);
+      };
       setInterval(check, 60 * 60 * 1000);
       document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') check(); });
     },
