@@ -1,6 +1,6 @@
 import { db } from '../db/db';
 import type { DailyRecord, DailyStockItem, MovementType, PaymentMethod, StockMovement } from '../db/types';
-import { isQty, MAX_QTY, money, nowIso, uid } from '../lib/util';
+import { isQty, MAX_QTY, money, nowIso, todayStr, uid } from '../lib/util';
 import { audit } from './audit';
 import { UserError } from './catalog';
 import { addTombstones } from './sync';
@@ -281,10 +281,24 @@ export async function closeDay(dailyRecordId: string, countedBalanceInCents?: nu
   });
 }
 
+/**
+ * Virou a data: encerra sozinho os dias que ficaram abertos antes de hoje (o caixa contado fica como estava).
+ * Dia reaberto de propósito (para corrigir) não fecha de novo. Devolve as datas encerradas.
+ */
+export async function autoCloseOldDays(today = todayStr()) {
+  const open = (await db.dailyRecords.where('status').equals('open').toArray())
+    .filter((d) => d.date < today && !d.reopenedAt);
+  for (const d of open) {
+    await closeDay(d.id);
+    await db.dailyRecords.update(d.id, { autoClosedAt: nowIso() });
+  }
+  return open.map((d) => d.date).sort();
+}
+
 export async function reopenDay(dailyRecordId: string) {
   await db.transaction('rw', db.dailyRecords, db.cashRecords, db.auditLogs, async () => {
     const now = nowIso();
-    await db.dailyRecords.update(dailyRecordId, { status: 'open', closedAt: null, updatedAt: now });
+    await db.dailyRecords.update(dailyRecordId, { status: 'open', closedAt: null, autoClosedAt: null, reopenedAt: now, updatedAt: now });
     const cash = await db.cashRecords.where('dailyRecordId').equals(dailyRecordId).first();
     if (cash) await db.cashRecords.update(cash.id, { status: 'open' });
     await audit('day', dailyRecordId, 'reopen');

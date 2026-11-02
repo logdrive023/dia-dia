@@ -132,6 +132,7 @@ export interface StockRow {
   restock: number;
   /** falta repor, mas ainda tem peça */
   low: boolean;
+  /** esgotado = não sobrou nenhuma peça (peça reservada ainda está no estoque: não é esgotada). O mesmo em todo lugar: Início, Estoque, Vender e WhatsApp. */
   out: boolean;
 }
 
@@ -176,7 +177,7 @@ export async function loadStockRows(dailyRecordId: string, date: string): Promis
     const ideal = idealOf(variant);
     const available = item.currentQuantity - r;
     const restock = restockOf(variant, item.currentQuantity, ideal);
-    rows.push({ item, variant, group, reserved: r, available, ideal, restock, out: available <= 0, low: available > 0 && restock > 0 });
+    rows.push({ item, variant, group, reserved: r, available, ideal, restock, out: item.currentQuantity <= 0, low: item.currentQuantity > 0 && restock > 0 });
   }
   rows.sort((a, b) => a.group.displayOrder - b.group.displayOrder || a.variant.displayOrder - b.variant.displayOrder);
   return rows;

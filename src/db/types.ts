@@ -63,6 +63,10 @@ export interface DailyRecord {
   status: DayStatus;
   notes?: string;
   closedAt?: string | null;
+  /** encerrado sozinho quando virou a data */
+  autoClosedAt?: string | null;
+  /** reaberto de propósito: não fecha sozinho de novo */
+  reopenedAt?: string | null;
   createdAt: string;
   updatedAt: string;
 }

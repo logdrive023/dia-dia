@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { ensureDailyPay } from './services/cash';
+import { autoCloseOldDays } from './services/days';
 import { db } from './db/db';
 import type { DailyRecord } from './db/types';
 import { todayStr, uid } from './lib/util';
@@ -61,6 +62,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const check = () => {
       const now = todayStr();
       if (now === lastToday.current) return;
+      autoCloseOldDays(now).catch(() => undefined); // virou a data: o dia de ontem encerra sozinho
       if (dateRef.current === lastToday.current) setDate(now);
       lastToday.current = now;
     };

@@ -12,7 +12,7 @@ import { seedIfNeeded } from '../db/seed';
 import { uid } from '../lib/util';
 import { migrateCadastroEntries, moveStock, startDay } from '../services/days';
 import { archiveVariant, createGroup, createVariant, deleteVariant, updateVariant } from '../services/catalog';
-import { createOrder } from '../services/sales';
+import { createOrder, createReservation } from '../services/sales';
 import { daySummary, loadStockRows } from '../services/summary';
 import { openWhatsApp, whatsappReport, WHATSAPP_URL_MAX } from '../services/report';
 import { runDiagnostics } from '../services/diagnostics';
@@ -109,13 +109,13 @@ describe('arquivadas e excluídas fora do relatório', () => {
 function stockSection(w: string) {
   const i = w.indexOf('📦 *Estoque agora');
   if (i < 0) return null;
-  const out: Record<string, { qty: number; note: string }> = {};
+  const out: Record<string, { qty: number; start?: number; note: string }> = {};
   let group = '';
   for (const line of w.slice(i).split('\n').slice(1)) {
     const g = line.match(/^\S+ \*(.+)\*$/);
     if (g) { group = g[1]; continue; }
-    const m = line.match(/^ {3}• Cor (.+): (\d+)(.*)$/);
-    if (m) out[`${group} ${m[1]}`] = { qty: Number(m[2]), note: m[3].trim() };
+    const m = line.match(/^ {3}• Cor (.+?): (?:começou (\d+) → terminou )?(\d+)(.*)$/);
+    if (m) out[`${group} ${m[1]}`] = { qty: Number(m[3]), start: m[2] === undefined ? undefined : Number(m[2]), note: m[4].trim() };
   }
   return out;
 }
@@ -143,6 +143,10 @@ describe('mensagem com o estoque de agora (configurável)', () => {
     expect(st[`${groups.get(a.groupId)} ${a.name}`].note).toBe('🚫 esgotado');
     expect(st[`${groups.get(b.groupId)} ${b.name}`].note).toBe('⚠️ repor 1');
     expect(st[`${groups.get(arch.groupId)} ${arch.name}`]).toBeUndefined(); // nome exato (Broche ≠ Broche Médio)
+    // começo → fim do dia (ligado por padrão no app; aqui pela opção)
+    const se = stockSection(whatsappReport(d.date, s, { showStock: true, stockStartEnd: true }))!;
+    for (const r of rows) expect(se[`${groups.get(r.variant.groupId)} ${r.variant.name}`]).toMatchObject({ start: r.item.initialQuantity, qty: r.item.currentQuantity });
+    expect(whatsappReport(d.date, s, { showStock: true, stockStartEnd: true })).toContain(`Cor ${a.name}: começou 2 → terminou 0 🚫 esgotado`);
     // a parte "Precisa repor" continua
     expect(w).toContain('🔁 *Precisa repor');
   });
@@ -153,6 +157,24 @@ describe('mensagem com o estoque de agora (configurável)', () => {
     expect(stockSection(w)).toBeNull();
     expect(w).toContain(`📊 Estoque no fim do dia: *${s.totalUnits} peças*`);
     expect((await (await import('../services/settings')).getSetting('reportShowStock'))).toBe(true); // padrão: mostra
+  });
+});
+
+describe('reserva no estoque da mensagem (bug Plomo Azul 02/11)', () => {
+  it('começou 3, vendeu 1, 2 reservadas: “começou 3 → terminou 2 🔒 2 reservadas”, não “esgotado”', async () => {
+    const d = await setup('res1');
+    const g = await createGroup({ name: 'Teste Res' });
+    const v = await createVariant({ groupId: g.id, name: 'Azul', startQuantity: 3, idealStock: 2, dailyRecordId: d.id });
+    await createOrder({ orderId: uid(), dailyRecordId: d.id, paymentMethod: 'pix', lines: [{ variantId: v.id, quantity: 1, unitPriceInCents: 7000 }] });
+    await createReservation({ dailyRecordId: d.id, variantId: v.id, quantity: 2, customer: 'Kelly' });
+    const s = await daySummary(d.id, d.date);
+    const w = whatsappReport(d.date, s, { showStock: true, stockStartEnd: true });
+    expect(w).toContain('Cor Azul: começou 3 → terminou 2 🔒 2 reservadas');
+    expect(stockSection(w)!['Teste Res Azul']).toEqual({ start: 3, qty: 2, note: '🔒 2 reservadas' }); // não “esgotado”
+    expect(whatsappReport(d.date, s, { showStock: true })).toContain('Cor Azul: 2 🔒 2 reservadas');
+    // não entra em “Esgotados” (o grupo de teste nem aparece lá)
+    const esg = w.indexOf('🚫 *Esgotados');
+    if (esg >= 0) expect(w.slice(esg, w.indexOf('\n\n', esg))).not.toContain('Teste Res');
   });
 });
 
@@ -270,6 +292,17 @@ describe.skipIf(!REAL)('dados reais do celular (02/11)', () => {
     const st = stockSection(ws)!;
     expect(Object.values(st).reduce((n, x) => n + x.qty, 0)).toBe(after.totalUnits);
     expect(Object.keys(st).length).toBe(after.stockNow.length);
+    // o número de esgotados do Início = “Esgotados (N)” da mensagem = marcas “esgotado” na lista
+    const homeOut = after.restock.filter((r) => r.out).length;
+    const msgOut = Number(ws.match(/🚫 \*Esgotados \((\d+)\)\*/)?.[1] ?? 0);
+    expect(msgOut, 'esgotados: Início x mensagem').toBe(homeOut);
+    expect(Object.values(st).filter((x) => x.note.includes('esgotado')).length).toBe(homeOut);
+    console.log(`dados reais: esgotados ${homeOut} no Início = ${msgOut} na mensagem`);
+    // “esgotado” só ao lado de 0 peças; começo → fim bate com o dia
+    for (const [k, x] of Object.entries(st)) expect(x.note.includes('esgotado'), `${k}: ${x.qty} ${x.note}`).toBe(x.qty === 0);
+    const se = stockSection(whatsappReport(day.date, after, { showStock: true, stockStartEnd: true }))!;
+    for (const r of after.stockNow) expect(se[`${r.group.name} ${r.variant.name}`], r.variant.name).toMatchObject({ start: r.item.initialQuantity, qty: r.item.currentQuantity });
+    console.log('dados reais: ' + ws.split('\n').filter((l) => /reservad/.test(l)).join(' | '));
     console.log(`dados reais: estoque na mensagem ${Object.keys(st).length} cores · ${after.totalUnits} peças · ${Object.values(st).filter((x) => x.note).length} com aviso · mensagem ${ws.length} letras`);
     expect(await erros()).toEqual([]);
     console.log(`dados reais: excluídas ${apagadas} de vez + ${escondidas} com vendas (histórico mantido) · mensagem ${w.length} letras`);

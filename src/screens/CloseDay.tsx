@@ -21,7 +21,7 @@ export default function CloseDaySheet({ open, onClose }: { open: boolean; onClos
   const [copied, setCopied] = useState(false);
   const s = useLiveQuery(async () => (day && open ? daySummary(day.id, day.date) : null), [day?.id, open]);
   if (!open || !day) return null;
-  const opts = { symbol: settings.currencySymbol, title: settings.reportTitle, showStock: settings.reportShowStock, restockDetail: settings.reportRestockDetail };
+  const opts = { symbol: settings.currencySymbol, title: settings.reportTitle, showStock: settings.reportShowStock, restockDetail: settings.reportRestockDetail, stockStartEnd: settings.reportStockStartEnd };
   // o que for digitado em "Dinheiro vivo contado" já aparece no relatório (antes de encerrar)
   const typed = counted.trim() ? toCents(counted) : null;
   const view = s && typed !== null ? { ...s, cash: { ...s.cash, counted: typed, difference: typed - s.cash.cashOnHand } } : s;
@@ -94,6 +94,21 @@ export default function CloseDaySheet({ open, onClose }: { open: boolean; onClos
                 ['🚫', <><b>Desligado:</b> só o total (“Estoque no fim do dia: 233 peças”)</>],
               ]}>
                 Fica salvo: vale também para o “Enviar relatório” do Início. A parte “Precisa repor” continua igual.
+              </InfoTip>
+            </div>
+          )}
+          {fmt === 'whats' && settings.reportShowStock && (
+            <div className="flex items-center gap-2 mb-2 bg-white rounded-xl border border-slate-200 px-3 py-1">
+              <div className="flex-1">
+                <Toggle label="🌅 Começo → fim do dia em cada cor" checked={settings.reportStockStartEnd}
+                  onChange={(on) => { setSetting('reportStockStartEnd', on).catch(() => undefined); setDraft(null); setEditing(false); }} />
+              </div>
+              <InfoTip title="Começo → fim do dia" example={[
+                ['✅', <><b>Ligado:</b> “Cor Azul: começou 3 → terminou 2”</>],
+                ['🚫', <><b>Desligado:</b> “Cor Azul: 2” (só o que tem agora)</>],
+                ['🔒', '“🔒 2 reservadas”: ainda estão no estoque, guardadas para alguém'],
+              ]}>
+                Só muda a lista “Estoque agora”. Fica salvo.
               </InfoTip>
             </div>
           )}

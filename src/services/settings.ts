@@ -21,6 +21,8 @@ export interface AppSettings {
   reportShowStock: boolean;
   /** em “Precisa repor”, mostrar “(tem 14 de 15)” */
   reportRestockDetail: boolean;
+  /** no “Estoque agora”, cada cor com “começou X → terminou Y” */
+  reportStockStartEnd: boolean;
   /** Diária de quem vende (centavos). Sugestão ao lançar “Pagamento”. */
   dailyPayInCents: number;
   /** Ao iniciar o dia, já lança a diária daquele dia. */
@@ -37,6 +39,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   reportTitle: 'Check List',
   reportShowStock: true,
   reportRestockDetail: false,
+  reportStockStartEnd: true,
   dailyPayInCents: 15000,
   autoDailyPay: true,
 };

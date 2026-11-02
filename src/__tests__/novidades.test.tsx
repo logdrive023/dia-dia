@@ -187,6 +187,13 @@ describe('chaves do repor e do estoque na mensagem (pela tela)', () => {
     const sw = await screen.findByRole('switch', { name: /Mostrar o estoque/ });
     expect(sw.getAttribute('aria-checked')).toBe('true');
     await screen.findByText(/Estoque agora/);
+    // começo → fim do dia: ligado por padrão; desligando, a lista mostra só o número
+    const se = await screen.findByRole('switch', { name: /Começo → fim do dia/ });
+    expect(se.getAttribute('aria-checked')).toBe('true');
+    expect((await screen.findAllByText(/começou \d+ → terminou \d+/)).length).toBeGreaterThan(0);
+    click(se);
+    await waitFor(() => expect(screen.queryByText(/começou \d+ → terminou \d+/)).toBeNull());
+    await waitFor(async () => expect((await db.settings.where('key').equals('reportStockStartEnd').first())?.value).toBe(false));
     click(sw);
     await waitFor(() => expect(screen.queryByText(/Estoque agora/)).toBeNull());
     await waitFor(async () => expect((await db.settings.where('key').equals('reportShowStock').first())?.value).toBe(false));

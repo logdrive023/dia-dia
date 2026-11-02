@@ -18,6 +18,11 @@ export const CHANGELOG: ChangeEntry[] = [
       ['🔁', 'Em cada produto: “Precisa repor?” (sim/não) e “Tem estoque mínimo?” — só aparece para repor quando chega no mínimo'],
       ['✂️', '“Precisa repor” no WhatsApp mais simples: só a cor e o número (ex.: “Cor Blanco: 1”)'],
       ['🔢', 'Chave “Repor com tem X de Y” no Encerrar o dia: liga para mostrar “(tem 14 de 15)” ao lado do número'],
+      ['🌅', '“Estoque agora” mostra cada cor com “começou 3 → terminou 2” (chave para ligar/desligar)'],
+      ['🔒', 'Peça reservada não aparece mais como “esgotado”: mostra “🔒 2 reservadas”. Esgotado é só quando acaba'],
+      ['🚫', 'Esgotados: o número do Início e o da mensagem agora são sempre iguais (esgotado = 0 peças)'],
+      ['🌙', 'Virou a data: o dia de ontem que ficou aberto encerra sozinho (reaberto de propósito não fecha)'],
+      ['💾', 'No “Bom dia”: mostra o último backup (data e hora) e pergunta se quer fazer outro agora'],
     ],
   },
   {

@@ -185,11 +185,11 @@ export default function Sell() {
                     const c = inCart(r.variant.id);
                     const left = r.available - c;
                     return (
-                      <div key={r.variant.id} className={`flex items-center gap-3 pl-4 pr-2.5 py-2.5 ${c > 0 ? 'bg-emerald-50' : ''} ${r.out && !c ? 'opacity-60' : ''}`}>
+                      <div key={r.variant.id} className={`flex items-center gap-3 pl-4 pr-2.5 py-2.5 ${c > 0 ? 'bg-emerald-50' : ''} ${r.available <= 0 && !c ? 'opacity-60' : ''}`}>
                         <span className="rounded-full ring-2 ring-offset-1 ring-slate-100"><Swatch color={r.variant.color} size={26} /></span>
                         <div className="flex-1 min-w-0">
                           <div className="font-bold text-slate-800 text-[16px] leading-tight break-words">{r.variant.name}</div>
-                          {!r.out && <div className="text-[13px] font-bold text-slate-700 mt-0.5 tabular-nums">🏷️ {r.available} à venda</div>}
+                          {r.available > 0 && <div className="text-[13px] font-bold text-slate-700 mt-0.5 tabular-nums">🏷️ {r.available} à venda</div>}
                           <StockFlow size="sm" start={r.item.initialQuantity} now={r.item.currentQuantity} restock={r.restock} out={r.out} reserved={r.reserved} />
                         </div>
                         {!locked && (c > 0 ? (

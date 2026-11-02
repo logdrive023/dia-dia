@@ -3,7 +3,8 @@ import { fmtDate, money, PAYMENT_LABEL } from '../lib/util';
 import { cashStatement, type DaySummary } from './summary';
 
 type Opts = { symbol?: string; title?: string; /** mostrar o estoque de agora (cor por cor) na mensagem do WhatsApp */ showStock?: boolean;
-  /** em “Precisa repor”, mostrar “(tem 14 de 15)” ao lado do número */ restockDetail?: boolean };
+  /** em “Precisa repor”, mostrar “(tem 14 de 15)” ao lado do número */ restockDetail?: boolean;
+  /** no “Estoque agora”, cada cor com “começou 3 → terminou 2” */ stockStartEnd?: boolean };
 
 /** Linha do caderno para uma venda: "2x70 = 140 Dinheiro" ou "1x70 + 1x85 = 155 Pix". */
 export function orderLine(lines: { quantity: number; unitPriceInCents: number | null; paymentMethod?: PaymentMethod }[], total: number, method: PaymentMethod,
@@ -143,7 +144,8 @@ export function whatsappReport(date: string, s: DaySummary, opts: Opts = {}) {
 
   // repor
   const toRestock = s.restock.filter((r) => r.restock > 0);
-  const soldOut = s.restock.filter((r) => r.out && r.restock === 0);
+  // esgotados: todos com 0 peças (o mesmo número do Início), mesmo os que também estão em “repor”
+  const soldOut = s.restock.filter((r) => r.out);
   if (toRestock.length) {
     section(`🔁 *Precisa repor (${plural(s.restockUnits, 'peça', 'peças')})*`);
     L.push(...byGroup(toRestock, (r) => `Cor ${r.variant.name}: ${r.restock}${opts.restockDetail ? ` (tem ${r.item.currentQuantity} de ${r.ideal})` : ''}`));
@@ -156,11 +158,21 @@ export function whatsappReport(date: string, s: DaySummary, opts: Opts = {}) {
   if (opts.showStock && s.stockNow.length) {
     // o que tem agora, cor por cor; ao lado, o aviso de repor/esgotado (a seção "Precisa repor" continua acima)
     section(`📦 *Estoque agora (${plural(s.totalUnits, 'peça', 'peças')})*`);
-    L.push(...byGroup(s.stockNow, (r) => `Cor ${r.variant.name}: ${r.item.currentQuantity}${r.out ? ' 🚫 esgotado' : r.restock > 0 ? ` ⚠️ repor ${r.restock}` : ''}`));
+    L.push(...byGroup(s.stockNow, (r) => `Cor ${r.variant.name}: ${opts.stockStartEnd ? `começou ${r.item.initialQuantity} → terminou ${r.item.currentQuantity}` : r.item.currentQuantity}${stockNote(r)}`));
   } else {
     section(`📊 Estoque no fim do dia: *${plural(s.totalUnits, 'peça', 'peças')}*`);
   }
   return L.join('\n');
+}
+
+/** Aviso ao lado da cor no “Estoque agora”: esgotado só com 0 peças; peça reservada aparece como reservada. */
+function stockNote(r: DaySummary['stockNow'][number]) {
+  if (r.item.currentQuantity <= 0) return ' 🚫 esgotado';
+  const notes: string[] = [];
+  const res = Math.min(r.reserved, r.item.currentQuantity);
+  if (res > 0) notes.push(`🔒 ${res} ${res === 1 ? 'reservada' : 'reservadas'}`);
+  if (r.restock > 0) notes.push(`⚠️ repor ${r.restock}`);
+  return notes.length ? ' ' + notes.join(' ') : '';
 }
 
 export async function shareText(text: string, title = 'Relatório') {

@@ -131,11 +131,12 @@ export function StartDayCard() {
       return { prev: null, units: vs.filter((v) => !v.archivedAt).reduce((s, v) => s + v.startQuantity, 0), cash: 0 };
     }
     const items = await db.dailyStockItems.where('dailyRecordId').equals(prev.id).toArray();
-    return { prev, units: items.reduce((s, i) => s + i.currentQuantity, 0), cash: (await computeCash(prev.id)).accumulated };
+    return { prev, units: items.reduce((s, i) => s + i.currentQuantity, 0), cash: (await computeCash(prev.id)).accumulated, autoClosed: !!prev.autoClosedAt };
   }, [date]);
   const { confirm } = useUi();
-  const { setDate, setOverlay } = useApp();
+  const { setDate, setOverlay, settings } = useApp();
   const today = todayStr();
+  const lastBackup = settings.lastBackupAt ? new Date(settings.lastBackupAt) : null;
   const kind = date === today ? 'today' : date < today ? 'past' : 'future';
   const start = (mode: 'copy' | 'blank') => wrap(async () => {
     if (mode === 'blank' && !(await confirm({ title: 'Começar com estoque zerado?', tone: 'danger', confirm: 'Começar zerado',
@@ -188,6 +189,26 @@ export function StartDayCard() {
           <div className="text-center">
             <div className="text-4xl mb-1">☀️</div>
             <div className="text-lg font-bold text-slate-800">Bom dia! Vamos começar?</div>
+          </div>
+          {info?.prev && info.autoClosed && (
+            <div className="mt-3 rounded-xl bg-indigo-50 border border-indigo-200 px-3 py-2 text-[14px] text-indigo-900">
+              🌙 O dia <b>{fmtDate(info.prev.date, false)}</b> foi encerrado sozinho quando virou a data.
+            </div>
+          )}
+          <div className="mt-3 rounded-2xl border-2 border-sky-300 bg-gradient-to-br from-sky-50 to-white p-3.5" aria-label="Último backup">
+            <div className="flex items-center gap-3">
+              <span className="text-3xl leading-none">💾</span>
+              <div className="flex-1 min-w-0">
+                <div className="text-[12px] font-bold uppercase tracking-wide text-sky-700">Último backup</div>
+                <div className="text-[17px] font-bold text-slate-800 tabular-nums">
+                  {lastBackup
+                    ? <>{fmtDate(todayStr(lastBackup), false)} às {lastBackup.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</>
+                    : 'Ainda não fez backup'}
+                </div>
+              </div>
+            </div>
+            <p className="text-[14px] text-slate-700 mt-2">Quer fazer {lastBackup ? 'outro' : 'um'} backup agora, antes de começar?</p>
+            <Button className="w-full mt-2" variant="soft" onClick={() => setOverlay('backup')}>💾 Sim, fazer backup agora</Button>
           </div>
           <div className="mt-3">{choices}</div>
           {info && !info.prev && (
