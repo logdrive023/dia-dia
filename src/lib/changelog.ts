@@ -21,7 +21,7 @@ export const CHANGELOG: ChangeEntry[] = [
       ['📏', 'Tamanhos (P, M, G…) e tipos de produto (Vestido, Blusa…), opcionais e editáveis em Configurações'],
       ['🎨', 'Cores separadas em neutras, quentes e frias; dá para criar cores e ícones novos'],
       ['🛍️', '“Novo produto” direto na aba Vender: entra no cadastro, no estoque de hoje e já à venda'],
-      ['➕', '“Chegou mais” em cada peça da aba Vender: põe mais no estoque (mercadoria nova ou reposição) e já fica à venda'],
+      ['➕', '“Chegou mais” em cada peça da aba Vender (verde, sempre dá para tocar, até na peça esgotada): põe mais no estoque (mercadoria nova ou reposição) e já fica à venda'],
       ['🔒', 'Peça toda reservada aparece como “reservadas” (não mais “sem peça”); no Estoque: físico, reservado e disponível'],
       ['📌', 'Reservas ativas: dá para recolher a lista e filtrar por grupo, peça ou cliente'],
       ['🙋', 'Configurações › Seu nome: aparece em cada registro feito por você'],

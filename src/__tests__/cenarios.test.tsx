@@ -362,7 +362,12 @@ describe('Vender › “Chegou mais” (entrada pela tela de vender)', () => {
     render(<App />);
     fireEvent.click(within(await screen.findByRole('navigation', {}, { timeout: 5000 })).getByRole('button', { name: /Vender/ }));
     fireEvent.click(await screen.findByRole('button', { name: /Todos os grupos/ }));
-    fireEvent.click(await screen.findByRole('button', { name: 'Chegou mais de Verde Cenário' }));
+    // esgotada: a informação fica apagada, mas o botão continua forte (nenhum pai com opacity)
+    const chegou = await screen.findByRole('button', { name: 'Chegou mais de Verde Cenário' });
+    for (let el: HTMLElement | null = chegou; el; el = el.parentElement) expect(el.className ?? '', 'pai apagando o botão').not.toMatch(/opacity-/);
+    expect(chegou.className).toMatch(/bg-emerald-100/);
+    expect(chegou.closest('div.flex')!.querySelector('[data-testid="info-peca"]')?.className ?? chegou.parentElement!.querySelector('[data-testid="info-peca"]')!.className).toMatch(/opacity-60/);
+    fireEvent.click(chegou);
     fireEvent.change(await screen.findByLabelText('Quantas chegaram'), { target: { value: '3' } });
     fireEvent.click(screen.getByRole('radio', { name: 'Reposição' }));
     expect(screen.getByText(/Estoque:/).textContent).toMatch(/0 → 3/);

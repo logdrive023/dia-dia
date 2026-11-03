@@ -208,16 +208,19 @@ export default function Sell() {
                     const c = inCart(r.variant.id);
                     const left = r.available - c;
                     return (
-                      <div key={r.variant.id} className={`flex items-center gap-3 pl-4 pr-2.5 py-2.5 ${c > 0 ? 'bg-emerald-50' : ''} ${r.available <= 0 && !c ? 'opacity-60' : ''}`}>
-                        <span className="rounded-full ring-2 ring-offset-1 ring-slate-100"><Swatch color={r.variant.color} size={26} /></span>
+                      // sem peça para vender: só a informação fica mais clara; o “Chegou mais” continua forte (sempre dá para tocar)
+                      <div key={r.variant.id} className={`flex items-center gap-3 pl-4 pr-2.5 py-2.5 ${c > 0 ? 'bg-emerald-50' : ''}`}>
+                        <span className={`rounded-full ring-2 ring-offset-1 ring-slate-100 ${r.available <= 0 && !c ? 'opacity-60' : ''}`}><Swatch color={r.variant.color} size={26} /></span>
                         <div className="flex-1 min-w-0">
-                          <button onClick={() => openHistory(r.variant.id)} aria-label={`Histórico de ${r.variant.name}`}
-                            className="font-bold text-slate-800 text-[16px] leading-tight break-words text-left">{variantLabel(r.variant)} <span className="text-[12px] font-normal text-slate-400" aria-hidden>📜</span></button>
-                          {r.available > 0 && <div className="text-[13px] font-bold text-slate-700 mt-0.5 tabular-nums">🏷️ {r.available} à venda</div>}
-                          <StockFlow size="sm" start={r.item.initialQuantity} now={r.item.currentQuantity} restock={r.restock} out={r.out} reserved={r.reserved} />
+                          <div className={r.available <= 0 && !c ? 'opacity-60' : ''} data-testid="info-peca">
+                            <button onClick={() => openHistory(r.variant.id)} aria-label={`Histórico de ${r.variant.name}`}
+                              className="font-bold text-slate-800 text-[16px] leading-tight break-words text-left">{variantLabel(r.variant)} <span className="text-[12px] font-normal text-slate-400" aria-hidden>📜</span></button>
+                            {r.available > 0 && <div className="text-[13px] font-bold text-slate-700 mt-0.5 tabular-nums">🏷️ {r.available} à venda</div>}
+                            <StockFlow size="sm" start={r.item.initialQuantity} now={r.item.currentQuantity} restock={r.restock} out={r.out} reserved={r.reserved} />
+                          </div>
                           {!locked && (
                             <button onClick={() => setAddRow(r)} aria-label={`Chegou mais de ${variantLabel(r.variant)}`}
-                              className="mt-1.5 h-8 px-2.5 rounded-lg border border-emerald-300 bg-emerald-50 text-emerald-800 text-[12px] font-bold active:bg-emerald-100">＋ Chegou mais</button>
+                              className="mt-1.5 h-9 px-3 rounded-lg border-2 border-emerald-400 bg-emerald-100 text-emerald-800 text-[13px] font-bold shadow-sm active:bg-emerald-200">＋ Chegou mais</button>
                           )}
                         </div>
                         {!locked && (c > 0 ? (
