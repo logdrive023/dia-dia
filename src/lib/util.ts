@@ -98,10 +98,27 @@ export const NAMED_COLORS: [string, string][] = [
   ['#92400e', 'Café'], ['#78350f', 'Marrom'], ['#78716c', 'Taupe'], ['#a16207', 'Caramelo'],
 ];
 
+/** Famílias para escolher mais fácil (a ordem dentro de cada uma segue a lista acima). */
+export type ColorFamily = 'neutras' | 'quentes' | 'frias';
+const FAMILY_OF: Record<string, ColorFamily> = {};
+for (const n of ['Poá', 'Branco', 'Creme', 'Bege', 'Prata', 'Cinza', 'Chumbo', 'Grafite', 'Preto', 'Café', 'Marrom', 'Taupe', 'Caramelo']) FAMILY_OF[n] = 'neutras';
+for (const n of ['Vinho', 'Vermelho escuro', 'Vermelho', 'Coral', 'Laranja', 'Pêssego', 'Âmbar', 'Dourado', 'Mostarda', 'Amarelo', 'Amarelo claro', 'Rosa claro', 'Rosa', 'Pink', 'Magenta']) FAMILY_OF[n] = 'quentes';
+export const COLOR_FAMILIES: { key: ColorFamily; label: string; colors: string[] }[] = (['neutras', 'quentes', 'frias'] as const).map((key) => ({
+  key, label: key === 'neutras' ? 'Neutras' : key === 'quentes' ? 'Quentes' : 'Frias',
+  colors: NAMED_COLORS.filter(([, n]) => (FAMILY_OF[n] ?? 'frias') === key).map(([c]) => c),
+}));
+
+/** Cores que a usuária criou (Configurações › Cores): [cor, nome]. */
+let customColors: [string, string][] = [];
+export function registerCustomColors(list: [string, string][] | undefined) { customColors = list ?? []; }
+export const getCustomColors = () => customColors;
+
 /** Nome da cor ("Azul"); cor fora da paleta → "Personalizada". */
 export function colorName(c?: string | null) {
   if (!c) return '';
-  return NAMED_COLORS.find(([hex]) => hex.toLowerCase() === c.toLowerCase())?.[1] ?? 'Personalizada';
+  const low = c.toLowerCase();
+  return NAMED_COLORS.find(([hex]) => hex.toLowerCase() === low)?.[1]
+    ?? customColors.find(([hex]) => hex.toLowerCase() === low)?.[1] ?? 'Personalizada';
 }
 
 export function normalize(s: string) {

@@ -45,6 +45,8 @@ const CloseDaySheet = lazyRetry(() => import('./screens/CloseDay'));
 const CatalogSheet = lazyRetry(() => import('./screens/Catalog'));
 const BackupSheet = lazyRetry(() => import('./screens/Backup'));
 const SettingsSheet = lazyRetry(() => import('./screens/Settings'));
+const MovementHistorySheet = lazyRetry(() => import('./screens/MovementHistory'));
+const ImportSheet = lazyRetry(() => import('./screens/Import'));
 const TransferSheet = lazyRetry(() => import('./screens/Transfer'));
 const SyncSheet = lazyRetry(() => import('./screens/Sync'));
 
@@ -115,6 +117,8 @@ function Shell() {
         {overlay === 'cadastro' && <CatalogSheet open onClose={close} />}
         {overlay === 'backup' && <BackupSheet open onClose={close} />}
         {overlay === 'config' && <SettingsSheet open onClose={close} />}
+        {overlay === 'movimentos' && <MovementHistorySheet open onClose={close} />}
+        {overlay === 'importar' && <ImportSheet open onClose={close} />}
         {overlay === 'transferir' && <TransferSheet open onClose={close} />}
         {overlay === 'juntar' && <SyncSheet open onClose={close} />}
       </Suspense>
@@ -210,7 +214,7 @@ const tabRef = { current: 'inicio' as Tab };
 
 /** Tudo que não é do dia a dia fica aqui, com nome e explicação. */
 function MenuSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const { setTab, setOverlay } = useApp();
+  const { setTab, setOverlay, openHistory } = useApp();
   if (!open) return null;
   type Item = { icon: string; tint: string; title: string; desc: string; go: () => void; badge?: string };
   const unseen = (() => { try { return localStorage.getItem('changelogSeen') !== LATEST_CHANGE; } catch { return false; } })();
@@ -219,6 +223,8 @@ function MenuSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
       { icon: '✏️', tint: 'bg-blue-100', title: 'Produtos e grupos', desc: 'Criar, renomear, preço e estoque ideal', go: () => setOverlay('cadastro') },
       { icon: '⚡', tint: 'bg-amber-100', title: 'Mostrar meu Pix', desc: 'QR code na tela para a cliente pagar', go: () => setOverlay('pix') },
       { icon: '🗓️', tint: 'bg-indigo-100', title: 'Histórico', desc: 'Dias anteriores e comparar dias', go: () => { setTab('historico'); onClose(); } },
+      { icon: '📋', tint: 'bg-lime-100', title: 'Importar mercadoria', desc: 'Colar uma lista com muitos produtos de uma vez', go: () => setOverlay('importar') },
+      { icon: '📜', tint: 'bg-teal-100', title: 'Histórico de movimentações', desc: 'A vida de cada peça: entradas, vendas, ajustes, quem fez', go: () => openHistory(null) },
     ] },
     { label: 'Seus dados', items: [
       { icon: '🔄', tint: 'bg-sky-100', title: 'Juntar com outro celular', desc: 'Vendeu nos dois? Gera um código e soma tudo', go: () => setOverlay('juntar') },

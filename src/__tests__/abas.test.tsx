@@ -340,7 +340,7 @@ describe('Histórico', () => {
   it('troca de mês, abre um dia e compara', async () => {
     await openAndStart();
     click(screen.getByRole('button', { name: 'Abrir menu' }));
-    click(await screen.findByRole('button', { name: /Histórico/ }));
+    click(await screen.findByRole('button', { name: /Dias anteriores e comparar/ })); // “Histórico” (há também “Histórico de movimentações”)
     await screen.findByText(/Dias registrados em/);
     click(screen.getByRole('button', { name: 'Mês anterior' }));
     await screen.findByText(/Nenhum dia neste mês/);

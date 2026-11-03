@@ -2,6 +2,7 @@ import type { PaymentMethod } from '../db/types';
 import { fmtDate, money, PAYMENT_LABEL } from '../lib/util';
 import { cashStatement, type DaySummary } from './summary';
 import { setPendingParts } from '../lib/pendingParts';
+import { variantLabel } from './catalog';
 
 type Opts = { symbol?: string; title?: string; /** mostrar o estoque de agora (cor por cor) na mensagem do WhatsApp */ showStock?: boolean;
   /** em “Precisa repor”, mostrar “(tem 14 de 15)” ao lado do número */ restockDetail?: boolean;
@@ -140,14 +141,14 @@ export function whatsappReport(date: string, s: DaySummary, opts: Opts = {}) {
 
   // peças que saíram (vendidas)
   section(`🛍️ *O que saiu (${plural(s.soldUnits, 'peça', 'peças')})*`);
-  if (s.soldByVariant.length) L.push(...byGroup(s.soldByVariant, (x) => `Cor ${x.variant.name}: ${x.qty}`, div));
+  if (s.soldByVariant.length) L.push(...byGroup(s.soldByVariant, (x) => `Cor ${variantLabel(x.variant)}: ${x.qty}`, div));
   // vendas copiadas do caderno não dizem a cor
   if (c.notebookUnits) L.push(`• 📒 ${plural(c.notebookUnits, 'peça', 'peças')} do caderno (sem cor anotada)`);
   if (!s.soldByVariant.length && !c.notebookUnits) L.push('• Nenhuma peça vendida');
 
   // entrou
   section(`📦 *Entrou no estoque${s.enteredUnits ? ` (${plural(s.enteredUnits, 'peça', 'peças')})` : ''}*`);
-  if (s.enteredByVariant.length) L.push(...byGroup(s.enteredByVariant, (x) => `Cor ${x.variant.name}: +${x.qty}`, div));
+  if (s.enteredByVariant.length) L.push(...byGroup(s.enteredByVariant, (x) => `Cor ${variantLabel(x.variant)}: +${x.qty}`, div));
   else L.push('• Nenhuma peça');
 
   // repor
@@ -156,17 +157,17 @@ export function whatsappReport(date: string, s: DaySummary, opts: Opts = {}) {
   const soldOut = s.restock.filter((r) => r.out);
   if (toRestock.length) {
     section(`🔁 *Precisa repor (${plural(s.restockUnits, 'peça', 'peças')})*`);
-    L.push(...byGroup(toRestock, (r) => `Cor ${r.variant.name}: ${r.restock}${opts.restockDetail ? ` (tem ${r.item.currentQuantity} de ${r.ideal})` : ''}`, div));
+    L.push(...byGroup(toRestock, (r) => `Cor ${variantLabel(r.variant)}: ${r.restock}${opts.restockDetail ? ` (tem ${r.item.currentQuantity} de ${r.ideal})` : ''}`, div));
   }
   if (soldOut.length) {
     section(`🚫 *Esgotados (${soldOut.length})*`);
-    L.push(...byGroup(soldOut, (r) => `Cor ${r.variant.name}`, div));
+    L.push(...byGroup(soldOut, (r) => `Cor ${variantLabel(r.variant)}`, div));
   }
 
   if (opts.showStock && s.stockNow.length) {
     // o que tem agora, cor por cor; ao lado, o aviso de repor/esgotado (a seção "Precisa repor" continua acima)
     section(`📦 *Estoque agora (${plural(s.totalUnits, 'peça', 'peças')})*`);
-    L.push(...byGroup(s.stockNow, (r) => `Cor ${r.variant.name}: ${opts.stockStartEnd ? `começou ${r.item.initialQuantity} → terminou ${r.item.currentQuantity}` : r.item.currentQuantity}${stockNote(r)}`, div));
+    L.push(...byGroup(s.stockNow, (r) => `Cor ${variantLabel(r.variant)}: ${opts.stockStartEnd ? `começou ${r.item.initialQuantity} → terminou ${r.item.currentQuantity}` : r.item.currentQuantity}${stockNote(r)}`, div));
   } else {
     section(`📊 Estoque no fim do dia: *${plural(s.totalUnits, 'peça', 'peças')}*`);
   }

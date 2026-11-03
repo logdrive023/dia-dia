@@ -6,6 +6,29 @@ export interface ChangeEntry { id: string; date: string; title: string; items: [
 
 export const CHANGELOG: ChangeEntry[] = [
   {
+    id: '2026-11-03a', date: '03/11/2026', title: 'Histórico de movimentações, importação e cadastro mais claro',
+    items: [
+      ['📜', 'Novo: Histórico de movimentações (Menu e Configurações). A vida de cada peça desde o cadastro: começou, entrou, vendeu, reservou, ajustou, quem fez e quanto tem agora'],
+      ['🔎', 'Filtros no histórico: data, grupo, peça, tipo, quem fez e origem (você ou o sistema)'],
+      ['⚠️', 'Se a conta de uma peça não fecha, aparece “Divergência não explicada” (o app não inventa ajuste)'],
+      ['↩️', 'Desfazer pelo histórico mostra antes → depois e pede confirmação; o registro original continua lá'],
+      ['📋', 'Novo: Importar mercadoria. Cole uma lista (grupo, produto, tamanho, quantidade), veja a prévia antes/entrada/depois e confirme'],
+      ['🧾', 'Cada importação fica guardada com o texto colado e dá para desfazer sem mexer nas vendas feitas depois'],
+      ['📦', 'Entrada de estoque: escolha “mercadoria nova” ou “reposição” (o padrão fica em Configurações)'],
+      ['✏️', '“Definir” ou “No estoque hoje” para mais: o app pergunta se chegou mercadoria ou se foi correção da contagem'],
+      ['🎯', 'Estoque ideal mais claro: “Usar estoque ideal?” em cada peça, separado da quantidade real, com prévia antes de mudar'],
+      ['📏', 'Tamanhos (P, M, G…) e tipos de produto (Vestido, Blusa…), opcionais e editáveis em Configurações'],
+      ['🎨', 'Cores separadas em neutras, quentes e frias; dá para criar cores e ícones novos'],
+      ['🛍️', '“Novo produto” direto na aba Vender: entra no cadastro, no estoque de hoje e já à venda'],
+      ['🔒', 'Peça toda reservada aparece como “reservadas” (não mais “sem peça”); no Estoque: físico, reservado e disponível'],
+      ['📌', 'Reservas ativas: dá para recolher a lista e filtrar por grupo, peça ou cliente'],
+      ['🙋', 'Configurações › Seu nome: aparece em cada registro feito por você'],
+      ['🐛', 'Corrigido: cadastrar com quantidade olhando outro dia perdia a quantidade (agora entra sempre no dia de hoje)'],
+      ['🗂️', 'Excluir uma cor não apaga mais o histórico dela'],
+      ['⌨️', 'O teclado não abre mais sozinho na tela de entrada/saída do estoque'],
+    ],
+  },
+  {
     id: '2026-11-02a', date: '02/11/2026', title: 'Cadastro e relatório corrigidos',
     items: [
       ['🗑️', 'Cor arquivada agora tem “Excluir” direto na lista (se já teve vendas, as vendas antigas ficam no histórico)'],

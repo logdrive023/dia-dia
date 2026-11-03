@@ -6,10 +6,13 @@ export const BACKUP_FORMAT = 'ESTOQUE_BACKUP';
 export const BACKUP_VERSION = 1;
 export const TEXT_HEADER = 'ESTOQUE_BACKUP_V1';
 
-const TABLES = [
+const REQUIRED = [
   'groups', 'variants', 'categories', 'dailyRecords', 'dailyStockItems', 'stockMovements', 'orders',
   'sales', 'reservations', 'cashRecords', 'cashMovements', 'settings', 'auditLogs',
 ] as const;
+/** tabelas que vieram depois: backup antigo não tem (vira lista vazia); app antigo ignora */
+const OPTIONAL = ['imports'] as const;
+const TABLES = [...REQUIRED, ...OPTIONAL] as const;
 type TableName = (typeof TABLES)[number];
 
 export interface BackupFile {
@@ -52,13 +55,21 @@ export function backupFileName(d = new Date()) {
 export class BackupError extends Error { name = 'BackupError'; }
 
 export function validateBackup(raw: unknown): BackupFile {
-  const b = raw as BackupFile;
-  if (!b || typeof b !== 'object' || b.format !== BACKUP_FORMAT) throw new BackupError('Arquivo não é um backup deste aplicativo.');
-  if (typeof b.version !== 'number' || b.version > BACKUP_VERSION) throw new BackupError(`Versão de backup não suportada (${b.version}).`);
-  if (!b.data || typeof b.data !== 'object') throw new BackupError('Backup sem dados.');
+  const orig = raw as BackupFile;
+  if (!orig || typeof orig !== 'object' || orig.format !== BACKUP_FORMAT) throw new BackupError('Arquivo não é um backup deste aplicativo.');
+  if (typeof orig.version !== 'number' || orig.version > BACKUP_VERSION) throw new BackupError(`Versão de backup não suportada (${orig.version}).`);
+  if (!orig.data || typeof orig.data !== 'object') throw new BackupError('Backup sem dados.');
+  // conferência: os dados como vieram; backup antigo conferido de novo já com as tabelas opcionais vazias também vale
+  if (orig.checksum && checksum(JSON.stringify(orig.data)) !== orig.checksum) {
+    const without = Object.fromEntries(Object.entries(orig.data).filter(([k, v]) => !((OPTIONAL as readonly string[]).includes(k) && Array.isArray(v) && !v.length)));
+    if (checksum(JSON.stringify(without)) !== orig.checksum) throw new BackupError('Backup corrompido (verificação falhou).');
+  }
+  // cópia completada (o objeto recebido não muda)
+  const b: BackupFile = { ...orig, data: { ...orig.data } };
+  for (const t of OPTIONAL) if (b.data[t] === undefined) b.data[t] = [];
   for (const t of TABLES) {
     if (!Array.isArray(b.data[t])) throw new BackupError(`Backup incompleto: falta "${t}".`);
-    if (b.counts && b.counts[t] !== b.data[t].length) throw new BackupError(`Quantidade de registros não confere em "${t}".`);
+    if (b.counts && b.counts[t] !== undefined && b.counts[t] !== b.data[t].length) throw new BackupError(`Quantidade de registros não confere em "${t}".`);
     const ids = new Set<string>();
     for (const r of b.data[t]) {
       if (!r || typeof r.id !== 'string') throw new BackupError(`Registro sem identificador em "${t}".`);
@@ -66,8 +77,6 @@ export function validateBackup(raw: unknown): BackupFile {
       ids.add(r.id as string);
     }
   }
-  if (b.checksum && checksum(JSON.stringify(b.data)) !== b.checksum) throw new BackupError('Backup corrompido (verificação falhou).');
-
   const ids = (t: TableName) => new Set(b.data[t].map((r) => r.id as string));
   const groups = ids('groups'), variants = ids('variants'), days = ids('dailyRecords'), orders = ids('orders');
   const check = (t: TableName, field: string, set: Set<string>, optional = false) => {

@@ -137,14 +137,16 @@ O app substitui o caderno sem mudar o jeito de pensar:
 ### Menu
 | Item | O que faz |
 |---|---|
-| Produtos e grupos | cadastrar/renomear/ordenar grupos e cores, preço, 44 cores com nome; em cada cor: **📦 No estoque hoje** (corrige a quantidade), **🔁 Precisa repor?**, **📏 Tem estoque mínimo?**, **🎯 Meta**; arquivar e **🗑️ Excluir** (também direto na lista de arquivadas) |
+| Produtos e grupos | cadastrar/renomear/ordenar grupos e produtos, preço, cores (neutras, quentes, frias, minhas cores); novo produto com **tipo**, **tamanhos** (cada um com a sua quantidade), **quantidade real**, **à venda** e **usar estoque ideal?**; em cada produto: **📦 No estoque hoje** (sobe? pergunta se chegou mercadoria ou se é correção), tipo, tamanho, **🎯 Usar estoque ideal (repor)?**, **📏 Tem estoque mínimo?**, **🎯 Estoque ideal** (com prévia), **📜 Histórico desta peça**; arquivar e **🗑️ Excluir** (o histórico fica) |
+| Importar mercadoria | colar uma lista com muitos produtos, prévia antes/entrada/depois, confirmar; importações feitas com o texto original e **desfazer** (ver 4.18) |
+| Histórico de movimentações | a vida de cada peça desde o cadastro, com filtros e desfazer (ver 4.17) |
 | Mostrar meu Pix | QR code do Pix na tela (valor opcional), copiar código, onde conferir (Neon/iPhone) |
 | Histórico | calendário do mês, resumo do mês, melhor dia, cartões por dia, comparar dois dias |
 | Juntar com outro celular | gera código com tudo / cola o código do outro e **soma** |
 | Passar para outro celular | arquivo ou texto com tudo e **substitui** no outro (troca de aparelho) |
 | Backup | cópia em arquivo ou texto, restaurar, planilhas CSV, “voltar como estava” |
 | Atualizações | o que mudou em cada versão (selo “Novo” até abrir) |
-| Configurações | formas de pagamento, moeda, **sua diária** e diária automática, lembrete de backup, título do relatório, **dados protegidos** (status, teste de gravação, espaço), verificar dados, **recomeçar** (dados iniciais ou do zero) |
+| Configurações | **Histórico de movimentações**, **seu nome**, **entrada padrão** (mercadoria nova ou reposição), **tipos de produto**, **tamanhos**, **minhas cores e ícones**, formas de pagamento, moeda, **sua diária** e diária automática, lembrete de backup, título do relatório, **dados protegidos** (status, teste de gravação, espaço), verificar dados, **recomeçar** (dados iniciais ou do zero) |
 | Sobre | “Feito com amor, pelo seu amor 🥰” |
 
 ---
@@ -179,6 +181,15 @@ Nem tudo que está no estoque está à venda. Cada cor tem `forSale` (padrão: �
 pode ser vendida/reservada (exceto convertendo uma reserva que já existia). **Grupo novo**: a primeira cor já nasce à venda
 e o grupo entra em ⭐ Para vender.
 
+### 4.4b Entrada: mercadoria nova × reposição
+- Toda entrada diz o tipo (`entryKind`): **📦 mercadoria nova** (peça que a loja ainda não tinha) ou **🔁 reposição**. O padrão
+  vem de Configurações › Entrada de estoque; em cada entrada dá para escolher o outro.
+- **Definir** (Estoque) e **No estoque hoje** (cadastro) para MAIS: a tela pergunta o motivo — chegou mercadoria (vira
+  **entrada**, conta em “Entrou hoje”) ou correção da contagem (vira **ajuste**). Para menos: sempre ajuste. Ajuste nunca é venda.
+- **Cadastro com quantidade** entra sempre no estoque de **hoje** (não no dia que está aberto na tela); sem o dia de hoje
+  iniciado, avisa. A quantidade do cadastro é o estoque com que a peça começa (não é “Entrou”).
+- **Quem fez**: cada movimento, venda, reserva, cadastro, alteração e importação guarda o nome de Configurações › Seu nome (`by`).
+
 ### 4.5 Estoque ideal e “repor” (configurado em cada cor)
 Uma regra só (`restockOf` em `summary.ts`), usada no Início, no Estoque e no WhatsApp:
 
@@ -196,7 +207,7 @@ Uma regra só (`restockOf` em `summary.ts`), usada no Início, no Estoque e no W
 
 ### 4.5b Arquivar e excluir
 - **Arquivar**: some do Vender, do Estoque e do **relatório** (Entrou, Repor, total do estoque); dá para reativar.
-- **Excluir** (também direto na lista de arquivadas): nunca vendida → apaga de vez; já vendida → some de tudo, mas as vendas antigas continuam no histórico com o nome.
+- **Excluir** (também direto na lista de arquivadas): some de tudo (cadastro, estoque, vender, relatório), mas **nunca apaga registros**: movimentos, vendas, reservas e o estoque de cada dia continuam no Histórico de movimentações (`deletedAt`).
 
 ### 4.6 Reservas
 Reserva separa peças para uma cliente: **disponível = estoque − reservado**. Vale para o dia da reserva e os seguintes.
@@ -303,6 +314,37 @@ Cada celular guarda os próprios dados. **Juntar** soma os dois:
 - **Outros apps** (`shareText`): abre o compartilhar do aparelho; sem ele (comum no computador), **copia** o texto e avisa.
   Não usa mais o link `wa.me`.
 
+### 4.17 Histórico de movimentações
+- Menu › Histórico de movimentações (também em Configurações e nos atalhos “📜” do Estoque, do Vender e do cadastro).
+- Montado **só com o que está gravado** (`services/history.ts`): estoque de cada dia, movimentos, auditoria. Tipos: estoque
+  inicial, entrada (nova / reposição / antiga sem tipo), importação, venda, reserva, cancelamento, ajuste manual, saída,
+  perda, desfazimento, alteração no cadastro.
+- **Origem**: 🙋 usuária (à mão), 🤖 sistema (efeito de venda/reserva), 🕰️ registro antigo (de antes de guardar quem fez).
+- **Linha do tempo** da peça, dia a dia: começou → registros → terminou. Se a conta não fecha (ou o dia começou diferente do
+  que o anterior terminou): **⚠️ Divergência não explicada** com a diferença — o app nunca cria ajuste para “fechar”.
+- Filtros: período (hoje por padrão), grupo, produto, tipo, pessoa, origem. Cada registro abre: antes → movimentou → depois,
+  quem, referência (venda, importação, registro desfeito), motivo.
+- **Desfazer** (entrada, saída, perda, ajuste): mostra antes → depois, pede confirmação, cria um movimento inverso ligado ao
+  original (o original fica). Movimento de dia encerrado: o desfazimento entra no dia de **hoje**. Venda: cancele a venda.
+
+### 4.18 Importar mercadoria
+- Menu › Importar mercadoria (e botão “📋 Importar” no Estoque). `services/importer.ts`.
+- Texto: grupo numa linha e “Produto: quantidade” embaixo; tamanho com “Verde · P: 2” ou “Verde (P): 2”; numa linha só
+  “Lila > Rosa > M > 4” (também “;”, “|” ou tab). “📋 Copiar o modelo” traz o catálogo pronto.
+- **Prévia** (nada gravado): já existe / novo / grupo novo / **parecido** (escolher: é o existente ou é novo — nunca duplica) /
+  erro, com antes, entrada e depois. Opções: **somar** (entrada nova ou reposição) ou **definir** (contagem); produto novo à
+  venda ou só no estoque.
+- Confirmar: uma transação só; cria os produtos (origem “importação”), lança as entradas (`importId`) e guarda o registro
+  em `imports` (texto original, quem, quando, cada linha antes/mudou/depois).
+- **Desfazer**: prévia linha a linha; movimento inverso ligado a cada entrada. Linha que não dá (vendeu depois, reservas) fica
+  como está e o motivo é guardado (“desfeita em parte”). As vendas feitas depois nunca são mexidas.
+
+### 4.19 Tamanhos, tipos, cores e ícones
+- **Tamanho** (`Variant.size`, opcional): cada tamanho é uma linha própria (Azul · P, Azul · M) → estoque, venda, reserva,
+  importação, filtros, relatório e histórico funcionam igual. Mesmo nome com outro tamanho pode; mesmo nome e tamanho, não.
+- **Tipo de produto** (`Variant.productType`, opcional). Listas de tamanhos e tipos editáveis em Configurações.
+- Cores em **neutras, quentes, frias** e **minhas cores** (criadas em Configurações); ícones extras para os grupos.
+
 ---
 
 ## 5. Tecnologia e por que cada escolha
@@ -353,7 +395,8 @@ dia-dia/
    │  ├─ changelog.ts             lista do Menu › Atualizações
    │  ├─ updateState.ts           situação da versão (selo do cabeçalho)
    │  ├─ applyUpdate.ts           botão Atualizar: ativa a versão nova e recarrega sempre
-   │  └─ pendingParts.ts          partes da mensagem que faltam mandar (“Mandar parte 2”)
+   │  ├─ pendingParts.ts          partes da mensagem que faltam mandar (“Mandar parte 2”)
+   │  └─ actor.ts                 quem está usando (Configurações › Seu nome), gravado em cada registro
    ├─ services/                   REGRAS (sem tela): tudo testável
    │  ├─ days.ts                  iniciar/desfazer/encerrar/reabrir dia, encerrar sozinho na virada, movimentos de estoque, desfazer, dias do caderno, conserto do cadastro antigo
    │  ├─ sales.ts                 vendas, pagamento por peça, cancelar, corrigir valor, trocar peça, reservas, Pix conferido
@@ -361,6 +404,8 @@ dia-dia/
    │  ├─ summary.ts               contas: caixa de todos os dias, resumo do dia, linhas da conta, estoque com repor (`restockOf`), estoque de agora
    │  ├─ catalog.ts               grupos e cores (criar, renomear, ordenar, arquivar, excluir, à venda/guardada, repor/mínimo)
    │  ├─ report.ts                relatório WhatsApp e caderno, tamanho, partes, copiar + abrir o WhatsApp, compartilhar
+   │  ├─ history.ts               histórico de movimentações: vida de cada peça, divergências, filtros
+   │  ├─ importer.ts              importar mercadoria: ler o texto, prévia, aplicar, desfazer, modelo
    │  ├─ backup.ts                backup/restauração, texto comprimido em partes, recomeçar
    │  ├─ sync.ts                  juntar celulares (mesclar dois bancos) e lista de apagados
    │  ├─ storage.ts               armazenamento permanente e teste de gravação
@@ -372,9 +417,10 @@ dia-dia/
    │  ├─ ui.tsx                   botões, cartões, janelas (Sheet), tooltips com exemplo, escolha de cor, avisos
    │  ├─ day.tsx                  barra de dias, iniciar o dia, avisos do dia
    │  ├─ StockFlow.tsx            “começou X → agora Y” (mesmo visual em todo lugar)
+   │  ├─ EntryReason.tsx          escolha: mercadoria nova / reposição / correção da contagem
    │  └─ Pix.tsx                  QR do Pix e janela “Meu Pix”
    ├─ screens/                    uma por tela/janela (Home, Sell, Stock, Cash, CloseDay, History, Catalog, Settings,
-   │                              Backup, Transfer, Sync)
+   │                              Backup, Transfer, Sync, MovementHistory, Import)
    └─ __tests__/                  testes (ver seção 10)
 ```
 
@@ -385,23 +431,24 @@ sem tela, e a mesma regra vale em todo lugar.
 
 ## 7. Banco de dados
 
-IndexedDB (via Dexie), nome `dia-dia`, versão 2. Índices:
+IndexedDB (via Dexie), nome `dia-dia`, versão 3 (v2 acrescentou `safety`; v3 acrescentou `imports` — nada existente mudou). Índices:
 
 | Tabela | Índices | Para quê |
 |---|---|---|
 | `groups` | id, displayOrder, active | grupos (Plomo, Lila…) |
-| `variants` | id, groupId, displayOrder, active | cores de cada grupo (`forSale`, `idealStock` = meta, `minimumStock`, `restockOff`, `startQuantity`, `color`, `archivedAt`, `deletedAt`) |
+| `variants` | id, groupId, displayOrder, active | cores/produtos de cada grupo (`forSale`, `idealStock` = meta, `minimumStock`, `restockOff`, `startQuantity`, `color`, `size`, `productType`, `origin`, `createdBy`, `archivedAt`, `deletedAt`) |
 | `categories` | id, displayOrder | etiquetas |
 | `dailyRecords` | id, **&date** (único), status | um registro por dia (aberto/encerrado, `autoClosedAt`, `reopenedAt`) |
 | `dailyStockItems` | id, dailyRecordId, variantId, **&[dailyRecordId+variantId]** | estoque de cada cor em cada dia |
-| `stockMovements` | id, dailyRecordId, variantId, type, createdAt, orderId | todo movimento de estoque |
+| `stockMovements` | id, dailyRecordId, variantId, type, createdAt, orderId | todo movimento de estoque (`entryKind` nova/reposição, `by` quem fez, `importId`, `reversedMovementId`) |
 | `orders` | id, dailyRecordId, createdAt | vendas (`payments`, `payByLine`, `pixConfirmedAt/Cents`) |
 | `sales` | id, orderId, dailyRecordId, variantId, createdAt | peças de cada venda (preço, forma) |
 | `reservations` | id, dailyRecordId, variantId, status | reservas |
 | `cashRecords` | id, **&dailyRecordId** | caixa do dia (ontem digitado, contado, `dailyPayDone`) |
 | `cashMovements` | id, dailyRecordId, type, relatedOrderId, createdAt | todo lançamento de caixa (`venda`, `entrada`, `dar`, `despesa`, `retirada`, `pagamento`, `estorno`) |
 | `settings` | id, **&key** | configurações (inclusive as chaves do relatório: `reportShowStock`, `reportStockStartEnd`, `reportRestockDetail`, `reportTotals`, `reportDividers`, `reportSplit`), marcas (`seedDone`, `migrCadastroV1`), lista de apagados (`tombstones`) |
-| `auditLogs` | id, entityType, entityId, createdAt | auditoria |
+| `auditLogs` | id, entityType, entityId, createdAt | auditoria (com `by`); vira “alteração no cadastro” no histórico |
+| `imports` | id, createdAt | importações: texto original, quem, quando, linhas antes/mudou/depois, situação (aplicada, desfeita, em parte) |
 | `safety` | id | cópia de segurança para “Voltar como estava” |
 
 Campos novos são opcionais (não exigem migração). Mudança de índice exige **nova versão** em `db.ts`.
@@ -476,7 +523,7 @@ HOJE=2028-07-15 npm test
 O setup também: banco em memória (`fake-indexeddb`), espera de até 10 s pelas telas (GitHub é lento), simula download de arquivo no jsdom.
 Configuração (`vite.config.ts`): 60 s por teste, **um arquivo por vez** (os testes pesados não atrasam os de tela).
 
-### Arquivos de teste (176 testes + 2 com dados reais = 178)
+### Arquivos de teste (195 testes + 4 com dados reais = 199)
 
 | Arquivo | Testes | O que garante |
 |---|---|---|
@@ -499,6 +546,7 @@ Configuração (`vite.config.ts`): 60 s por teste, **um arquivo por vez** (os te
 | `troca.test.ts` | 2 | trocar peça vendida + backtest (estoque cor por cor) |
 | `tela.test.tsx` | 2 | um dia completo pela tela (iniciar, vender, lançar, encerrar, relatório copiado) |
 | `rolagem.test.ts` | 2 | impede `overflow` em html/body (travava a rolagem no Android) e altura das janelas |
+| `cenarios.test.tsx` | 19 + 2 real | os 9 cenários de 03/11: divergência, venda, reposição, ajuste, reserva, importação, produto criado no Vender, dia fechado, reversões; bugs do cadastro e do excluir; backup antigo; **dados reais**: 0 divergências e a “Celeste 7” explicada |
 | `ajustes.test.tsx` | 11 | venda no meio na meia-noite (espera e fica no dia certo), juntar (dia encerrado/reaberto e chaves: vale o último), mínimo ≤ meta, Outros apps copia, código do Juntar = backup, partes guardadas no aparelho, aviso de dia reaberto, 📅 calendário abre |
 
 ### Testar com os dados reais do celular

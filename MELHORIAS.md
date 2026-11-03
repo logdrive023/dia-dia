@@ -1,8 +1,8 @@
 # Melhorias de lógica — Dia a Dia
 
 Histórico das revisões e correções, da primeira revisão (31/10/2026, commit `0c5243d`, 61 testes) até o uso real no celular
-(02/11/2026: **167 testes** passando, inclusive com os dados reais do celular). ✅ = corrigido no código.
-As rodadas estão em ordem; a mais nova é a **Rodada 4** no fim. Como o sistema funciona hoje: `SISTEMA.md`.
+(03/11/2026: **199 testes** passando, inclusive com os dados reais do celular). ✅ = corrigido no código.
+As rodadas estão em ordem; a mais nova é a **Rodada 5** no fim. Como o sistema funciona hoje: `SISTEMA.md`.
 
 Prioridade: 🔴 corrigir já · 🟠 importante · 🟡 melhoria · ⚪ manutenção
 
@@ -528,3 +528,92 @@ correção com teste. Tudo também aparece para a usuária em **Menu › Atualiz
 ### Testes
 - **177 testes** (175 + 2 com dados reais), também rodando em outra data (`HOJE=2027-03-01`). Lista completa em `SISTEMA.md`,
   seção 10.
+
+---
+
+## Rodada 5 — estoque × vendas, histórico, importação e cadastro (03/11/2026) — ✅
+
+Pedido: evoluir o app a partir do uso real (prints e 3 arquivos “Passar para outro celular” de 03/11, às 02:18, 03:11 e 03:28),
+sem reconstruir nada, sem inventar movimentação e sem mexer em dia fechado.
+
+### Fase 1 — investigação com os dados reais (antes de corrigir)
+Conferência completa dos 3 arquivos (estoque de cada dia, movimentos, vendas, reservas, dia encerrado):
+- **Os dados estavam íntegros**: em todas as cores, começou + movimentos = agora; começou de hoje = terminou de ontem;
+  toda venda tem exatamente uma saída; nada duplicado; o dia 02/11 (encerrado) não foi mexido depois de fechar.
+
+| O que a usuária viu | Causa real | Correção |
+|---|---|---|
+| “Azul Celeste: 7 no início, saiu 4, final 3 ou 4” | É **Plomo Celeste**: cadastrada com **3**; o **estoque ideal** foi posto em **7** (02:01 e 02:03) → a tela mostrou “repor 4”, lido como “saíram 4”; depois foi **arquivada e recriada** com 7. Nenhum movimento faltando | Estoque ideal separado e explicado (“não é estoque”), prévia antes de mudar, o histórico mostra a alteração cadastral |
+| Renda blanco/negro “começou 1, agora 2 ▲+1” | Mesmo padrão: quantidade posta no campo da meta, depois arquivar e recriar | Cadastro novo com “Quantidade real” e “Estoque ideal” separados |
+| Terracota “Início do dia 0” | 🐛 o cadastro usava o dia **selecionado na tela**; olhando outro dia (encerrado), a quantidade sumia sem aviso | Cadastro sempre no dia de **hoje**; sem o dia de hoje iniciado, avisa |
+| Movimentos do dia “+113 Ajustes” | Mercadoria que chegou (25 cores, 02:47–03:04) foi lançada pelo “Definir” / “No estoque hoje” → registrada como **ajuste**, não entrada | Subir a quantidade pergunta: mercadoria nova, reposição ou correção da contagem |
+| Vino e Azul “sem peça” | Estoque 1 com 1 reservada; a tela não dizia “reservada” | “🔒 reservadas”; o Estoque mostra físico / reservado / disponível |
+| 20 cores somem entre o 2º e o 3º arquivo | 🐛 “Excluir” de cor nunca vendida **apagava os movimentos** (16) | Excluir nunca apaga: some das telas, o histórico fica |
+| Plomo Rojo −2 | Venda real de 2 às 02:28 | — (correto) |
+
+### Fase 2 — integridade
+- Cadastro com quantidade entra no dia de **hoje** (`createVariant({ intoToday })`); sem o dia de hoje: aviso.
+- Entrada com tipo: **mercadoria nova** ou **reposição** (`StockMovement.entryKind`); padrão em Configurações › Entrada de estoque.
+- “Definir” / “No estoque hoje” para mais pergunta o motivo; “chegou mercadoria” vira **entrada**, “correção” continua **ajuste**.
+- **Quem fez**: Configurações › Seu nome → `by` em movimentos, vendas, reservas, cadastro, auditoria e importação.
+  Origem no histórico: 🙋 usuária (à mão), 🤖 sistema (efeito de venda ou reserva), 🕰️ registro antigo (sem a informação).
+- **Excluir** é sempre “esconder” (`deletedAt`): movimentos, vendas e estoque de cada dia continuam.
+- **Dia fechado**: todos os serviços de escrita já recusavam (`assertOpen`). Desfazer um movimento de um dia encerrado agora
+  cria a correção **no dia de hoje**, ligada ao original (o dia encerrado não muda).
+- O teclado não abre mais sozinho na folha de entrada/saída do Estoque (print 4).
+
+### Fase 3 — Histórico de movimentações (Menu e Configurações)
+- `services/history.ts` monta a vida de cada peça só com o que já está gravado (estoque de cada dia, movimentos, auditoria).
+- Linha do tempo por dia: começou → registros → terminou; **divergência não explicada** quando a conta não fecha ou o dia
+  começou diferente do que o anterior terminou (mostrada, nunca “corrigida”).
+- Filtros: período (hoje por padrão, 7 e 30 dias, tudo, datas), grupo, produto, tipo, pessoa, origem.
+- Cada registro abre os detalhes: data/hora, antes → movimentou → depois, origem, quem, referência (venda, importação,
+  registro desfeito), motivo; **desfazer** com prévia antes → depois e confirmação (venda se cancela pela própria venda).
+- Atalhos: “📜 Histórico desta peça” no Estoque e no cadastro; o nome da peça no Vender abre o histórico dela.
+
+### Fase 4 — Importar mercadoria (Menu e Estoque)
+- Formatos: grupo numa linha + “Produto: quantidade”; com tamanho (“Verde · P: 2”, “Verde (P): 2”); numa linha
+  (“Lila > Rosa > 4”, com “;”, “|” ou tab); aceita o próprio relatório do WhatsApp (“• Cor Azul: 2 …”).
+- **Prévia obrigatória**: existentes, novos, grupos novos, “parecidos” (precisa escolher: é o existente ou é novo — nunca
+  duplica), erros por linha, antes / entrada / depois e o texto colado. Nada é gravado antes de confirmar.
+- Operação: **somar** (entrada nova ou reposição) ou **definir** (contagem); produto novo à venda ou só no estoque.
+- Aplicar é uma transação só (tudo ou nada); fica um registro em **`imports`** com o texto original, quem, quando, cada
+  linha (antes, mudou, depois, criado) e as movimentações geradas (`importId`).
+- **Desfazer**: prévia linha a linha; cada linha ganha um movimento inverso ligado ao original. Se depois da importação
+  houve venda ou saída que impede (ou reservas), a linha fica como está e o motivo é guardado (“desfeita em parte”).
+- “Copiar o modelo”: o catálogo atual pronto, só faltando as quantidades.
+
+### Fase 5 — cadastro e experiência
+- Novo formulário: grupo · nome e cor · **tipo** (opcional) · **tamanhos** (opcional, cada um com a sua quantidade) ·
+  **quantidade real** · **à venda** ou só estoque · **usar estoque ideal?** com a meta separada (“não é estoque”).
+- Tamanho é um campo da cor (`Variant.size`): cada tamanho é uma linha própria → estoque, vendas, reservas, importação,
+  filtros e histórico funcionam sem mudar a estrutura. Mesmo nome com tamanho diferente pode; mesmo nome e tamanho, não.
+- Tipos de produto, tamanhos, cores e ícones editáveis em Configurações; cores em **neutras, quentes, frias** + “Minhas cores”.
+- Estoque ideal: “🎯 Usar estoque ideal (repor)?” por peça; editar a meta mostra a prévia (o real continua N, repor vira X).
+- Filtros “🎯 Com ideal / Sem ideal” no Estoque e no Vender; filtro de tamanho no Vender; “🔒 Reservadas” no Estoque.
+- **Novo produto pela aba Vender** (origem “vender”): entra no cadastro, no estoque de hoje e à venda.
+- Reservas ativas: recolher (lembra no aparelho) e filtrar por grupo e por peça, cor, tamanho ou cliente.
+
+### Armazenamento e migração (não destrutiva)
+- Banco **versão 3**: só acrescenta a tabela `imports` (nada existente muda).
+- Campos novos, todos opcionais: `StockMovement.entryKind / by / importId`, `Variant.origin / createdBy / size / productType`,
+  `Order.by`, `Reservation.by`, `AuditLog.by`. Registro antigo sem eles aparece como “registro antigo” — nada é inventado.
+- Backup: `imports` é **opcional** (backup antigo abre; app antigo ignora a tabela nova). A conferência (checksum) não altera o
+  backup recebido e aceita conferir duas vezes (as telas Backup e Passar conferem e depois restauram).
+- Juntar celulares leva as importações pelo id (não duplica).
+
+### Testes (todos passando)
+- **199 testes** (195 + 4 com dados reais), também em outra data (`HOJE=2027-03-01`) e com o backup antigo de 02/11.
+- `cenarios.test.tsx` (21): os 9 cenários pedidos — divergência (explicada; inventada nunca; entre dias), venda 10→8 com
+  referência, reposição 8→13, ajuste 10→7 que não é venda, “Definir” que vira entrada, reserva 5/2/3 e cancelamento,
+  “reservadas” no Vender, importação (formatos, prévia, confirmar, vender depois, desfazer respeitando a venda,
+  “parecido” sem duplicar), produto criado no Vender pela tela, dia fechado intacto com desfazer no dia de hoje,
+  reversões; os bugs de cadastro e de excluir; compatibilidade de backup; **dados reais**: 0 divergências e a “Celeste 7”
+  explicada pela linha do tempo.
+
+### Pendências e pontos de atenção
+- **Não testado no celular**: as telas novas (Histórico, Importar, novo cadastro) foram conferidas no navegador do computador.
+- Desfazer importação “em parte” não tira só um pedaço de uma linha: a linha inteira fica como está, com o motivo.
+- Tipo de produto ainda não tem filtro próprio nas telas.
+- Os 16 movimentos apagados pelo “Excluir” antigo (entre 03:11 e 03:28 de 03/11) não podem ser recuperados.
+- Juntar celulares com versões diferentes do app: o celular sem esta versão ignora as importações do outro.

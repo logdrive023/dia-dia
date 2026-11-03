@@ -22,12 +22,63 @@ function Section({ icon, title, tip, children }: { icon: string; title: string; 
   );
 }
 
+/** Lista que a usuária edita (tipos, tamanhos, ícones): toca no × para tirar, escreve e “Acrescentar”. */
+function ListEditor({ items, onChange, placeholder, label, upper }: { items: string[]; onChange: (l: string[]) => void; placeholder: string; label: string; upper?: boolean }) {
+  const [t, setT] = useState('');
+  const add = () => {
+    const v = (upper ? t.toUpperCase() : t).trim().slice(0, 20);
+    if (!v || items.some((x) => x.toLowerCase() === v.toLowerCase())) { setT(''); return; }
+    onChange([...items, v]); setT('');
+  };
+  return (
+    <div>
+      <div className="flex flex-wrap gap-1.5 mb-2" aria-label={label}>
+        {items.map((x) => (
+          <span key={x} className="inline-flex items-center gap-1 rounded-full bg-slate-100 border border-slate-200 pl-2.5 pr-1 h-8 text-[14px] font-semibold text-slate-700">
+            {x}<button onClick={() => onChange(items.filter((y) => y !== x))} aria-label={`Tirar ${x}`} className="w-6 h-6 rounded-full text-slate-500 active:bg-slate-200">×</button>
+          </span>
+        ))}
+        {!items.length && <span className="text-[13px] text-slate-400">Nenhum ainda.</span>}
+      </div>
+      <div className="flex gap-2">
+        <Input value={t} onChange={(e) => setT(e.target.value)} placeholder={placeholder} aria-label={`Novo: ${label}`} onKeyDown={(e) => e.key === 'Enter' && add()} />
+        <Button variant="outline" disabled={!t.trim()} onClick={add}>Acrescentar</Button>
+      </div>
+    </div>
+  );
+}
+
+/** Cores da usuária: escolhe a cor e dá um nome (aparece em “Minhas cores” no cadastro). */
+function CustomColors({ list, onChange }: { list: [string, string][]; onChange: (l: [string, string][]) => void }) {
+  const [hex, setHex] = useState('#7c3aed');
+  const [name, setName] = useState('');
+  return (
+    <div>
+      <div className="flex flex-wrap gap-1.5 mb-2">
+        {list.map(([c, n]) => (
+          <span key={c} className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 border border-slate-200 pl-1 pr-1 h-8 text-[14px] font-semibold text-slate-700">
+            <span className="w-6 h-6 rounded-full border border-slate-300" style={{ background: c }} />{n}
+            <button onClick={() => onChange(list.filter(([x]) => x !== c))} aria-label={`Tirar ${n}`} className="w-6 h-6 rounded-full text-slate-500 active:bg-slate-200">×</button>
+          </span>
+        ))}
+        {!list.length && <span className="text-[13px] text-slate-400">Nenhuma ainda.</span>}
+      </div>
+      <div className="flex gap-2 items-center">
+        <input type="color" value={hex} onChange={(e) => setHex(e.target.value)} aria-label="Escolher a cor" className="w-12 h-11 rounded-lg border border-slate-200 bg-white p-1" />
+        <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Nome (ex.: Verde água)" aria-label="Nome da cor" />
+        <Button variant="outline" disabled={!name.trim()} onClick={() => { onChange([...list.filter(([x]) => x.toLowerCase() !== hex.toLowerCase()), [hex, name.trim().slice(0, 24)]]); setName(''); }}>Acrescentar</Button>
+      </div>
+    </div>
+  );
+}
+
 /** Configurações: tudo salva na hora (igual ao resto do app), com explicação e exemplo em cada parte. */
 export default function SettingsSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const { settings } = useApp();
+  const { settings, openHistory } = useApp();
   const { run, toast } = useUi();
   const [symbol, setSymbol] = useState(settings.currencySymbol);
   const [title, setTitle] = useState(settings.reportTitle);
+  const [userName, setUserName] = useState(settings.userName);
   if (!open) return null;
   const saved = () => toast('Salvo');
   const [pay, setPay] = useState(money(settings.dailyPayInCents));
@@ -37,6 +88,7 @@ export default function SettingsSheet({ open, onClose }: { open: boolean; onClos
     if (c !== settings.dailyPayInCents) run(() => setSetting('dailyPayInCents', c)).then(saved);
   };
   const saveSymbol = () => { if (symbol.trim() !== settings.currencySymbol) run(() => setSetting('currencySymbol', symbol.trim().slice(0, 4))).then(saved); };
+  const saveUser = () => { const t = userName.trim().slice(0, 40); if (t !== settings.userName) run(() => setSetting('userName', t)).then(saved); };
   const saveTitle = () => { const t = title.trim().slice(0, 30) || 'Check List'; if (t !== settings.reportTitle) run(() => setSetting('reportTitle', t)).then(saved); };
   const toggleMethod = (p: PaymentMethod, on: boolean) => {
     const list = on ? PAYMENTS.filter((x) => x === p || settings.paymentMethods.includes(x)) : settings.paymentMethods.filter((x) => x !== p);
@@ -48,10 +100,68 @@ export default function SettingsSheet({ open, onClose }: { open: boolean; onClos
   };
 
   return (
-    <Sheet open onClose={() => { saveSymbol(); saveTitle(); onClose(); }} title="⚙️ Configurações" tall>
+    <Sheet open onClose={() => { saveSymbol(); saveTitle(); saveUser(); onClose(); }} title="⚙️ Configurações" tall>
       <div className="flex items-center gap-2 rounded-xl bg-emerald-50 border border-emerald-200 px-3 py-2 mb-4 text-[13px] text-emerald-800">
         <span>✓</span><span className="flex-1">Tudo aqui <b>salva sozinho</b> assim que você muda.</span>
       </div>
+
+      <Section icon="📜" title="Histórico de movimentações" tip={
+        <InfoTip title="Histórico de movimentações" example={[
+          ['🌅', 'Azul Celeste: começou com 7'],
+          ['✏️', 'Ajuste manual −3 · por Ana'],
+          ['🌙', 'Terminou com 4'],
+          ['⚠️', 'Se a conta não fecha e não há registro: “Divergência não explicada”'],
+        ]}>A vida de cada peça desde o cadastro, com filtros por data, grupo, peça, tipo e quem fez.</InfoTip>}>
+        <Button className="w-full" variant="outline" onClick={() => openHistory(null)}>📜 Abrir o histórico</Button>
+      </Section>
+
+      <Section icon="🙋" title="Seu nome" tip={
+        <InfoTip title="Seu nome" example={[
+          ['✏️', <>Escreva <b>“Ana”</b></>],
+          ['📜', <>No Histórico de movimentações: “Ajuste manual · <b>Ana</b>”, “Entrada · <b>Ana</b>”</>],
+          ['🤖', 'O que o app faz sozinho (saída de uma venda, reserva) aparece como “Sistema”'],
+        ]}>Aparece em cada registro feito por você. Registros antigos ficam como “registro antigo”.</InfoTip>}>
+        <Input value={userName} onChange={(e) => setUserName(e.target.value)} onBlur={saveUser} placeholder="Ex.: Ana" aria-label="Seu nome" />
+      </Section>
+
+      <Section icon="📥" title="Entrada de estoque" tip={
+        <InfoTip title="Mercadoria nova × reposição" example={[
+          ['📦', <><b>Mercadoria nova:</b> peça que a loja ainda não tinha</>],
+          ['🔁', <><b>Reposição:</b> mais peças de algo que já vende</>],
+          ['👆', 'Aqui é só o padrão: em cada entrada dá para escolher o outro'],
+        ]}>Define o que vem marcado no “+” e na “Entrada” do Estoque.</InfoTip>}>
+        <Toggle checked={settings.entryNewByDefault} onChange={(v) => run(() => setSetting('entryNewByDefault', v)).then(saved)}
+          label={settings.entryNewByDefault ? 'Entrada é mercadoria nova (padrão)' : 'Entrada é reposição (padrão)'} />
+      </Section>
+
+      <Section icon="👗" title="Tipos de produto" tip={
+        <InfoTip title="Tipos de produto" example={[
+          ['👗', 'Vestido, Macacão, Blusa, Calça, Saia… (você acrescenta e tira)'],
+          ['🏷️', 'No cadastro de cada produto dá para escolher o tipo (opcional)'],
+          ['🧰', 'Serve para qualquer loja: ex.: Caneca, Camiseta, Bolsa'],
+        ]}>Não é obrigatório: produto sem tipo continua normal.</InfoTip>}>
+        <ListEditor label="Tipos de produto" items={settings.productTypes} placeholder="Ex.: Shorts" onChange={(l) => run(() => setSetting('productTypes', l)).then(saved)} />
+      </Section>
+
+      <Section icon="📏" title="Tamanhos" tip={
+        <InfoTip title="Tamanhos" example={[
+          ['📏', 'P, M, G, GG, XG… (você acrescenta e tira; ex.: 36, 38, Único)'],
+          ['👕', 'Camiseta Azul: P 5 · M 10 · G 5 → cada tamanho tem o próprio estoque'],
+          ['🧾', 'Aparece no estoque, nas vendas, nas reservas, na importação e no histórico'],
+        ]}>Opcional: produto sem tamanho continua normal.</InfoTip>}>
+        <ListEditor upper label="Tamanhos" items={settings.sizes} placeholder="Ex.: 38" onChange={(l) => run(() => setSetting('sizes', l)).then(saved)} />
+      </Section>
+
+      <Section icon="🎨" title="Minhas cores e ícones" tip={
+        <InfoTip title="Cores e ícones" example={[
+          ['🎨', 'Cores novas aparecem em “Minhas cores” no cadastro'],
+          ['✨', 'Ícones novos aparecem na escolha do ícone do grupo'],
+        ]}>As cores que já vêm no app ficam separadas em neutras, quentes e frias.</InfoTip>}>
+        <div className="text-[13px] font-semibold text-slate-700 mb-1.5">Cores</div>
+        <CustomColors list={settings.customColors} onChange={(l) => run(() => setSetting('customColors', l)).then(saved)} />
+        <div className="text-[13px] font-semibold text-slate-700 mb-1.5 mt-3">Ícones (cole um emoji)</div>
+        <ListEditor label="Ícones" items={settings.customIcons} placeholder="Ex.: 🧥" onChange={(l) => run(() => setSetting('customIcons', l)).then(saved)} />
+      </Section>
 
       <Section icon="💳" title="Formas de pagamento" tip={
         <InfoTip title="Formas de pagamento" example={[

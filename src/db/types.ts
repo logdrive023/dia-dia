@@ -45,6 +45,14 @@ export interface Variant {
   notes?: string;
   createdAt: string;
   updatedAt: string;
+  /** de onde veio o cadastro (antigos: sem) */
+  origin?: 'cadastro' | 'vender' | 'importacao' | null;
+  /** quem cadastrou */
+  createdBy?: string | null;
+  /** tamanho (opcional): P, M, G… Cada tamanho é uma linha própria no estoque (Azul · P, Azul · M) */
+  size?: string | null;
+  /** tipo de produto (opcional): Vestido, Blusa… (lista em Configurações) */
+  productType?: string | null;
 }
 
 export interface Category {
@@ -102,7 +110,16 @@ export interface StockMovement {
   description?: string;
   reversedMovementId?: ID | null;
   orderId?: ID | null;
+  /** entrada: mercadoria nova ou reposição (antigos: sem) */
+  entryKind?: EntryKind | null;
+  /** quem fez (Configurações › Seu nome); antigos: sem */
+  by?: string | null;
+  /** entrada que veio de uma importação em quantidade */
+  importId?: ID | null;
 }
+
+/** Entrada de estoque: peça que a loja ainda não tinha (nova) ou mais peças de algo que já vende (reposição). */
+export type EntryKind = 'nova' | 'reposicao';
 
 /** Uma venda para uma pessoa (pode ter várias peças/linhas). */
 export interface Order {
@@ -124,6 +141,8 @@ export interface Order {
   pixConfirmedCents?: number | null;
   createdAt: string;
   notes?: string;
+  /** quem fez (Configurações › Seu nome); antigos: sem */
+  by?: string | null;
 }
 
 export interface Payment {
@@ -162,6 +181,8 @@ export interface Reservation {
   orderId?: ID | null;
   createdAt: string;
   updatedAt: string;
+  /** quem fez (Configurações › Seu nome); antigos: sem */
+  by?: string | null;
 }
 
 export interface CashRecord {
@@ -216,4 +237,39 @@ export interface AuditLog {
   oldValue?: unknown;
   newValue?: unknown;
   createdAt: string;
+  /** quem fez (antigos: sem) */
+  by?: string | null;
+}
+
+/** Uma linha de uma importação em quantidade (o que aconteceu com cada produto). */
+export interface ImportLine {
+  variantId: ID;
+  groupName: string;
+  name: string;
+  size?: string | null;
+  /** produto criado por esta importação */
+  created: boolean;
+  createdGroup: boolean;
+  before: number;
+  delta: number;
+  after: number;
+  movementId?: ID | null;
+  forSale?: boolean;
+}
+
+/** Importação em quantidade: guarda o texto colado e o que mudou (para consultar e desfazer). */
+export interface ImportRecord {
+  id: ID;
+  createdAt: string;
+  dailyRecordId: ID;
+  date: string;
+  by?: string | null;
+  /** texto original, exatamente como foi colado */
+  text: string;
+  op: 'somar' | 'definir';
+  lines: ImportLine[];
+  status: 'aplicada' | 'desfeita' | 'parcial';
+  undoneAt?: string | null;
+  /** linhas que não deu para desfazer, com o motivo */
+  undoSkipped?: { variantId: ID; reason: string }[];
 }

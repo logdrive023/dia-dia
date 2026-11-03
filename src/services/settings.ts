@@ -29,6 +29,18 @@ export interface AppSettings {
   reportDividers: boolean;
   /** mensagem maior que o link do WhatsApp: mandar em partes (parte 1, volta, parte 2) */
   reportSplit: boolean;
+  /** nome de quem usa o app: aparece no histórico em cada registro feito à mão */
+  userName: string;
+  /** entrada de estoque: true = mercadoria nova por padrão; false = reposição por padrão */
+  entryNewByDefault: boolean;
+  /** tamanhos que dá para escolher (a usuária acrescenta e tira) */
+  sizes: string[];
+  /** tipos de produto que dá para escolher (ex.: Vestido, Blusa) */
+  productTypes: string[];
+  /** cores criadas pela usuária: [cor, nome] */
+  customColors: [string, string][];
+  /** ícones a mais para os grupos */
+  customIcons: string[];
   /** Diária de quem vende (centavos). Sugestão ao lançar “Pagamento”. */
   dailyPayInCents: number;
   /** Ao iniciar o dia, já lança a diária daquele dia. */
@@ -49,6 +61,12 @@ export const DEFAULT_SETTINGS: AppSettings = {
   reportTotals: true,
   reportDividers: true,
   reportSplit: true,
+  userName: '',
+  entryNewByDefault: false,
+  sizes: ['P', 'M', 'G', 'GG', 'XG'],
+  productTypes: ['Vestido', 'Macacão', 'Blusa', 'Calça', 'Saia'],
+  customColors: [],
+  customIcons: [],
   dailyPayInCents: 15000,
   autoDailyPay: true,
 };

@@ -1,10 +1,10 @@
 import { db } from '../db/db';
 import type { Group, Variant } from '../db/types';
-import { isCents, MAX_QTY, normalize, nowIso, uid } from '../lib/util';
+import { isCents, MAX_QTY, normalize, nowIso, uid, todayStr } from '../lib/util';
 import { audit } from './audit';
 import { getSetting, setSetting } from './settings';
 // import normal (nunca `await import` dentro de transação: a espera encerra a transação do IndexedDB antes da hora)
-import { addTombstones } from './sync';
+import { actor } from '../lib/actor';
 
 /** Recusa com mensagem para a pessoa (em português). O nome fixo sobrevive à compactação do build. */
 export class UserError extends Error { name = 'UserError'; }
@@ -143,11 +143,30 @@ export async function transferVariants(fromGroupId: string, toGroupId: string) {
 
 // ---------------- variações ----------------
 
+/** Tamanho limpo (vazio = sem tamanho). */
+export function cleanSize(s?: string | null) { const t = (s ?? '').trim().toUpperCase(); return t ? t.slice(0, 10) : null; }
+/** Mesmo produto = mesmo nome e mesmo tamanho (Azul · P e Azul · M são produtos diferentes). */
+export function sameProduct(v: Pick<Variant, 'name' | 'size'>, name: string, size: string | null) {
+  return normalize(v.name) === normalize(name) && (v.size ?? null) === size;
+}
+/** Nome para mostrar: “Azul” ou “Azul · P”. */
+export const variantLabel = (v: Pick<Variant, 'name' | 'size'>) => (v.size ? `${v.name} · ${v.size}` : v.name);
+
 export async function createVariant(input: {
   groupId: string; name: string; startQuantity?: number; minimumStock?: number | null; idealStock?: number | null;
   optionalPriceInCents?: number | null; color?: string; description?: string; notes?: string;
   /** Se informado, a quantidade inicial entra neste dia (se existir e estiver aberto). */
   dailyRecordId?: string | null;
+  /** a quantidade entra no dia de HOJE (as telas usam isto: nunca no dia que está sendo olhado) */
+  intoToday?: boolean;
+  /** de onde veio o cadastro */
+  origin?: 'cadastro' | 'vender' | 'importacao';
+  size?: string | null;
+  productType?: string | null;
+  /** à venda já no cadastro (sem: segue o grupo) */
+  forSale?: boolean;
+  /** não usar estoque ideal (nunca aparece em repor) */
+  restockOff?: boolean;
 }) {
   if (!input.groupId || typeof input.groupId !== 'string') throw new UserError('Escolha o grupo da cor (ou crie um grupo primeiro).');
   const name = cleanName(input.name, 'da variação');
@@ -158,52 +177,71 @@ export async function createVariant(input: {
   return db.transaction('rw', [db.variants, db.groups, db.dailyStockItems, db.dailyRecords, db.stockMovements, db.auditLogs, db.settings], async () => {
     if (!(await db.groups.get(input.groupId))) throw new UserError('Grupo não encontrado.');
     const siblings = await db.variants.where('groupId').equals(input.groupId).toArray();
-    if (siblings.some((v) => !v.archivedAt && normalize(v.name) === normalize(name)))
-      throw new UserError(`Já existe "${name}" neste grupo.`);
+    const size = cleanSize(input.size);
+    if (siblings.some((v) => !v.archivedAt && sameProduct(v, name, size)))
+      throw new UserError(`Já existe "${name}${size ? ` · ${size}` : ''}" neste grupo.`);
     const now = nowIso();
+    let dayId = input.dailyRecordId ?? null;
+    if (input.intoToday) {
+      const today = await db.dailyRecords.where('date').equals(todayStr()).first();
+      // antes: olhando outro dia (ex.: ontem, encerrado), a quantidade sumia sem avisar
+      if (qty > 0 && (!today || today.status !== 'open'))
+        throw new UserError('Para cadastrar com quantidade, inicie o dia de hoje primeiro (Início › Iniciar o dia). Ou cadastre com 0.');
+      dayId = today?.status === 'open' ? today.id : null;
+    }
     const v: Variant = {
       id: uid(), groupId: input.groupId, name, description: input.description, color: input.color,
+      origin: input.origin ?? 'cadastro', createdBy: actor(), size, productType: input.productType?.trim() || null,
+      ...(input.restockOff ? { restockOff: true } : {}),
       displayOrder: siblings.length, active: true, archivedAt: null,
       minimumStock: input.minimumStock ?? null, idealStock: input.idealStock ?? null, startQuantity: qty,
       optionalPriceInCents: input.optionalPriceInCents ?? null, notes: input.notes, createdAt: now, updatedAt: now,
       // grupo novo (ainda sem cores): a primeira cor já nasce à venda e o grupo entra em ⭐ Para vender.
       // Guardar no estoque é uma escolha (Vender › Estoque ⇄ Venda).
-      forSale: siblings.length === 0 ? true : await groupIsForSale(input.groupId),
+      forSale: input.forSale ?? (siblings.length === 0 ? true : await groupIsForSale(input.groupId)),
     };
     await db.variants.add(v);
     if (siblings.length === 0) {
       const sell = await getSetting('sellGroups');
       if (!sell.some((e) => e.groupId === input.groupId)) await setSetting('sellGroups', [...sell, { groupId: input.groupId, highlight: false }]);
     }
-    if (input.dailyRecordId) {
-      const day = await db.dailyRecords.get(input.dailyRecordId);
+    if (dayId) {
+      const day = await db.dailyRecords.get(dayId);
       if (day && day.status === 'closed') throw new UserError('O dia está encerrado. Reabra para lançar a quantidade.');
       if (day) {
         // a quantidade do cadastro é o estoque com que a cor COMEÇA o dia (não é mercadoria que "entrou")
         await db.dailyStockItems.add({ id: uid(), dailyRecordId: day.id, variantId: v.id, initialQuantity: qty, currentQuantity: qty });
       }
     }
-    await audit('variant', v.id, 'create', null, { name, groupId: input.groupId, qty });
+    await audit('variant', v.id, 'create', null, { name, groupId: input.groupId, qty, origin: v.origin, by: v.createdBy, dayId });
     return v;
   });
 }
 
 export async function updateVariant(id: string, patch: Partial<Pick<Variant,
-  'name' | 'description' | 'color' | 'minimumStock' | 'idealStock' | 'optionalPriceInCents' | 'notes' | 'restockOff'>>) {
+  'name' | 'description' | 'color' | 'minimumStock' | 'idealStock' | 'optionalPriceInCents' | 'notes' | 'restockOff' | 'size' | 'productType'>>) {
   return db.transaction('rw', db.variants, db.auditLogs, async () => {
     const v = await db.variants.get(id);
     if (!v) throw new UserError('Variação não encontrada.');
     if (patch.name !== undefined) {
       const name = cleanName(patch.name, '');
       const sib = await db.variants.where('groupId').equals(v.groupId).toArray();
-      if (sib.some((x) => x.id !== id && !x.archivedAt && normalize(x.name) === normalize(name)))
+      if (sib.some((x) => x.id !== id && !x.archivedAt && sameProduct(x, name, v.size ?? null)))
         throw new UserError(`Já existe "${name}" neste grupo.`);
       patch.name = name;
       if (name !== v.name) await audit('variant', id, 'rename', v.name, name);
     }
+    if (patch.size !== undefined) {
+      patch.size = cleanSize(patch.size);
+      const sib = await db.variants.where('groupId').equals(v.groupId).toArray();
+      if (sib.some((x) => x.id !== id && !x.archivedAt && sameProduct(x, patch.name ?? v.name, patch.size ?? null)))
+        throw new UserError(`Já existe "${patch.name ?? v.name}${patch.size ? ` · ${patch.size}` : ''}" neste grupo.`);
+      if ((patch.size ?? null) !== (v.size ?? null)) await audit('variant', id, 'set_size', v.size ?? null, patch.size ?? null);
+    }
+    if (patch.productType !== undefined && (patch.productType || null) !== (v.productType ?? null)) await audit('variant', id, 'set_productType', v.productType ?? null, patch.productType || null);
     validateNumbers(patch);
     checkMinVsMeta({ ...v, ...patch });
-    for (const k of ['minimumStock', 'idealStock', 'optionalPriceInCents'] as const)
+    for (const k of ['minimumStock', 'idealStock', 'optionalPriceInCents', 'restockOff'] as const)
       if (patch[k] !== undefined && patch[k] !== v[k]) await audit('variant', id, `set_${k}`, v[k], patch[k]);
     await db.variants.update(id, { ...patch, updatedAt: nowIso() });
   });
@@ -246,30 +284,17 @@ export async function moveVariant(id: string, toGroupId: string) {
 }
 
 /**
- * Excluir uma cor. Nunca vendida nem reservada → apaga de vez (estoque e movimentos dela).
- * Com vendas → some de tudo (cadastro, estoque, relatório), mas as vendas antigas continuam no histórico com o nome.
+ * Excluir uma cor: some de todas as telas (cadastro, estoque, vender, relatório), mas o histórico
+ * fica (movimentos, vendas, reservas e o estoque de cada dia) — nunca apaga registros.
  */
-export async function deleteVariant(id: string): Promise<'apagada' | 'escondida'> {
-  const [sales, res] = await Promise.all([
-    db.sales.where('variantId').equals(id).count(),
-    db.reservations.where('variantId').equals(id).count(),
-  ]);
-  return db.transaction('rw', [db.variants, db.dailyStockItems, db.stockMovements, db.auditLogs, db.settings], async () => {
+export async function deleteVariant(id: string): Promise<'escondida'> {
+  return db.transaction('rw', [db.variants, db.auditLogs], async () => {
     const v = await db.variants.get(id);
     if (!v) throw new UserError('Variação não encontrada.');
     const now = nowIso();
-    if (sales + res > 0) {
-      await db.variants.update(id, { deletedAt: now, archivedAt: v.archivedAt ?? now, active: false, updatedAt: now });
-      await audit('variant', id, 'delete_soft', v.name, null);
-      return 'escondida';
-    }
-    const moves = await db.stockMovements.where('variantId').equals(id).primaryKeys();
-    await db.stockMovements.bulkDelete(moves);
-    await db.dailyStockItems.where('variantId').equals(id).delete();
-    await db.variants.delete(id);
-    await addTombstones([id, ...(moves as string[])]); // ao juntar com outro celular, não volta
-    await audit('variant', id, 'delete', v.name, null);
-    return 'apagada';
+    await db.variants.update(id, { deletedAt: now, archivedAt: v.archivedAt ?? now, active: false, updatedAt: now });
+    await audit('variant', id, 'delete_soft', v.name, { by: actor() });
+    return 'escondida' as const;
   });
 }
 

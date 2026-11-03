@@ -1,25 +1,32 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../db/db';
 import type { Group, Variant } from '../db/types';
-import { colorName, COLORS, money, NAMED_COLORS, normalize, toCents } from '../lib/util';
+import { colorName, COLORS, money, NAMED_COLORS, normalize, toCents, todayStr } from '../lib/util';
 import {
   archiveGroup, archiveVariant, createCategory, createGroup, createVariant, deleteCategory, deleteGroup, deleteVariant,
   groupHasHistory, moveVariant, reorderGroups, reorderVariants, setGroupActive, setVariantActive, transferVariants,
-  updateGroup, updateVariant,
+  updateGroup, updateVariant, variantLabel,
 } from '../services/catalog';
 import { setStock } from '../services/days';
+import { EntryReasonPicker, type IncreaseReason } from '../components/EntryReason';
 import { restockOf } from '../services/summary';
+import { setSetting } from '../services/settings';
 import { useApp } from '../state';
 import { Badge, Button, Card, ColorField, Field, InfoTip, Input, Sheet, Swatch, Toggle, useBusy, useUi } from '../components/ui';
 
-const ICONS = ['📦', '🎀', '💜', '📌', '📍', '👕', '🧡', '✨', '💙', '👑', '💎', '🌸', '⭐', '🔥', '🆕', '🎁', '👜', '🧢', '🧦', '💍', '🌈', '🍀', '❤️', '🖤'];
+const ICONS = ['📦', '🎀', '💜', '📌', '📍', '👕', '🧡', '✨', '💙', '👑', '💎', '🌸', '⭐', '🔥', '🆕', '🎁', '👜', '🧢', '🧦', '💍', '🌈', '🍀', '❤️', '🖤',
+  '👗', '👚', '👖', '🩱', '🧥', '👠', '👡', '🩳', '👔', '🧣', '🧤', '🕶️', '💄', '👛', '🎒', '👒'];
 
 export default function CatalogSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { run } = useUi();
+  const { catalogIntent, clearCatalogIntent } = useApp();
   const [q, setQ] = useState('');
   const [edit, setEdit] = useState<string | null>(null);
-  const [quick, setQuick] = useState<'group' | 'variant' | null>(null);
+  const [quick, setQuick] = useState<'group' | 'variant' | null>(catalogIntent ? 'variant' : null);
+  // de onde veio o “novo produto” (fica guardado no cadastro)
+  const [origin] = useState<'cadastro' | 'vender'>(catalogIntent ?? 'cadastro');
+  useEffect(() => { if (catalogIntent) clearCatalogIntent(); }, [catalogIntent, clearCatalogIntent]);
   const [showArchived, setShowArchived] = useState(false);
   const data = useLiveQuery(async () => {
     const [groups, variants, categories] = await Promise.all([db.groups.orderBy('displayOrder').toArray(), db.variants.toArray(), db.categories.orderBy('displayOrder').toArray()]);
@@ -97,32 +104,52 @@ export default function CatalogSheet({ open, onClose }: { open: boolean; onClose
       )}
       <Categories />
       <GroupEditor id={edit} onClose={() => setEdit(null)} />
-      <QuickAdd kind={quick} onClose={() => setQuick(null)} groups={list} onCreatedGroup={(id) => setEdit(id)} />
+      <QuickAdd kind={quick} origin={origin} onClose={() => setQuick(null)} groups={list} onCreatedGroup={(id) => setEdit(id)} />
     </Sheet>
   );
 }
 
-function QuickAdd({ kind, onClose, groups, onCreatedGroup }: { kind: 'group' | 'variant' | null; onClose: () => void; groups: Group[]; onCreatedGroup: (id: string) => void }) {
-  const { day } = useApp();
-  const { run } = useUi();
+function QuickAdd({ kind, origin, onClose, groups, onCreatedGroup }: { kind: 'group' | 'variant' | null; origin: 'cadastro' | 'vender'; onClose: () => void; groups: Group[]; onCreatedGroup: (id: string) => void }) {
+  const { settings } = useApp();
+  const { run, toast } = useUi();
   const [busy, wrap] = useBusy();
   const [name, setName] = useState('');
   const [groupId, setGroupId] = useState('');
   const [qty, setQty] = useState(0);
   const [color, setColor] = useState<string | undefined>();
   const [newGroup, setNewGroup] = useState('');
+  const [type, setType] = useState<string | null>(null);
+  const [newType, setNewType] = useState('');
+  // tamanhos escolhidos, cada um com a própria quantidade (vazio = produto sem tamanho)
+  const [sizes, setSizes] = useState<Record<string, number>>({});
+  const [forSale, setForSale] = useState(true);
+  const [useIdeal, setUseIdeal] = useState(true);
+  const [meta, setMeta] = useState('');
+  const todayOpen = useLiveQuery(async () => (await db.dailyRecords.where('date').equals(todayStr()).first())?.status === 'open', []);
   if (!kind) return null;
   const gid = groupId || groups[0]?.id;
   const group = groups.find((g) => g.id === gid);
-  const close = () => { setName(''); setQty(0); setColor(undefined); onClose(); };
+  const sizeList = Object.keys(sizes);
+  const total = sizeList.length ? sizeList.reduce((n, k) => n + sizes[k], 0) : qty;
+  const reset = () => { setName(''); setQty(0); setColor(undefined); setSizes({}); setMeta(''); };
+  const close = () => { reset(); onClose(); };
   const save = () => wrap(async () => {
     if (kind === 'group') {
       const g = await run(() => createGroup({ name }), 'Grupo criado');
       if (g) { setName(''); onClose(); onCreatedGroup(g.id); }
-    } else {
-      const v = await run(() => createVariant({ groupId: gid, name, color, startQuantity: qty, dailyRecordId: day?.status === 'open' ? day.id : null }),
-        `${name.trim()} cadastrada em ${group?.name ?? ''}`);
-      if (v) { setName(''); setQty(0); setColor(undefined); } // continua aberto para cadastrar a próxima cor
+      return;
+    }
+    const metaN = meta.trim() === '' ? null : Number(meta);
+    const each = sizeList.length ? sizeList.map((s) => [s, sizes[s]] as const) : [[null, qty] as const];
+    const ok = await run(async () => {
+      for (const [size, q] of each)
+        await createVariant({ groupId: gid, name, color, size, startQuantity: q, intoToday: true, origin, productType: type, forSale,
+          restockOff: !useIdeal, idealStock: useIdeal && metaN !== null ? metaN : null });
+      return true;
+    });
+    if (ok) {
+      toast(`${name.trim()}${sizeList.length ? ` (${sizeList.join(', ')})` : ''} cadastrada em ${group?.name ?? ''}${total ? ` · ${total} no estoque de hoje` : ''}`);
+      reset(); // continua aberto para cadastrar o próximo
     }
   });
   if (kind === 'group') return (
@@ -134,20 +161,29 @@ function QuickAdd({ kind, onClose, groups, onCreatedGroup }: { kind: 'group' | '
       <p className="text-xs text-slate-500">Ícone e cor você escolhe em seguida.</p>
     </Sheet>
   );
+  const chip = (on: boolean) => `shrink-0 h-10 px-3 rounded-xl border-2 text-[14px] font-semibold ${on ? 'border-blue-600 bg-blue-50 text-blue-800' : 'border-slate-200 bg-white text-slate-600'}`;
+  const stepper = (v: number, set: (n: number) => void, label: string) => (
+    <div className="flex items-center gap-1">
+      <button onClick={() => set(Math.max(0, v - 1))} className="w-11 h-11 rounded-lg bg-slate-100 text-xl font-bold" aria-label={`Menos ${label}`}>−</button>
+      <input inputMode="numeric" value={v} onChange={(e) => set(Math.min(100000, Number(e.target.value.replace(/\D/g, '')) || 0))}
+        className="w-14 h-11 text-center text-lg font-extrabold border border-slate-200 rounded-lg" aria-label={`Quantidade ${label}`} />
+      <button onClick={() => set(v + 1)} className="w-11 h-11 rounded-lg bg-blue-600 text-white text-xl font-bold" aria-label={`Mais ${label}`}>+</button>
+    </div>
+  );
   return (
-    <Sheet open onClose={close} title="🎨 Nova cor / variação" tall
-      footer={<Button size="lg" className="w-full" disabled={!name.trim() || !group || busy} onClick={save}>
-        {!group ? 'Crie um grupo primeiro' : name.trim() ? `Salvar ${name.trim()} em ${group.name}` : 'Salvar'}
+    <Sheet open onClose={close} title={origin === 'vender' ? '🛍️ Novo produto para vender' : '🎨 Novo produto (cor / variação)'} tall
+      footer={<Button size="lg" className="w-full" disabled={!name.trim() || !group || busy || (total > 0 && !todayOpen)} onClick={save}>
+        {!group ? 'Crie um grupo primeiro' : name.trim() ? `Salvar ${name.trim()}${sizeList.length > 1 ? ` (${sizeList.length} tamanhos)` : ''} em ${group.name}` : 'Salvar'}
       </Button>}>
       <div className="flex items-start gap-2 rounded-xl bg-blue-50 border border-blue-200 px-3 py-2.5 mb-4 text-[14px] text-blue-900">
-        <span className="flex-1">Variação é a cor ou modelo dentro de um grupo (ex.: Plomo <b>Verde</b>).</span>
-        <InfoTip title="Cadastrar uma cor" example={[
-          ['📦', <>Escolha o grupo: <b>Plomo</b></>],
-          ['✍️', <>Nome: <b>Verde</b> · bolinha verde</>],
-          ['🔢', <>Quantidade: <b>15</b> → entra 15 no estoque de hoje</>],
-          ['🔁', 'Esses 15 viram o estoque ideal: vendeu 1 → aparece “repor 1”'],
-          ['➕', 'Depois de salvar, já dá para cadastrar a próxima cor'],
-        ]}>A quantidade é opcional; dá para lançar depois na aba Estoque com o +.</InfoTip>
+        <span className="flex-1">Produto é a cor ou modelo dentro de um grupo (ex.: Plomo <b>Verde</b>). A <b>quantidade real</b> entra no estoque de hoje; o <b>estoque ideal</b> é só a meta.</span>
+        <InfoTip title="Cadastrar um produto" example={[
+          ['📦', <>Grupo: <b>Plomo</b> · Nome: <b>Verde</b></>],
+          ['📏', <>Com tamanho? Marque <b>P</b> e <b>M</b> e diga quantas de cada</>],
+          ['🔢', <>Quantidade real: <b>5</b> → hoje tem 5 no estoque</>],
+          ['🎯', <>Estoque ideal <b>8</b> → não muda o estoque: aparece “repor 3”</>],
+          ['➕', 'Depois de salvar, já dá para cadastrar o próximo'],
+        ]}>Quantidade real é o que tem de verdade na loja. Estoque ideal (meta) é quanto você quer ter.</InfoTip>
       </div>
 
       <div className="text-sm font-semibold text-slate-700 mb-1.5">1. Grupo</div>
@@ -166,37 +202,77 @@ function QuickAdd({ kind, onClose, groups, onCreatedGroup }: { kind: 'group' | '
       )}
       <div className="flex gap-2 overflow-x-auto no-scrollbar -mx-5 px-5 pb-1 mb-4">
         {groups.map((g) => (
-          <button key={g.id} onClick={() => setGroupId(g.id)}
-            className={`shrink-0 h-11 px-3 rounded-xl border-2 flex items-center gap-1.5 text-[14px] font-semibold ${g.id === gid ? 'border-blue-600 bg-blue-50 text-blue-800' : 'border-slate-200 bg-white text-slate-600'}`}>
-            <span>{g.icon}</span>{g.name}
-          </button>
+          <button key={g.id} onClick={() => setGroupId(g.id)} className={chip(g.id === gid)}><span>{g.icon}</span> {g.name}</button>
         ))}
       </div>
 
       <div className="text-sm font-semibold text-slate-700 mb-1.5">2. Nome e cor</div>
       <div className="flex items-center gap-2 mb-2">
         <Swatch color={color} size={44} />
-        <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Ex.: Verde" autoFocus onKeyDown={(e) => e.key === 'Enter' && name.trim() && save()} />
+        <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Ex.: Verde" onKeyDown={(e) => e.key === 'Enter' && name.trim() && save()} aria-label="Nome do produto" />
       </div>
       <ColorField value={color} onChange={(c) => { if (!name.trim() || name.trim() === colorName(color)) setName(colorName(c) === 'Poá' ? 'Poa' : colorName(c)); setColor(c); }} />
 
-      <div className="text-sm font-semibold text-slate-700 mb-1.5">3. Quantidade agora <span className="font-normal text-slate-500">(opcional)</span></div>
-      <div className="flex items-center justify-between bg-white rounded-xl border border-slate-200 px-3 py-2">
-        <span className="text-[14px] text-slate-600">{qty === 0 ? 'Nenhuma peça ainda' : `${qty} ${qty === 1 ? 'peça' : 'peças'} · ideal ${qty}`}</span>
-        <div className="flex items-center gap-1">
-          <button onClick={() => setQty(Math.max(0, qty - 1))} className="w-11 h-11 rounded-lg bg-slate-100 text-xl font-bold" aria-label="Menos">−</button>
-          <input inputMode="numeric" value={qty} onChange={(e) => setQty(Math.min(100000, Number(e.target.value.replace(/\D/g, '')) || 0))}
-            className="w-14 h-11 text-center text-lg font-extrabold border border-slate-200 rounded-lg" aria-label="Quantidade" />
-          <button onClick={() => setQty(qty + 1)} className="w-11 h-11 rounded-lg bg-blue-600 text-white text-xl font-bold" aria-label="Mais">+</button>
-        </div>
+      <div className="text-sm font-semibold text-slate-700 mb-1.5">3. Tipo <span className="font-normal text-slate-500">(opcional)</span></div>
+      <div className="flex gap-2 overflow-x-auto no-scrollbar -mx-5 px-5 pb-1 mb-2">
+        <button onClick={() => setType(null)} className={chip(type === null)}>Sem tipo</button>
+        {settings.productTypes.map((t) => <button key={t} onClick={() => setType(t)} className={chip(type === t)}>{t}</button>)}
       </div>
-      <p className="text-xs text-slate-500 mt-1.5">{day?.status === 'open' ? 'Entra no estoque do dia selecionado.' : 'Entra quando o próximo dia for iniciado.'}</p>
+      <div className="flex gap-2 mb-4">
+        <Input value={newType} onChange={(e) => setNewType(e.target.value)} placeholder="Outro tipo (ex.: Shorts)" aria-label="Novo tipo" />
+        <Button variant="outline" disabled={!newType.trim()} onClick={() => run(async () => {
+          const t = newType.trim().slice(0, 20);
+          if (!settings.productTypes.some((x) => x.toLowerCase() === t.toLowerCase())) await setSetting('productTypes', [...settings.productTypes, t]);
+          setType(t); setNewType('');
+        })}>Acrescentar</Button>
+      </div>
+
+      <div className="text-sm font-semibold text-slate-700 mb-1.5">4. Tamanho <span className="font-normal text-slate-500">(opcional: marque para ter estoque por tamanho)</span></div>
+      <div className="flex flex-wrap gap-2 mb-3">
+        {settings.sizes.map((s) => (
+          <button key={s} aria-pressed={s in sizes} onClick={() => setSizes((cur) => { const n = { ...cur }; if (s in n) delete n[s]; else n[s] = 0; return n; })} className={chip(s in sizes)}>{s}</button>
+        ))}
+      </div>
+
+      <div className="text-sm font-semibold text-slate-700 mb-1.5">5. 📦 Quantidade real <span className="font-normal text-slate-500">(o que tem agora na loja)</span></div>
+      {sizeList.length ? (
+        <div className="space-y-1.5 mb-1">
+          {sizeList.map((s) => (
+            <div key={s} className="flex items-center justify-between bg-white rounded-xl border border-slate-200 px-3 py-1.5">
+              <span className="text-[15px] font-bold text-slate-700">{s}</span>
+              {stepper(sizes[s], (n) => setSizes((cur) => ({ ...cur, [s]: n })), s)}
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="flex items-center justify-between bg-white rounded-xl border border-slate-200 px-3 py-2">
+          <span className="text-[14px] text-slate-600">{qty === 0 ? 'Nenhuma peça ainda' : `${qty} ${qty === 1 ? 'peça' : 'peças'}`}</span>
+          {stepper(qty, setQty, '')}
+        </div>
+      )}
+      <p className={`text-xs mt-1.5 mb-4 ${total > 0 && !todayOpen ? 'text-red-600 font-semibold' : 'text-slate-500'}`}>
+        {total > 0 && !todayOpen ? 'Inicie o dia de hoje para cadastrar com quantidade (ou deixe 0 e lance depois).' : 'Entra no estoque de HOJE (não importa o dia que está aberto na tela).'}
+      </p>
+
+      <div className="rounded-2xl bg-white border border-slate-200 px-3 py-1 mb-2">
+        <Toggle label={forSale ? '🏷️ À venda (aparece na aba Vender)' : '📦 Só no estoque (fora da venda)'} checked={forSale} onChange={setForSale} />
+      </div>
+      <div className="rounded-2xl bg-white border border-slate-200 px-3 py-1">
+        <Toggle label="🎯 Usar estoque ideal (repor)?" checked={useIdeal} onChange={setUseIdeal} />
+        {useIdeal && (
+          <div className="pb-2">
+            <Field label="Estoque ideal (meta) — não é estoque" hint={`Quanto você quer ter. Vazio = a quantidade real (${sizeList.length ? 'de cada tamanho' : total}). Repor = meta − o que tem.`}>
+              <Input inputMode="numeric" value={meta} onChange={(e) => setMeta(e.target.value.replace(/\D/g, ''))} placeholder={sizeList.length ? 'igual à quantidade' : String(total)} aria-label="Estoque ideal (meta)" />
+            </Field>
+          </div>
+        )}
+      </div>
     </Sheet>
   );
 }
 
 function GroupEditor({ id, onClose }: { id: string | null; onClose: () => void }) {
-  const { day } = useApp();
+  const { settings } = useApp();
   const { run, confirm, toast } = useUi();
   const [editVar, setEditVar] = useState<string | null>(null);
   const [newVar, setNewVar] = useState('');
@@ -215,9 +291,9 @@ function GroupEditor({ id, onClose }: { id: string | null; onClose: () => void }
   const archivedV = data.variants.filter((v) => v.archivedAt && !v.deletedAt);
   const excluirCor = async (v: Variant) => {
     if (!(await confirm({ title: `Excluir ${v.name}?`, tone: 'danger', confirm: 'Excluir',
-      message: 'Some do cadastro, do estoque e do relatório. Se ela já teve vendas, as vendas antigas continuam no histórico.' }))) return;
+      message: 'Some do cadastro, do estoque e do relatório. O histórico dela (movimentos e vendas) continua guardado.' }))) return;
     const r = await run(() => deleteVariant(v.id));
-    if (r) toast(r === 'apagada' ? `🗑️ ${v.name} excluída` : `🗑️ ${v.name} excluída (as vendas antigas ficam no histórico)`);
+    if (r) toast(`🗑️ ${v.name} excluída (o histórico fica guardado)`);
   };
   const moveV = (i: number, d: number) => {
     const j = i + d;
@@ -232,7 +308,7 @@ function GroupEditor({ id, onClose }: { id: string | null; onClose: () => void }
         hint="Renomear não perde histórico: vendas e estoques continuam ligados a este grupo." />
       <Field label="Ícone">
         <div className="flex flex-wrap gap-1.5">
-          {ICONS.map((i) => (
+          {[...ICONS, ...settings.customIcons.filter((x) => !ICONS.includes(x))].map((i) => (
             <button key={i} onClick={() => run(() => updateGroup(g.id, { icon: i }))} className={`w-10 h-10 rounded-lg text-xl ${g.icon === i ? 'bg-blue-100 ring-2 ring-blue-500' : 'bg-slate-100'}`}>{i}</button>
           ))}
         </div>
@@ -262,7 +338,7 @@ function GroupEditor({ id, onClose }: { id: string | null; onClose: () => void }
           <Card key={v.id} className={`flex items-center gap-2 p-2 pl-3 ${v.active ? '' : 'opacity-60'}`}>
             <button className="flex-1 flex items-center gap-2.5 text-left min-w-0" onClick={() => setEditVar(v.id)}>
               <Swatch color={v.color} />
-              <span className="font-semibold break-words">{v.name}</span>
+              <span className="font-semibold break-words">{variantLabel(v)}{v.productType ? <span className="text-[12px] font-normal text-slate-500"> · {v.productType}</span> : null}</span>
               {v.optionalPriceInCents ? <Badge tone="blue">{money(v.optionalPriceInCents)}</Badge> : null}
               <Badge>ideal {v.idealStock ?? v.startQuantity}</Badge>
               {!v.active && <Badge>desativada</Badge>}
@@ -274,7 +350,7 @@ function GroupEditor({ id, onClose }: { id: string | null; onClose: () => void }
         {archivedV.map((v) => (
           <Card key={v.id} className="flex items-center gap-2 p-2 pl-3 opacity-60">
             <Swatch color={v.color} />
-            <button className="flex-1 text-left min-w-0 break-words" onClick={() => setEditVar(v.id)}>{v.name} <Badge>arquivada</Badge></button>
+            <button className="flex-1 text-left min-w-0 break-words" onClick={() => setEditVar(v.id)}>{variantLabel(v)} <Badge>arquivada</Badge></button>
             <Button size="sm" variant="soft" onClick={() => run(() => archiveVariant(v.id, false), 'Reativada')}>Reativar</Button>
             <Button size="sm" variant="soft" className="!text-red-600" aria-label={`Excluir ${v.name}`} onClick={() => excluirCor(v)}>🗑️ Excluir</Button>
           </Card>
@@ -284,7 +360,7 @@ function GroupEditor({ id, onClose }: { id: string | null; onClose: () => void }
         <Input placeholder="Nova variação (ex.: Verde)" value={newVar} onChange={(e) => setNewVar(e.target.value)} />
         <Input className="!w-20" inputMode="numeric" placeholder="Qtd" value={newQty} onChange={(e) => setNewQty(e.target.value.replace(/\D/g, ''))} />
         <Button className="h-12" disabled={!newVar.trim()} onClick={async () => {
-          const v = await run(() => createVariant({ groupId: g.id, name: newVar, startQuantity: Number(newQty) || 0, dailyRecordId: day?.status === 'open' ? day.id : null }), 'Variação criada');
+          const v = await run(() => createVariant({ groupId: g.id, name: newVar, startQuantity: Number(newQty) || 0, intoToday: true }), 'Variação criada');
           if (v) { setNewVar(''); setNewQty(''); }
         }}>＋</Button>
       </div>
@@ -330,9 +406,10 @@ function GroupEditor({ id, onClose }: { id: string | null; onClose: () => void }
 
 function VariantEditor({ id, onClose }: { id: string | null; onClose: () => void }) {
   const { run, confirm, toast } = useUi();
-  const { day } = useApp();
+  const { day, openHistory, settings } = useApp();
   const [dest, setDest] = useState('');
   const [qtyText, setQtyText] = useState<string | null>(null);
+  const [reason, setReason] = useState<IncreaseReason | null>(null);
   const data = useLiveQuery(async () => {
     if (!id) return null;
     const v = await db.variants.get(id);
@@ -345,29 +422,58 @@ function VariantEditor({ id, onClose }: { id: string | null; onClose: () => void
   const group = data.groups.find((g) => g.id === v.groupId);
   const others = data.groups.filter((g) => g.id !== v.groupId && !g.archivedAt);
   return (
-    <Sheet open onClose={onClose} title={<span className="flex items-center gap-2"><Swatch color={v.color} />{group?.name} · {v.name}</span>} tall>
+    <Sheet open onClose={onClose} title={<span className="flex items-center gap-2"><Swatch color={v.color} />{group?.name} · {variantLabel(v)}</span>} tall>
       <NameField key={v.id + v.name} value={v.name} onSave={(name) => run(() => updateVariant(v.id, { name }), 'Nome alterado')} />
       <ColorField value={v.color} onChange={(c) => run(() => updateVariant(v.id, { color: c }))} />
+      <div className="grid grid-cols-2 gap-2 mb-3">
+        <Field label="Tipo (opcional)">
+          <select aria-label="Tipo do produto" className="w-full h-11 rounded-xl border border-slate-200 bg-white px-2 text-[15px]" value={v.productType ?? ''}
+            onChange={(e) => run(() => updateVariant(v.id, { productType: e.target.value || null }), 'Tipo salvo')}>
+            <option value="">Sem tipo</option>
+            {[...new Set([...settings.productTypes, ...(v.productType ? [v.productType] : [])])].map((t) => <option key={t} value={t}>{t}</option>)}
+          </select>
+        </Field>
+        <Field label="Tamanho (opcional)">
+          <select aria-label="Tamanho do produto" className="w-full h-11 rounded-xl border border-slate-200 bg-white px-2 text-[15px]" value={v.size ?? ''}
+            onChange={(e) => run(() => updateVariant(v.id, { size: e.target.value || null }), 'Tamanho salvo')}>
+            <option value="">Sem tamanho</option>
+            {[...new Set([...settings.sizes, ...(v.size ? [v.size] : [])])].map((t) => <option key={t} value={t}>{t}</option>)}
+          </select>
+        </Field>
+      </div>
+      <Button className="w-full mb-3" variant="outline" onClick={() => openHistory(v.id)}>📜 Histórico desta peça</Button>
       {/* 1) quantas peças tem hoje: muda o estoque (ajuste), não é “entrou” nem “repor” */}
       {day && !v.archivedAt && (
-        <Field label="📦 No estoque hoje" hint={day.status === 'open' ? 'Corrige a quantidade de hoje (conta como ajuste, não como “entrou”).' : 'Dia encerrado: reabra o dia para corrigir.'}>
+        <Field label="📦 No estoque hoje (quantidade real)" hint={day.status === 'open' ? 'É o que tem de verdade na loja. Subiu? Diga se chegou mercadoria ou se foi só correção da contagem.' : 'Dia encerrado: reabra o dia para corrigir.'}>
           <div className="flex gap-2">
             <Input inputMode="numeric" value={qtyText ?? String(data.item?.currentQuantity ?? 0)} disabled={day.status !== 'open'}
-              onChange={(e) => setQtyText(e.target.value.replace(/\D/g, ''))} />
-            <Button disabled={qtyText === null || qtyText === '' || Number(qtyText) === (data.item?.currentQuantity ?? 0) || day.status !== 'open'}
-              onClick={async () => { const r = await run(() => setStock(day.id, v.id, Number(qtyText)), `${v.name}: agora ${qtyText} no estoque`); if (r !== undefined) setQtyText(null); }}>Salvar</Button>
+              onChange={(e) => { setQtyText(e.target.value.replace(/\D/g, '')); setReason(null); }} />
+            <Button disabled={qtyText === null || qtyText === '' || Number(qtyText) === (data.item?.currentQuantity ?? 0) || day.status !== 'open' || (Number(qtyText) > (data.item?.currentQuantity ?? 0) && !reason)}
+              onClick={async () => {
+                const up = Number(qtyText) > (data.item?.currentQuantity ?? 0);
+                const r = await run(() => setStock(day.id, v.id, Number(qtyText), 'Ajuste manual', up && reason && reason !== 'ajuste' ? { entryKind: reason } : {}), `${v.name}: agora ${qtyText} no estoque`);
+                if (r !== undefined) { setQtyText(null); setReason(null); }
+              }}>Salvar</Button>
           </div>
         </Field>
+      )}
+      {day && !v.archivedAt && qtyText !== null && qtyText !== '' && Number(qtyText) > (data.item?.currentQuantity ?? 0) && (
+        <div className="-mt-2 mb-4">
+          <div className="text-[13px] font-semibold text-slate-700 mb-1.5">Por que aumentou? (+{Number(qtyText) - (data.item?.currentQuantity ?? 0)})</div>
+          <EntryReasonPicker withAdjust value={reason} onChange={setReason} />
+        </div>
       )}
       {/* 2) repor: configurado em cada produto (vai direto para o relatório do WhatsApp) */}
       <div className="rounded-2xl bg-white border border-slate-200 px-3 py-1 mb-4">
         <div className="flex items-center gap-2">
-          <div className="flex-1"><Toggle label="🔁 Precisa repor?" checked={!v.restockOff} onChange={(on) => run(() => updateVariant(v.id, { restockOff: !on }), on ? 'Repor ligado' : 'Não aparece mais em “repor”')} /></div>
-          <InfoTip title="Precisa repor?" example={[
-            ['✅', <><b>Ligado:</b> aparece em “repor” quando faltar peça para a meta</>],
+          <div className="flex-1"><Toggle label="🎯 Usar estoque ideal (repor)?" checked={!v.restockOff} onChange={(on) => run(() => updateVariant(v.id, { restockOff: !on }), on ? 'Estoque ideal ligado' : 'Sem estoque ideal: não aparece mais em “repor”')} /></div>
+          <InfoTip title="Estoque ideal (repor)" example={[
+            ['📦', <><b>Quantidade real</b> (acima): o que tem de verdade na loja</>],
+            ['🎯', <><b>Estoque ideal:</b> quanto você QUER ter — não é estoque, não é entrada</>],
+            ['✅', <><b>Ligado:</b> real 3 · ideal 7 → aparece “repor 4”</>],
             ['🚫', <><b>Desligado:</b> nunca aparece em “repor” (ex.: peça que não vai comprar de novo)</>],
-            ['📏', <><b>Estoque mínimo 3:</b> só aparece para repor quando tiver 3 ou menos, e repõe até a meta</>],
-          ]}>Vale para o Estoque e para a mensagem do WhatsApp.</InfoTip>
+            ['📏', <><b>Estoque mínimo 3:</b> só aparece para repor quando tiver 3 ou menos, e repõe até o ideal</>],
+          ]}>Vale para o Estoque, o Vender e a mensagem do WhatsApp.</InfoTip>
         </div>
         {!v.restockOff && (
           <>
@@ -381,10 +487,17 @@ function VariantEditor({ id, onClose }: { id: string | null; onClose: () => void
                 value={String(v.minimumStock)}
                 onSave={(t) => run(() => updateVariant(v.id, { minimumStock: t === '' ? null : Number(t) }), 'Salvo')} />
             )}
-            <NumberField key={'i' + v.id + v.idealStock} label="🎯 Meta (repõe até quanto)"
-              hint={`Não muda o estoque.${data.item ? ` Hoje ${data.item.currentQuantity} · meta ${v.idealStock ?? v.startQuantity} → repor ${restockOf(v, data.item.currentQuantity, v.idealStock ?? v.startQuantity)}.` : ''} Vazio = usa a quantidade do cadastro (${v.startQuantity}).`}
+            <NumberField key={'i' + v.id + v.idealStock} label="🎯 Estoque ideal (meta) — não é estoque"
+              hint={`Não muda o estoque.${data.item ? ` Real hoje ${data.item.currentQuantity} · ideal ${v.idealStock ?? v.startQuantity} → repor ${restockOf(v, data.item.currentQuantity, v.idealStock ?? v.startQuantity)}.` : ''} Vazio = usa a quantidade do cadastro (${v.startQuantity}).`}
               value={v.idealStock === null || v.idealStock === undefined ? '' : String(v.idealStock)}
-              onSave={(t) => run(() => updateVariant(v.id, { idealStock: t === '' ? null : Number(t) }), 'Salvo')} />
+              onSave={async (t) => {
+                // prévia antes de mudar: o estoque real continua o mesmo, só o “repor” muda
+                const next = t === '' ? v.startQuantity : Number(t);
+                const real = data.item?.currentQuantity ?? 0;
+                if (!(await confirm({ title: `Estoque ideal: ${v.idealStock ?? v.startQuantity} → ${next}?`, confirm: 'Mudar o ideal',
+                  message: `O estoque REAL continua ${real} (nada entra nem sai). Repor passa a ser ${restockOf(v, real, next)}. Para mudar a quantidade real, use “No estoque hoje” acima.` }))) return;
+                run(() => updateVariant(v.id, { idealStock: t === '' ? null : Number(t) }), 'Estoque ideal salvo');
+              }} />
           </>
         )}
       </div>
@@ -415,9 +528,9 @@ function VariantEditor({ id, onClose }: { id: string | null; onClose: () => void
         }}>{v.archivedAt ? 'Reativar' : '🗄️ Arquivar'}</Button>
         <Button variant="soft" className="!text-red-600" onClick={async () => {
           if (!(await confirm({ title: `Excluir ${v.name}?`, confirm: 'Excluir', tone: 'danger',
-            message: 'Some do cadastro, do estoque e do relatório. Se ela já teve vendas, as vendas antigas continuam no histórico.' }))) return;
+            message: 'Some do cadastro, do estoque e do relatório. O histórico dela (movimentos e vendas) continua guardado.' }))) return;
           const r = await run(() => deleteVariant(v.id));
-          if (r) { toast(r === 'apagada' ? `🗑️ ${v.name} excluída` : `🗑️ ${v.name} excluída (as vendas antigas ficam no histórico)`); onClose(); }
+          if (r) { toast(`🗑️ ${v.name} excluída (o histórico fica guardado)`); onClose(); }
         }}>🗑️ Excluir</Button>
       </div>
     </Sheet>

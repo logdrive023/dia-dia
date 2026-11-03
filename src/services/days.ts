@@ -1,9 +1,10 @@
 import { db } from '../db/db';
-import type { DailyRecord, DailyStockItem, MovementType, PaymentMethod, StockMovement } from '../db/types';
+import type { DailyRecord, DailyStockItem, EntryKind, MovementType, PaymentMethod, StockMovement } from '../db/types';
 import { isQty, MAX_QTY, money, nowIso, todayStr, uid } from '../lib/util';
 import { audit } from './audit';
 import { UserError } from './catalog';
 import { addTombstones } from './sync';
+import { actor } from '../lib/actor';
 
 export async function getDayByDate(date: string) {
   return db.dailyRecords.where('date').equals(date).first();
@@ -12,6 +13,12 @@ export async function getDayByDate(date: string) {
 /** Último dia registrado antes da data informada. */
 export async function previousDay(date: string) {
   return db.dailyRecords.where('date').below(date).last();
+}
+
+/** O dia de HOJE, se já começou e está aberto (o cadastro com quantidade entra nele). */
+export async function todayOpenDay() {
+  const d = await db.dailyRecords.where('date').equals(todayStr()).first();
+  return d && d.status === 'open' ? d : null;
 }
 
 export async function assertOpen(dailyRecordId: string) {
@@ -134,7 +141,7 @@ export async function ensureItem(dailyRecordId: string, variantId: string) {
 /** Aplica um delta no estoque físico do dia, registrando a movimentação. Use dentro de transação. */
 export async function applyStockDelta(
   dailyRecordId: string, variantId: string, delta: number, type: MovementType,
-  extra: Partial<Pick<StockMovement, 'description' | 'orderId' | 'reversedMovementId'>> = {},
+  extra: Partial<Pick<StockMovement, 'description' | 'orderId' | 'reversedMovementId' | 'entryKind' | 'importId'>> = {},
 ) {
   const item = await ensureItem(dailyRecordId, variantId);
   const newBalance = item.currentQuantity + delta;
@@ -142,7 +149,7 @@ export async function applyStockDelta(
   await db.dailyStockItems.update(item.id, { currentQuantity: newBalance });
   const mv: StockMovement = {
     id: uid(), dailyRecordId, variantId, type, quantity: delta, previousBalance: item.currentQuantity,
-    newBalance, createdAt: nowIso(), ...extra,
+    newBalance, createdAt: nowIso(), by: actor(), ...extra,
   };
   await db.stockMovements.add(mv);
   return mv;
@@ -165,7 +172,11 @@ async function checkReserved(date: string, variantId: string, newBalance: number
   if (reserved > 0 && newBalance >= 0 && newBalance < reserved) throw new ReservedError(reserved, res.map((r) => r.customer).filter(Boolean) as string[]);
 }
 
-export interface StockOpts { allowBelowReserved?: boolean }
+export interface StockOpts {
+  allowBelowReserved?: boolean;
+  /** entrada: mercadoria nova ou reposição. Em setStock, subir a quantidade com isto vira ENTRADA (chegou mercadoria), não ajuste. */
+  entryKind?: EntryKind;
+}
 
 export async function moveStock(dailyRecordId: string, variantId: string, delta: number, type: MovementType, description?: string, opts: StockOpts = {}) {
   if (!isQty(Math.abs(delta))) throw new UserError('Quantidade inválida.');
@@ -178,7 +189,7 @@ export async function moveStock(dailyRecordId: string, variantId: string, delta:
       const item = await ensureItem(dailyRecordId, variantId);
       await checkReserved(day.date, variantId, item.currentQuantity + delta);
     }
-    return applyStockDelta(dailyRecordId, variantId, delta, type, { description });
+    return applyStockDelta(dailyRecordId, variantId, delta, type, { description, ...(type === 'entrada' ? { entryKind: opts.entryKind ?? null } : {}) });
   });
 }
 
@@ -192,11 +203,17 @@ export async function setStock(dailyRecordId: string, variantId: string, quantit
     const delta = quantity - item.currentQuantity;
     if (delta === 0) return null;
     if (delta < 0 && !opts.allowBelowReserved) await checkReserved(day.date, variantId, quantity);
+    // subiu porque chegou mercadoria: é entrada (nova ou reposição), não ajuste
+    if (delta > 0 && opts.entryKind) return applyStockDelta(dailyRecordId, variantId, delta, 'entrada', { entryKind: opts.entryKind, description: description === 'Ajuste manual' ? undefined : description });
     return applyStockDelta(dailyRecordId, variantId, delta, 'ajuste', { description });
   });
 }
 
-/** Desfaz uma movimentação de estoque com uma movimentação inversa (nunca apaga). */
+/**
+ * Desfaz uma movimentação de estoque com uma movimentação inversa (nunca apaga).
+ * Movimento de um dia já encerrado: o desfazimento entra no dia de HOJE, ligado ao original
+ * (o dia encerrado não muda).
+ */
 export async function undoMovement(movementId: string) {
   return db.transaction('rw', STOCK_TABLES(), async () => {
     const mv = await db.stockMovements.get(movementId);
@@ -206,9 +223,15 @@ export async function undoMovement(movementId: string) {
     if (!mv.quantity) throw new UserError('Este registro não mexe no estoque.');
     const already = await db.stockMovements.filter((m) => m.reversedMovementId === movementId).count();
     if (already) throw new UserError('Esta movimentação já foi desfeita.');
-    await assertOpen(mv.dailyRecordId);
-    return applyStockDelta(mv.dailyRecordId, mv.variantId, -mv.quantity, 'correcao', {
-      reversedMovementId: mv.id, description: 'Desfazer movimentação',
+    const origDay = await db.dailyRecords.get(mv.dailyRecordId);
+    let dayId = mv.dailyRecordId;
+    if (origDay?.status === 'closed') {
+      const today = await todayOpenDay();
+      if (!today) throw new UserError('Este movimento é de um dia encerrado. Inicie o dia de hoje para desfazer (o desfazimento entra hoje).');
+      dayId = today.id;
+    } else await assertOpen(mv.dailyRecordId);
+    return applyStockDelta(dayId, mv.variantId, -mv.quantity, 'correcao', {
+      reversedMovementId: mv.id, description: origDay?.status === 'closed' ? `Desfazer movimentação de ${origDay.date.split('-').reverse().join('/')}` : 'Desfazer movimentação',
     });
   });
 }

@@ -80,7 +80,7 @@ describe('arquivadas e excluídas fora do relatório', () => {
     expect(w).not.toContain('Velha');
     expect(await erros()).toEqual([]);
   });
-  it('excluir: nunca vendida → some de vez; vendida → some de tudo, venda antiga fica no histórico', async () => {
+  it('excluir: some de tudo, mas o histórico fica (movimentos de quem nunca vendeu e vendas de quem vendeu)', async () => {
     const d = await setup('exc1');
     const g = await createGroup({ name: 'Extra' });
     const nunca = await createVariant({ groupId: g.id, name: 'Nunca', startQuantity: 3, dailyRecordId: d.id });
@@ -88,9 +88,9 @@ describe('arquivadas e excluídas fora do relatório', () => {
     await moveStock(d.id, nunca.id, 2, 'entrada');
     const o = await createOrder({ orderId: uid(), dailyRecordId: d.id, paymentMethod: 'pix', lines: [{ variantId: vendida.id, quantity: 1, unitPriceInCents: 7000 }] });
     await archiveVariant(nunca.id, true); await archiveVariant(vendida.id, true);
-    expect(await deleteVariant(nunca.id)).toBe('apagada');
-    expect(await db.variants.get(nunca.id)).toBeUndefined();
-    expect(await db.stockMovements.where('variantId').equals(nunca.id).count()).toBe(0);
+    expect(await deleteVariant(nunca.id)).toBe('escondida');
+    expect((await db.variants.get(nunca.id))!.deletedAt).toBeTruthy(); // o registro fica
+    expect(await db.stockMovements.where('variantId').equals(nunca.id).count()).toBe(1); // a entrada de +2 continua no histórico
     expect(await deleteVariant(vendida.id)).toBe('escondida');
     expect((await db.variants.get(vendida.id))!.deletedAt).toBeTruthy();
     await expect(archiveVariant(vendida.id, false)).rejects.toThrow(/excluída/);
@@ -314,7 +314,10 @@ describe.skipIf(!REAL)('dados reais do celular (02/11)', () => {
     expect(await erros()).toEqual([]);
     // excluir todas as arquivadas
     let apagadas = 0, escondidas = 0;
-    for (const v of archived) (await deleteVariant(v.id)) === 'apagada' ? apagadas++ : escondidas++;
+    // excluir nunca apaga o histórico: todas ficam escondidas, com os movimentos guardados
+    const movesBefore = await db.stockMovements.count();
+    for (const v of archived) { await deleteVariant(v.id); escondidas++; }
+    expect(await db.stockMovements.count()).toBe(movesBefore);
     const after = await daySummary(day.id, day.date);
     const w = whatsappReport(day.date, after);
     for (const v of archived) expect(entrouSection(w), `arquivada ${v.name} no relatório`).not.toMatch(new RegExp(`Cor ${v.name}: \\+`));

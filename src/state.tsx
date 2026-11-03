@@ -2,14 +2,15 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { useLiveQuery } from 'dexie-react-hooks';
 import { ensureDailyPay } from './services/cash';
 import { autoCloseOldDays } from './services/days';
+import { setActor } from './lib/actor';
 import { db } from './db/db';
 import type { DailyRecord } from './db/types';
-import { todayStr, uid } from './lib/util';
+import { registerCustomColors, todayStr, uid } from './lib/util';
 import { DEFAULT_SETTINGS, getAllSettings, type AppSettings } from './services/settings';
 import type { CartLine } from './services/sales';
 
 export type Tab = 'inicio' | 'estoque' | 'vender' | 'caixa' | 'historico';
-export type Overlay = null | 'menu' | 'sobre' | 'transferir' | 'cadastro' | 'backup' | 'config' | 'fechar' | 'checkout' | 'comparar' | 'pix' | 'juntar' | 'novidades';
+export type Overlay = null | 'menu' | 'sobre' | 'transferir' | 'cadastro' | 'backup' | 'config' | 'fechar' | 'checkout' | 'comparar' | 'pix' | 'juntar' | 'novidades' | 'movimentos' | 'importar';
 
 interface Ctx {
   date: string;
@@ -28,6 +29,14 @@ interface Ctx {
   resetCart: () => void;
   /** virou a data com uma venda no meio: o novo dia espera a venda terminar (data nova) */
   newDayWaiting: string | null;
+  /** Histórico de movimentações aberto numa peça (null = todas) */
+  historyFor: string | null;
+  /** abre o Histórico de movimentações (com uma peça: já mostra a vida dela) */
+  openHistory: (variantId?: string | null) => void;
+  /** abre o cadastro já em “novo produto” (origem: de qual tela veio) */
+  catalogIntent: 'vender' | null;
+  openNewProduct: (from: 'vender') => void;
+  clearCatalogIntent: () => void;
 }
 
 const AppCtx = createContext<Ctx | null>(null);
@@ -40,6 +49,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [cartId, setCartId] = useState(uid());
   const day = useLiveQuery(async () => (await db.dailyRecords.where('date').equals(date).first()) ?? null, [date]);
   const settings = useLiveQuery(getAllSettings, []) ?? DEFAULT_SETTINGS;
+  setActor(settings.userName); // quem fez cada registro (histórico)
+  registerCustomColors(settings.customColors); // nomes das cores criadas pela usuária
   // carrinho nunca fica com peça que não existe mais (recomeçar, restaurar, juntar, peça apagada) nem sem dia
   const variantIds = useLiveQuery(async () => new Set(await db.variants.toCollection().primaryKeys() as string[]), []);
   useEffect(() => {
@@ -65,6 +76,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const busyRef = useRef(false);
   busyRef.current = cart.length > 0 || overlay === 'checkout';
   const [newDayWaiting, setNewDayWaiting] = useState<string | null>(null);
+  const [historyFor, setHistoryFor] = useState<string | null>(null);
+  const [catalogIntent, setCatalogIntent] = useState<'vender' | null>(null);
+  const openNewProduct = useCallback((from: 'vender') => { setCatalogIntent(from); setOverlay('cadastro'); }, []);
+  const clearCatalogIntent = useCallback(() => setCatalogIntent(null), []);
+  const openHistory = useCallback((variantId: string | null = null) => { setHistoryFor(variantId); setOverlay('movimentos'); }, []);
   const checkRef = useRef<() => void>(() => undefined);
   useEffect(() => {
     const check = () => {
@@ -95,8 +111,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const resetCart = useCallback(() => { setCart([]); setCartId(uid()); }, []);
 
   const value = useMemo(() => ({
-    date, setDate, day, settings, tab, setTab, overlay, setOverlay, cart, cartId, addToCart, setCart, resetCart, newDayWaiting,
-  }), [date, setDate, day, settings, tab, setTab, overlay, cart, cartId, addToCart, resetCart, newDayWaiting]);
+    date, setDate, day, settings, tab, setTab, overlay, setOverlay, cart, cartId, addToCart, setCart, resetCart, newDayWaiting, historyFor, openHistory, catalogIntent, openNewProduct, clearCatalogIntent,
+  }), [date, setDate, day, settings, tab, setTab, overlay, cart, cartId, addToCart, resetCart, newDayWaiting, historyFor, openHistory, catalogIntent, openNewProduct, clearCatalogIntent]);
   return <AppCtx.Provider value={value}>{children}</AppCtx.Provider>;
 }
 

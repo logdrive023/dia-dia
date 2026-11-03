@@ -1,7 +1,9 @@
+import { variantLabel } from '../services/catalog';
+import { EntryReasonPicker, type IncreaseReason } from '../components/EntryReason';
 import { useMemo, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../db/db';
-import type { MovementType, StockMovement } from '../db/types';
+import type { EntryKind, MovementType, StockMovement } from '../db/types';
 import { normalize } from '../lib/util';
 import { moveStock, ReservedError, setStock, undoMovement, type StockOpts } from '../services/days';
 import { setForSale } from '../services/catalog';
@@ -11,8 +13,8 @@ import { DayNotices, DayBar, StartDayCard } from '../components/day';
 import { StockFlow } from '../components/StockFlow';
 import { Badge, Button, Card, Chip, Empty, Field, HelpButton, InfoTip, Input, Sheet, Swatch, useBusy, useUi } from '../components/ui';
 
-type Filter = 'todos' | 'com' | 'sem' | 'baixo' | 'vender';
-const FILTERS: [Filter, string][] = [['todos', 'Todos'], ['baixo', 'Para repor'], ['com', 'Com estoque'], ['sem', 'Sem estoque'], ['vender', 'Para vender']];
+type Filter = 'todos' | 'com' | 'sem' | 'baixo' | 'vender' | 'ideal' | 'semideal' | 'res';
+const FILTERS: [Filter, string][] = [['todos', 'Todos'], ['baixo', 'Para repor'], ['com', 'Com estoque'], ['sem', 'Sem estoque'], ['res', '🔒 Reservadas'], ['vender', 'Para vender'], ['ideal', '🎯 Com ideal'], ['semideal', 'Sem ideal']];
 
 export const MOVE_LABEL: Record<MovementType, string> = {
   venda: 'Venda', entrada: 'Entrada', saida: 'Saída', perda: 'Perda', ajuste: 'Ajuste', correcao: 'Correção',
@@ -20,7 +22,7 @@ export const MOVE_LABEL: Record<MovementType, string> = {
 };
 
 export default function Stock() {
-  const { day, settings } = useApp();
+  const { day, settings, setOverlay } = useApp();
   const { run, toast } = useUi();
   const [q, setQ] = useState('');
   const [filter, setFilter] = useState<Filter>('todos');
@@ -36,11 +38,14 @@ export default function Stock() {
     const nq = normalize(q);
     const filtered = rows.filter((r) => {
       if (r.variant.archivedAt || r.group.archivedAt) return r.item.currentQuantity !== 0; // arquivado com saldo continua visível
-      if (nq && !normalize(`${r.group.name} ${r.variant.name}`).includes(nq)) return false;
+      if (nq && !normalize(`${r.group.name} ${variantLabel(r.variant)}`).includes(nq)) return false;
       if (filter === 'com') return r.item.currentQuantity > 0;
       if (filter === 'sem') return r.item.currentQuantity <= 0;
       if (filter === 'baixo') return r.restock > 0 || r.out;
       if (filter === 'vender') return sellIds.has(r.group.id);
+      if (filter === 'ideal') return !r.variant.restockOff;
+      if (filter === 'semideal') return !!r.variant.restockOff;
+      if (filter === 'res') return r.reserved > 0;
       return true;
     });
     const map = new Map<string, { group: StockRow['group']; rows: StockRow[] }>();
@@ -53,7 +58,7 @@ export default function Stock() {
 
   const guarded = useReserveGuard();
   const quick = async (r: StockRow, delta: number) => {
-    const mv = await guarded((o) => moveStock(r.item.dailyRecordId, r.variant.id, delta, delta > 0 ? 'entrada' : 'saida', undefined, o));
+    const mv = await guarded((o) => moveStock(r.item.dailyRecordId, r.variant.id, delta, delta > 0 ? 'entrada' : 'saida', undefined, delta > 0 ? { ...o, entryKind: settings.entryNewByDefault ? 'nova' : 'reposicao' } : o));
     if (mv) toast(`${delta > 0 ? 'Entrada +1' : 'Saída −1'} · ${r.variant.name}${delta < 0 ? ' (não é venda)' : ''}`, 'info',
       { label: 'Desfazer', fn: () => run(() => undoMovement(mv.id)) });
   };
@@ -85,6 +90,7 @@ export default function Stock() {
             </div>
             <div className="flex gap-2 mt-3">
               <button onClick={() => setShowMoves(true)} className="flex-1 h-11 rounded-xl bg-slate-100 text-[14px] font-semibold text-slate-700 active:bg-slate-200">🧾 Movimentos do dia</button>
+              <button onClick={() => setOverlay('importar')} className="h-11 px-3 rounded-xl bg-lime-100 text-[14px] font-semibold text-lime-900 active:bg-lime-200">📋 Importar</button>
               {!locked && (
                 <HelpButton icon="❓" label="Como usar" title="Estoque: + e −" example={[
                   ['📥', <>Chegaram 3 Plomo Vermelho → 3× no <b>+</b></>],
@@ -166,7 +172,7 @@ export default function Stock() {
                           <button className="flex-1 flex items-center gap-3 min-w-0 text-left py-1" onClick={() => setSel(r)}>
                             <Swatch color={r.variant.color} size={24} />
                             <span className="min-w-0">
-                              <span className="block font-semibold text-slate-800 break-words">{r.variant.name}</span>
+                              <span className="block font-semibold text-slate-800 break-words">{variantLabel(r.variant)}</span>
                               <StockFlow start={r.item.initialQuantity} now={r.item.currentQuantity} restock={r.restock} out={r.out} reserved={r.reserved} />
                               {r.variant.forSale === false && <span className="inline-block mt-1 rounded-full bg-slate-800 text-white px-2 py-0.5 text-[10px] font-bold">🔒 guardada · fora da venda</span>}
                             </span>
@@ -248,9 +254,11 @@ function ForSaleSwitch({ variantId }: { variantId: string }) {
 function VariantSheet({ row, onClose, locked }: { row: StockRow | null; onClose: () => void; locked: boolean }) {
   const guarded = useReserveGuard();
   const [busy, wrap] = useBusy();
+  const { settings, openHistory } = useApp();
   const [type, setType] = useState<'entrada' | 'saida' | 'perda' | 'ajuste'>('entrada');
   const [qty, setQty] = useState('');
   const [note, setNote] = useState('');
+  const [kind, setKind] = useState<IncreaseReason | null>(null);
   const live = useLiveQuery(async () => {
     if (!row) return null;
     const item = await db.dailyStockItems.where('[dailyRecordId+variantId]').equals([row.item.dailyRecordId, row.variant.id]).first();
@@ -261,27 +269,35 @@ function VariantSheet({ row, onClose, locked }: { row: StockRow | null; onClose:
   if (!row) return null;
   const current = live?.item?.currentQuantity ?? row.item.currentQuantity;
   const n = Number(qty);
-  const valid = qty !== '' && Number.isInteger(n) && (type === 'ajuste' ? n >= 0 : n > 0);
+  // entrada: nova ou reposição (padrão nas Configurações); “Definir” que sobe: pergunta o motivo
+  const entryKind = kind && kind !== 'ajuste' ? kind : (settings.entryNewByDefault ? 'nova' : 'reposicao');
+  const definirSobe = type === 'ajuste' && qty !== '' && n > current;
+  const valid = qty !== '' && Number.isInteger(n) && (type === 'ajuste' ? n >= 0 : n > 0) && (!definirSobe || kind !== null);
   const save = () => wrap(async () => {
     const r = await guarded(async (o) => {
-      if (type === 'ajuste') return setStock(row.item.dailyRecordId, row.variant.id, n, note || 'Ajuste manual', o);
-      return moveStock(row.item.dailyRecordId, row.variant.id, type === 'entrada' ? n : -n, type, note || undefined, o);
+      if (type === 'ajuste') return setStock(row.item.dailyRecordId, row.variant.id, n, note || 'Ajuste manual', definirSobe && kind !== 'ajuste' ? { ...o, entryKind: kind as EntryKind } : o);
+      return moveStock(row.item.dailyRecordId, row.variant.id, type === 'entrada' ? n : -n, type, note || undefined, type === 'entrada' ? { ...o, entryKind } : o);
     }, 'Salvo');
-    if (r !== undefined) { setQty(''); setNote(''); }
+    if (r !== undefined) { setQty(''); setNote(''); setKind(null); }
   });
   return (
-    <Sheet open onClose={onClose} title={<span className="flex items-center gap-2"><Swatch color={row.variant.color} />{row.group.name} · {row.variant.name}</span>}>
+    <Sheet open onClose={onClose} title={<span className="flex items-center gap-2"><Swatch color={row.variant.color} />{row.group.name} · {variantLabel(row.variant)}</span>}>
       <ForSaleSwitch variantId={row.variant.id} />
-      <div className="grid grid-cols-3 gap-2 text-center mb-4">
-        <Card className="p-2"><div className="text-xs text-slate-500">Início do dia</div><div className="text-xl font-bold">{row.item.initialQuantity}</div></Card>
-        <Card className="p-2"><div className="text-xs text-slate-500">Agora</div><div className="text-xl font-extrabold text-blue-600">{current}</div></Card>
-        <Card className="p-2"><div className="text-xs text-slate-500">Disponível</div><div className="text-xl font-bold">{current - row.reserved}</div></Card>
+      <div className="grid grid-cols-4 gap-1.5 text-center mb-2">
+        <Card className="p-2"><div className="text-[11px] text-slate-500 leading-tight">Começou o dia</div><div className="text-xl font-bold">{row.item.initialQuantity}</div></Card>
+        <Card className="p-2 ring-2 ring-blue-200"><div className="text-[11px] text-slate-500 leading-tight">📦 Físico agora</div><div className="text-xl font-extrabold text-blue-600">{current}</div></Card>
+        <Card className="p-2"><div className="text-[11px] text-slate-500 leading-tight">🔒 Reservado</div><div className={`text-xl font-bold ${row.reserved ? 'text-purple-700' : 'text-slate-400'}`}>{row.reserved}</div></Card>
+        <Card className="p-2"><div className="text-[11px] text-slate-500 leading-tight">🏷️ Disponível</div><div className="text-xl font-bold">{Math.max(0, current - row.reserved)}</div></Card>
       </div>
+      <p className="text-[12px] text-slate-500 mb-4 leading-snug">
+        {current > 0 && current - row.reserved <= 0 ? <><b className="text-purple-700">Tudo reservado:</b> as {current} peça(s) estão no estoque, guardadas para alguém, por isso não aparecem para vender. </> : null}
+        {row.variant.restockOff ? 'Sem estoque ideal.' : <>🎯 Estoque ideal {row.ideal} (meta, não é estoque){row.restock > 0 ? ` → repor ${row.restock}` : ''}.</>}
+      </p>
       {!locked && (
         <>
           <div className="grid grid-cols-4 gap-1.5 mb-3">
             {(['entrada', 'saida', 'perda', 'ajuste'] as const).map((t) => (
-              <button key={t} onClick={() => setType(t)}
+              <button key={t} onClick={() => { setType(t); setKind(null); }}
                 className={`h-11 rounded-xl text-sm font-semibold border ${type === t ? 'bg-blue-600 text-white border-blue-600' : 'bg-white border-slate-200 text-slate-600'}`}>
                 {t === 'ajuste' ? 'Definir' : MOVE_LABEL[t]}
               </button>
@@ -289,12 +305,21 @@ function VariantSheet({ row, onClose, locked }: { row: StockRow | null; onClose:
           </div>
           <Field label={type === 'ajuste' ? 'Quantidade correta agora' : 'Quantidade'}
             hint={type === 'ajuste' ? 'Gera um ajuste com a diferença. Ajuste não conta como venda.' : undefined}>
-            <Input inputMode="numeric" pattern="[0-9]*" value={qty} onChange={(e) => setQty(e.target.value.replace(/\D/g, ''))} placeholder="0" autoFocus />
+            {/* sem autoFocus: o teclado só abre quando a pessoa toca no campo */}
+            <Input inputMode="numeric" pattern="[0-9]*" value={qty} onChange={(e) => setQty(e.target.value.replace(/\D/g, ''))} placeholder="0" />
           </Field>
+          {type === 'entrada' && <EntryReasonPicker value={kind ?? entryKind} onChange={setKind} />}
+          {definirSobe && (
+            <>
+              <div className="text-[13px] font-semibold text-slate-700 mb-1.5">Por que aumentou? (+{n - current})</div>
+              <EntryReasonPicker withAdjust value={kind} onChange={setKind} />
+            </>
+          )}
           <Field label="Observação (opcional)"><Input value={note} onChange={(e) => setNote(e.target.value)} /></Field>
           <Button className="w-full" size="lg" disabled={!valid || busy} onClick={save}>Salvar</Button>
         </>
       )}
+      <Button className="w-full mt-3" variant="outline" onClick={() => openHistory(row.variant.id)}>📜 Histórico desta peça (desde o cadastro)</Button>
       <h3 className="font-bold text-slate-700 mt-5 mb-2">Movimentos do dia</h3>
       <MoveList moves={live?.moves ?? []} locked={locked} />
     </Sheet>

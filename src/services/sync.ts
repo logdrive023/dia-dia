@@ -14,7 +14,7 @@
 import { REPORT_PREFS_AT } from './settings';
 import { db } from '../db/db';
 import type {
-  CashMovement, CashRecord, DailyRecord, DailyStockItem, Group, Order, Reservation, Sale, StockMovement, Variant,
+  CashMovement, CashRecord, DailyRecord, DailyStockItem, Group, Order, Reservation, Sale, StockMovement, Variant, ImportRecord,
 } from '../db/types';
 import { normalize, nowIso, uid } from '../lib/util';
 import { buildBackup, summarizeBackup, validateBackup, type BackupFile } from './backup';
@@ -128,6 +128,12 @@ export async function mergeBackup(raw: unknown): Promise<MergeResult> {
       const cr = await db.cashRecords.where('dailyRecordId').equals(id).first();
       const day = localDays.find((x) => x.id === id);
       if (cr && day) await db.cashRecords.update(cr.id, { status: day.status });
+    }
+
+    // ---- importações (texto colado e o que mudou): entram pelo id, não duplicam
+    for (const im of (d as unknown as { imports?: Rows<ImportRecord> }).imports ?? []) {
+      if (await db.imports.get(im.id)) continue;
+      await db.imports.add({ ...im, dailyRecordId: md(im.dailyRecordId), lines: im.lines.map((l) => ({ ...l, variantId: mv(l.variantId) })) });
     }
 
     // ---- chaves da mensagem do WhatsApp: vale o celular que mudou por último

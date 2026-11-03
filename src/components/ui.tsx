@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { colorName, NAMED_COLORS } from '../lib/util';
+import { COLOR_FAMILIES, colorName, getCustomColors } from '../lib/util';
 
 // ---------------- botões e blocos ----------------
 
@@ -66,7 +66,11 @@ export function Swatch({ color, size = 18 }: { color?: string; size?: number }) 
 export function ColorField({ value, onChange, label = 'Cor', colors }: {
   value?: string | null; onChange: (c: string) => void; label?: ReactNode; colors?: string[];
 }) {
-  const list = colors ?? NAMED_COLORS.map(([c]) => c);
+  // em famílias (neutras, quentes, frias) + as cores da usuária; lista própria (ex.: grupos) fica numa linha só
+  const families = colors ? [{ key: 'lista', label: '', colors }] : [
+    ...COLOR_FAMILIES,
+    ...(getCustomColors().length ? [{ key: 'minhas', label: 'Minhas cores', colors: getCustomColors().map(([c]) => c) }] : []),
+  ];
   return (
     <div className="mb-4">
       <div className="flex items-center gap-2 mb-1.5 text-sm font-semibold text-slate-700">
@@ -77,12 +81,17 @@ export function ColorField({ value, onChange, label = 'Cor', colors }: {
           </span>
         )}
       </div>
-      <div className="flex flex-wrap gap-2">
-        {list.map((c) => (
-          <button key={c} type="button" onClick={() => onChange(c)} aria-label={`Cor ${colorName(c)}`} aria-pressed={value === c} title={colorName(c)}
-            className={`rounded-full p-0.5 ${value === c ? 'ring-2 ring-offset-1 ring-blue-500' : ''}`}><Swatch color={c} size={32} /></button>
-        ))}
-      </div>
+      {families.map((f) => (
+        <div key={f.key} className="mb-1.5">
+          {f.label && <div className="text-[11px] font-bold uppercase tracking-wide text-slate-400 mb-1">{f.label}</div>}
+          <div className="flex flex-wrap gap-2">
+            {f.colors.map((c) => (
+              <button key={c} type="button" onClick={() => onChange(c)} aria-label={`Cor ${colorName(c)}`} aria-pressed={value === c} title={colorName(c)}
+                className={`rounded-full p-0.5 ${value === c ? 'ring-2 ring-offset-1 ring-blue-500' : ''}`}><Swatch color={c} size={32} /></button>
+            ))}
+          </div>
+        </div>
+      ))}
     </div>
   );
 }

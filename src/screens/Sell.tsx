@@ -1,3 +1,4 @@
+import { variantLabel } from '../services/catalog';
 import { Fragment, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../db/db';
@@ -14,14 +15,20 @@ import { DayNotices, DayBar, StartDayCard } from '../components/day';
 import { StockFlow } from '../components/StockFlow';
 import { Button, Card, Chip, Empty, Field, HelpButton, InfoTip, Input, Sheet, Stepper, Swatch, Toggle, useBusy, useUi } from '../components/ui';
 
-type Filter = 'todos' | 'disp' | 'baixo' | 'esg' | 'res';
-const FILTERS: [Filter, string][] = [['todos', 'Todos'], ['disp', 'Disponíveis'], ['baixo', 'Para repor'], ['esg', 'Esgotados'], ['res', 'Com reservas']];
+type Filter = 'todos' | 'disp' | 'baixo' | 'esg' | 'res' | 'ideal' | 'semideal';
+const FILTERS: [Filter, string][] = [['todos', 'Todos'], ['disp', 'Disponíveis'], ['baixo', 'Para repor'], ['esg', 'Esgotados'], ['res', 'Com reservas'], ['ideal', '🎯 Com ideal'], ['semideal', 'Sem ideal']];
 
 export default function Sell() {
-  const { day, settings, cart, addToCart, setCart, setOverlay } = useApp();
+  const { day, settings, cart, addToCart, setCart, setOverlay, openHistory, openNewProduct } = useApp();
   const { run, confirm } = useUi();
   const [scope, setScope] = useState<'sel' | 'all'>('sel');
   const [filter, setFilter] = useState<Filter>('todos');
+  const [size, setSize] = useState('');
+  // reservas ativas: dá para recolher (lembra no aparelho) e filtrar por grupo e por peça/cliente
+  const [resOpen, setResOpenRaw] = useState(() => { try { return localStorage.getItem('reservasAbertas') !== '0'; } catch { return true; } });
+  const setResOpen = (v: boolean) => { setResOpenRaw(v); try { localStorage.setItem('reservasAbertas', v ? '1' : '0'); } catch { /* ok */ } };
+  const [resGroup, setResGroup] = useState('');
+  const [resQ, setResQ] = useState('');
   const [q, setQ] = useState('');
   const [reserveRow, setReserveRow] = useState<StockRow | null>(null);
   const [convert, setConvert] = useState<Reservation | null>(null);
@@ -61,6 +68,9 @@ export default function Sell() {
         if (filter === 'baixo') return r.restock > 0;
         if (filter === 'esg') return r.out;
         if (filter === 'res') return r.reserved > 0;
+        if (filter === 'ideal') return !r.variant.restockOff;
+        if (filter === 'semideal') return !!r.variant.restockOff;
+        if (size && (r.variant.size ?? '') !== size) return false;
         return true;
       });
       const g = gr[0]?.group ?? rows.find((r) => r.group.id === e.groupId)?.group ?? allGroups?.find((x) => x.id === e.groupId) ?? null;
@@ -70,7 +80,8 @@ export default function Sell() {
 
   const onSaleCount = (rows ?? []).filter((r) => r.variant.forSale !== false && !r.variant.archivedAt && !r.group.archivedAt).length;
   const hiddenCount = (rows ?? []).filter((r) => r.variant.forSale === false && !r.variant.archivedAt && !r.group.archivedAt).length;
-  const names = useMemo(() => new Map((rows ?? []).map((r) => [r.variant.id, `${r.group.name} ${r.variant.name}`])), [rows]);
+  const names = useMemo(() => new Map((rows ?? []).map((r) => [r.variant.id, `${r.group.name} ${variantLabel(r.variant)}`])), [rows]);
+  const sizesInUse = useMemo(() => [...new Set((rows ?? []).map((r) => r.variant.size).filter(Boolean) as string[])], [rows]);
 
   return (
     <div className={cartCount ? 'pb-20' : ''}>
@@ -109,6 +120,8 @@ export default function Sell() {
             <Input placeholder="🔍 Buscar peça ou cor..." value={q} onChange={(e) => setQ(e.target.value)} />
             <Button variant="outline" className="h-12 shrink-0 text-sm" onClick={() => setConfig(true)} aria-label="Escolher grupos">⚙️ Grupos</Button>
           </div>
+          {/* produto novo criado aqui entra no cadastro, no estoque de hoje e já à venda */}
+          {!locked && <button onClick={() => openNewProduct('vender')} className="mt-2 w-full h-10 rounded-xl border-2 border-dashed border-blue-300 text-blue-700 text-[14px] font-semibold active:bg-blue-50">＋ Novo produto (entra no estoque e na venda)</button>}
           <div className="flex gap-2 overflow-x-auto no-scrollbar mt-2 -mx-4 px-4 pb-1 items-center">
             <Chip active={scope === 'sel'} onClick={() => setScope('sel')}>⭐ Para vender</Chip>
             <Chip active={scope === 'all'} onClick={() => setScope('all')}>Todos os grupos</Chip>
@@ -117,6 +130,12 @@ export default function Sell() {
               <button key={k} onClick={() => setFilter(k)}
                 className={`shrink-0 h-10 px-3.5 rounded-full text-sm font-medium transition ${filter === k ? 'bg-slate-800 text-white' : 'text-slate-600 bg-slate-200/70 active:bg-slate-300'}`}>{l}</button>
             ))}
+            {sizesInUse.length > 0 && (
+              <select aria-label="Tamanho" value={size} onChange={(e) => setSize(e.target.value)} className="shrink-0 h-10 rounded-full border border-slate-300 bg-white px-2 text-sm">
+                <option value="">Todo tamanho</option>
+                {sizesInUse.map((x) => <option key={x} value={x}>Tam. {x}</option>)}
+              </select>
+            )}
           </div>
           </div>
 
@@ -188,7 +207,8 @@ export default function Sell() {
                       <div key={r.variant.id} className={`flex items-center gap-3 pl-4 pr-2.5 py-2.5 ${c > 0 ? 'bg-emerald-50' : ''} ${r.available <= 0 && !c ? 'opacity-60' : ''}`}>
                         <span className="rounded-full ring-2 ring-offset-1 ring-slate-100"><Swatch color={r.variant.color} size={26} /></span>
                         <div className="flex-1 min-w-0">
-                          <div className="font-bold text-slate-800 text-[16px] leading-tight break-words">{r.variant.name}</div>
+                          <button onClick={() => openHistory(r.variant.id)} aria-label={`Histórico de ${r.variant.name}`}
+                            className="font-bold text-slate-800 text-[16px] leading-tight break-words text-left">{variantLabel(r.variant)} <span className="text-[12px] font-normal text-slate-400" aria-hidden>📜</span></button>
                           {r.available > 0 && <div className="text-[13px] font-bold text-slate-700 mt-0.5 tabular-nums">🏷️ {r.available} à venda</div>}
                           <StockFlow size="sm" start={r.item.initialQuantity} now={r.item.currentQuantity} restock={r.restock} out={r.out} reserved={r.reserved} />
                         </div>
@@ -209,7 +229,10 @@ export default function Sell() {
                               className="h-11 px-3.5 rounded-xl bg-blue-600 text-white text-[15px] font-bold shadow-sm shadow-blue-600/30 active:scale-95 transition">+ Vender</button>
                           </div>
                         ) : (
-                          <span className="text-[12px] text-slate-400 pr-1">sem peça</span>
+                          // tem peça, mas está toda reservada: diz isso (antes aparecia “sem peça”)
+                          r.item.currentQuantity > 0
+                            ? <span className="text-[12px] font-semibold text-purple-700 pr-1 text-right leading-tight">🔒 {r.item.currentQuantity === 1 ? 'reservada' : `todas as ${r.item.currentQuantity} reservadas`}</span>
+                            : <span className="text-[12px] text-slate-400 pr-1">sem peça</span>
                         ))}
                       </div>
                     );
@@ -222,7 +245,8 @@ export default function Sell() {
 
           {!!reservations?.length && (
             <>
-              <h3 className="flex items-center gap-1.5 text-[13px] font-bold uppercase tracking-wide text-slate-500 mt-5 mb-2 px-1">Reservas ativas
+              <h3 className="flex items-center gap-1.5 text-[13px] font-bold uppercase tracking-wide text-slate-500 mt-5 mb-2 px-1">
+                <button onClick={() => setResOpen(!resOpen)} aria-expanded={resOpen} className="flex items-center gap-1 uppercase">{resOpen ? '▾' : '▸'} Reservas ativas ({reservations.length})</button>
                 <InfoTip title="Reservas" example={[
                   ['📌', 'Ana pediu 1 Plomo Rosa para amanhã → Reservar 1 para Ana'],
                   ['🏷️', 'A peça sai do “à venda”'],
@@ -232,8 +256,22 @@ export default function Sell() {
                   Reservar guarda a peça para uma cliente: ela continua no estoque, mas ninguém mais consegue vender. Se a cliente desistir, toque em Cancelar.
                 </InfoTip>
               </h3>
-              <div className="space-y-2">
-                {reservations.map((r) => (
+              {resOpen && (
+                <div className="grid grid-cols-2 gap-2 mb-2">
+                  <select aria-label="Grupo da reserva" value={resGroup} onChange={(e) => setResGroup(e.target.value)} className="h-10 rounded-xl border border-slate-200 bg-white px-2 text-[14px] min-w-0">
+                    <option value="">Todos os grupos</option>
+                    {[...new Map((rows ?? []).map((x) => [x.group.id, x.group.name])).entries()].map(([id, n]) => <option key={id} value={id}>{n}</option>)}
+                  </select>
+                  <Input placeholder="Peça, cor, tamanho ou cliente" value={resQ} onChange={(e) => setResQ(e.target.value)} aria-label="Buscar reserva" />
+                </div>
+              )}
+              {resOpen && <div className="space-y-2">
+                {reservations.filter((r) => {
+                  const row = (rows ?? []).find((x) => x.variant.id === r.variantId);
+                  if (resGroup && row?.group.id !== resGroup) return false;
+                  const t = normalize(resQ);
+                  return !t || normalize(`${names.get(r.variantId) ?? ''} ${r.customer ?? ''} ${r.notes ?? ''}`).includes(t);
+                }).map((r) => (
                   <Card key={r.id} className="p-3 flex items-center gap-2">
                     <div className="flex-1 min-w-0">
                       <div className="font-semibold text-slate-800 break-words">{r.quantity}× {names.get(r.variantId)}</div>
@@ -250,7 +288,7 @@ export default function Sell() {
                     )}
                   </Card>
                 ))}
-              </div>
+              </div>}
             </>
           )}
         </>

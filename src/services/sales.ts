@@ -5,6 +5,7 @@ import { audit } from './audit';
 import { UserError } from './catalog';
 import { applyStockDelta, assertOpen, ensureItem } from './days';
 import { addTombstones } from './sync';
+import { actor } from '../lib/actor';
 
 export interface CartLine {
   variantId: string;
@@ -122,7 +123,7 @@ export async function createOrder(params: {
         relatedOrderId: order.id, createdAt: now, description: order.customer ? `Venda — ${order.customer}` : 'Venda',
       });
     }
-    await db.orders.add(order);
+    await db.orders.add({ ...order, by: actor() });
     const sales: Sale[] = lines.map((l) => ({
       id: uid(), orderId: order.id, dailyRecordId: day.id, variantId: l.variantId, quantity: l.quantity,
       unitPriceInCents: l.unitPriceInCents, totalInCents: (l.unitPriceInCents ?? 0) * l.quantity,
@@ -260,7 +261,7 @@ export async function createReservation(p: { dailyRecordId: string; variantId: s
       id: uid(), dailyRecordId: day.id, date: day.date, variantId: p.variantId, quantity: p.quantity,
       customer: p.customer?.trim().slice(0, 80) || undefined, notes: p.notes?.slice(0, 200), status: 'active', createdAt: now, updatedAt: now,
     };
-    await db.reservations.add(r);
+    await db.reservations.add({ ...r, by: actor() });
     // registro informativo: reserva não muda o estoque físico (quantity 0)
     await db.stockMovements.add({
       id: uid(), dailyRecordId: day.id, variantId: p.variantId, type: 'reserva', quantity: 0,

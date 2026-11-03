@@ -155,7 +155,7 @@ describe('cor arquivada: botão Excluir na lista (pela tela)', () => {
     click((await waitFor(() => within(sheet()).getAllByRole('button', { name: new RegExp(g.name) })))[0]);
     click(await screen.findByRole('button', { name: `Excluir ${v.name}` }));
     click((await screen.findAllByRole('button', { name: /^Excluir$/ })).slice(-1)[0]);
-    await waitFor(async () => expect(await db.variants.get(v.id)).toBeUndefined());
+    await waitFor(async () => expect((await db.variants.get(v.id))?.deletedAt).toBeTruthy()); // some das telas, o histórico fica
     await waitFor(() => expect(screen.queryByRole('button', { name: `Excluir ${v.name}` })).toBeNull());
   }, 30000);
 });
@@ -179,7 +179,7 @@ describe('chaves do repor e do estoque na mensagem (pela tela)', () => {
     }));
     click(await screen.findByRole('switch', { name: /Tem estoque mínimo/ }));
     await waitFor(async () => expect((await db.variants.get(v.id))!.minimumStock).not.toBeNull());
-    click(screen.getByRole('switch', { name: /Precisa repor/ }));
+    click(screen.getByRole('switch', { name: /Usar estoque ideal/ }));
     await waitFor(async () => expect((await db.variants.get(v.id))!.restockOff).toBe(true));
     expect(screen.queryByRole('switch', { name: /Tem estoque mínimo/ })).toBeNull(); // sem repor, some o mínimo
     for (let i = 0; i < 4; i++) { fireEvent.keyDown(document, { key: 'Escape' }); await new Promise((r) => setTimeout(r, 80)); }
