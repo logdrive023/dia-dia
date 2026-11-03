@@ -1,7 +1,8 @@
 # Melhorias de lógica — Dia a Dia
 
-Revisão do código em 31/10/2026 (commit `0c5243d`). Agora são **61 testes** passando (regras, ataques, tela e 10 dias seguidos).
-✅ = já corrigido no código (ainda sem commit). Veja também "Rodada de usabilidade" no fim.
+Histórico das revisões e correções, da primeira revisão (31/10/2026, commit `0c5243d`, 61 testes) até o uso real no celular
+(02/11/2026: **167 testes** passando, inclusive com os dados reais do celular). ✅ = corrigido no código.
+As rodadas estão em ordem; a mais nova é a **Rodada 4** no fim. Como o sistema funciona hoje: `SISTEMA.md`.
 
 Prioridade: 🔴 corrigir já · 🟠 importante · 🟡 melhoria · ⚪ manutenção
 
@@ -435,7 +436,82 @@ Um modelo independente confere todo dia: estoque peça por peça, reservas, sald
   - resumo do mês (vendido, peças, dias com venda, média e melhor dia);
   - cartões de dia com barra por forma de pagamento.
 
-### O que falta para ir para o celular (fora do código)
+### O que faltava para ir para o celular (fora do código) — ✅ feito
 1. `git rm --cached tsconfig.tsbuildinfo` e fazer o commit/push.
 2. No GitHub: Settings › Pages › Source: **GitHub Actions** (o workflow publica sozinho).
 3. Abrir o link no celular, **Adicionar à tela de início**, e fazer um teste rápido real (vender, encerrar, mandar no WhatsApp e testar sem internet).
+
+---
+
+## Rodada 4 — uso real no celular (01 e 02/11/2026) — ✅
+
+O app passou a ser usado de verdade (iPhone e Samsung, dois celulares). Cada pedido e cada problema encontrado no uso virou
+correção com teste. Tudo também aparece para a usuária em **Menu › Atualizações**.
+
+### Pix, caixa e diária
+- **Pix na tela**: QR code na venda (com o valor) e botão “⚡ Mostrar Pix” sem venda; QR regenerado limpo a partir do código
+  conferido pelo CRC (PNG em base64 dentro do app).
+- **iPhone × Android**: o app diz onde conferir (Neon no Samsung). Ler notificação do banco é impossível em app de navegador,
+  então a conferência é um toque: **“✅ Caiu”**. Pix conferido e depois corrigido → **“⚠️ Pix mudou”** (guarda o valor conferido).
+- **Caixa em forma de conta**: ontem separado (💵 dinheiro · 🏦 banco), hoje linha por linha (uma por forma de venda e por
+  saída), = Hoje, ✅ Total; “na mão” e “no banco” em linhas separadas.
+- **Diária de 150 automática** só no dia de hoje (dia antigo esquecido aberto não recebe; tirou no ✕, não volta).
+- **Dinheiro contado** muda a mensagem na hora (faltam / sobram / bateu).
+
+### Dois celulares e segurança dos dados
+- **Juntar com outro celular**: código em texto (base64) que **soma** os dois; produtos casam por nome, dias por data,
+  apagados não voltam (`tombstones`), importar de novo não muda nada. Teste maluco com rodadas aleatórias.
+- **Dados protegidos**: o app pede ao navegador para nunca apagar (`storage.persist`) e mostra o status; teste de gravação.
+  Conferido no Samsung.
+- **Testes presos à data → relógio fixo**: a suíte roda como se fosse 01/11/2026 (e em qualquer data com `HOJE=`).
+
+### Atualizações
+- O app procura versão nova sozinho (de hora em hora e ao voltar para a tela, no máximo a cada 10 min, ~1 KB).
+- **Menu › Atualizações** (o que mudou, selo “Novo”) e selo no cabeçalho “✓ Atualizado / 🆕 Atualizar”.
+- 🐛 **“Atualizar” sem efeito no computador**: o recarregar do plugin dependia de um evento que não chega quando a página
+  não está sob o service worker (Ctrl+Shift+R) ou quando outra aba ativou a versão. Agora `applyUpdate` **recarrega sempre**
+  (testado no navegador no caso exato que travava).
+
+### Bugs do uso real
+| Bug | Causa | Correção |
+|---|---|---|
+| Teclado abrindo sozinho no “Fechar venda” | foco automático | removido |
+| “2” no carrinho depois de zerar tudo | o reset não recarregava | recarrega + carrinho se limpa sozinho |
+| “Invalid argument to Table.get()” | cor salva sem grupo | exige grupo; cria o grupo ali mesmo; erros em português |
+| Cor arquivada sem como excluir | faltava o botão | “🗑️ Excluir” na lista de arquivadas (vendas antigas ficam no histórico) |
+| Meta 15 → 18 virava “repor” e travava o uso | meta e estoque misturados | “📦 No estoque hoje” (ajuste) separado da “🎯 Meta” |
+| “Entrou no estoque: 664” | quantidade do cadastro lançada como entrada | cadastro = estoque inicial; dados antigos convertidos sozinhos (112 lançamentos nos dados reais) |
+| Cores arquivadas na mensagem (grave) | relatório sem filtro | arquivadas/excluídas fora de Entrou, Repor, Estoque e totais (46 cores nos dados reais) |
+| “Cor Azul: 2 🚫 esgotado” | esgotado olhava o livre (2 reservadas para Kelly) | esgotado = 0 peças; “🔒 2 reservadas” |
+| Início com 9 esgotados, mensagem com 1 (grave) | duas regras diferentes | uma regra só; “Esgotados (N)” = número do Início (7 nos dados reais); teste compara |
+| WhatsApp abria uma página e não chegava na conversa (iPhone) | link `wa.me` com o texto (emoji quebrado) | **Enviar = copiar + abrir o WhatsApp**, a pessoa cola |
+| Testes de tela falhando às vezes | `await import()` dentro de transação do banco | import normal no topo |
+
+### Mensagem do WhatsApp
+- **Estoque agora**, cor por cor, com “⚠️ repor N” / “🚫 esgotado” / “🔒 N reservadas” ao lado (chave).
+- **Começou → terminou** em cada cor (chave), **Totais** no final (estoque, repor, começo → final) (chave),
+  **divisão** entre os grupos `- - - - - - - -` (chave), **repor com “tem X de Y”** (chave, desligada).
+- **Repor configurado em cada produto**: “🔁 Precisa repor?” e “📏 Tem estoque mínimo?”; “Precisa repor” só com o número.
+- **Tamanho da mensagem**: “atual / máximo” na tela. Primeiro contra o limite do link (7.000); com copiar + abrir, o limite é o
+  de uma mensagem do WhatsApp (65.536 letras). Dados reais com tudo ligado: ~5.700 → **uma mensagem só**.
+- **Mandar em partes** (chave, segurança para mensagens gigantes): parte 1 copiada, “💬 Mandar parte 2” ao voltar; nunca corta
+  linha, título repetido com “↪️ (continua)”, teste garante todas as linhas na ordem.
+- **Recado em cima do botão**: “Ao clicar em Enviar no WhatsApp vai copiar e abrir o WhatsApp.”
+
+### Dia
+- **Virou a data: o dia de ontem encerra sozinho** (ao abrir e à meia-noite com o app aberto); reaberto de propósito não fecha.
+- **“Bom dia”** mostra o **último backup (data e hora)** e pergunta se quer fazer outro agora.
+- Dias do caderno separados (30/10 e 31/10).
+
+### Conferências com os dados reais do celular (02/11, sem tocar no celular)
+- Arquivo do celular restaurado só em banco de teste (`DADOS_REAIS=arquivo.json npm test`; o arquivo não vai para o repositório).
+- **A conta do estoque fecha cor por cor**: começou 426 − saiu 41 = terminou 385; o que a mensagem diz que saiu = o que saiu do
+  estoque (venda cancelada devolve a peça e não conta).
+- Excluir as 46 arquivadas não muda estoque nem dinheiro; diagnóstico sem erro.
+- Exemplo pedido: **começou 15, vendeu 3** → “O que saiu: 3”, “começou 15 → terminou 12 ⚠️ repor 3”, totais −3, dia seguinte
+  começa com 12 (teste `conta-estoque.test.ts`).
+- Sem vazamento de memória (tela estável ~300 elementos, 8–19 MB); internet: ~1 KB por conferência de versão.
+
+### Testes
+- **167 testes** (165 + 2 com dados reais), também rodando em outra data (`HOJE=2027-03-01`). Lista completa em `SISTEMA.md`,
+  seção 10.

@@ -48,7 +48,7 @@ O app substitui o caderno sem mudar o jeito de pensar:
 1. **Início › Iniciar o dia** → o dia começa com o estoque final do dia anterior (ou o cadastro, no primeiro dia). A diária de 150 entra sozinha no caixa.
 2. **Vender** → toca em “+ Vender” nas peças, **Fechar venda**, confere o preço, escolhe como pagou (Dinheiro, Pix, Crédito, Débito; ou cada peça de um jeito). Escolheu Pix: o QR code aparece na tela.
 3. **Caixa** → lança dinheiro que não é venda (dei dinheiro, entrada, despesa, retirada, pagamento) e vê a conta do dia.
-4. **Encerrar o dia** → confere o dinheiro contado, manda o relatório no WhatsApp e encerra.
+4. **Encerrar o dia** → confere o dinheiro contado, toca em **Enviar no WhatsApp** (o app copia a mensagem e abre o WhatsApp: é só colar na conversa) e encerra.
    - Esqueceu de encerrar? Quando vira a data (app aberto à meia-noite ou aberto no outro dia), o dia anterior **encerra sozinho** (o caixa contado fica como estava). Dia reaberto de propósito não fecha de novo.
    - No **“Bom dia! Vamos começar?”** aparece **💾 Último backup: data às hora** e a pergunta “Quer fazer outro backup agora?” com o botão.
 5. Usa dois celulares? **Menu › Juntar com outro celular** ao fim do dia.
@@ -64,10 +64,11 @@ O app substitui o caderno sem mudar o jeito de pensar:
 
 ### Início
 - Situação do dia (não iniciado / aberto / encerrado) e escolha de como começar: **continuar** (recomendado) ou **do zero**.
+- No **“Bom dia! Vamos começar?”**: cartão **💾 Último backup: dd/mm às hh:mm** (ou “Ainda não fez backup”) com a pergunta “Quer fazer outro backup agora?” e o botão; se o dia anterior fechou sozinho, avisa “O dia dd/mm foi encerrado sozinho”.
 - **Desfazer o início** enquanto não houver lançamento (diária automática não conta).
-- Botões **Nova venda**, **Encerrar o dia**, **⚡ Mostrar Pix (QR code)** e **Enviar relatório no WhatsApp** (com “Ver antes”).
+- Botões **Nova venda**, **Encerrar o dia**, **⚡ Mostrar Pix (QR code)** e **Enviar relatório no WhatsApp** (copia e abre o WhatsApp; “Ver antes” abre o Encerrar o dia).
 - Cartão **Vendido hoje** (total, vendas, peças, média, barra por forma de pagamento) e **Saldo do caixa**.
-- Números do estoque (peças, para repor, esgotados, entrou hoje), cada um com explicação e atalho para o Estoque.
+- Números do estoque (peças, para repor, esgotados, entrou hoje), cada um com explicação e atalho para o Estoque. São **os mesmos números** da mensagem do WhatsApp (esgotado = 0 peças).
 - Cartões por grupo com filtro **Todos / À venda / Guardados**.
 - Aviso de backup atrasado e dica de instalação no iPhone.
 
@@ -90,7 +91,7 @@ O app substitui o caderno sem mudar o jeito de pensar:
 ### Estoque
 - Resumo (repor, esgotados — tocam e filtram), legenda “começou → agora”.
 - Grupo: começou → agora, **Guardar todas / Pôr à venda**.
-- Cor: + / − (entrada/saída), **definir quantidade** (ajuste), estoque ideal, à venda/guardada.
+- Cor: + / − (entrada/saída), **definir quantidade** (ajuste), à venda/guardada, avisos (repor, 🚫 esgotado, 📌 reservadas). O repor de cada cor segue o cadastro (ver 4.5).
 - **Movimentos do dia** (filtros: vendidas, entraram, saíram, ajustes) com **Desfazer** (cria movimento inverso, não apaga).
 
 ### Caixa
@@ -106,27 +107,37 @@ O app substitui o caderno sem mudar o jeito de pensar:
 
 ### Encerrar o dia
 
-> **Esgotado = 0 peças**, igual em todo lugar (Início, Estoque, Vender e WhatsApp). Peça reservada continua no estoque: aparece como “🔒 N reservadas”, não como esgotada. Vender usa o que está livre (estoque − reservadas).
+> **Esgotado = 0 peças**, igual em todo lugar (Início, Estoque, Vender e WhatsApp). Peça reservada continua no estoque:
+> aparece como “🔒 N reservadas”, não como esgotada. Vender usa o que está livre (estoque − reservadas).
+
 - Resumo (vendeu, entrou, repor), formas de pagamento, **✅ Total (ontem + hoje)**.
 - **Dinheiro vivo contado**: a mensagem muda na hora (faltam/sobram/bateu).
-- Relatório **WhatsApp** (padrão) ou **Caderno**; “Editar mensagem” opcional; **Enviar no WhatsApp**, **Copiar texto**, **Outros apps**.
-- Chaves do WhatsApp (ficam salvas e valem também para o Início):
-  - **📦 Mostrar o estoque** (ligada): lista o que tem agora, cor por cor, com “⚠️ repor N” / “🚫 esgotado” ao lado; desligada mostra só o total;
-  - **🌅 Começo → fim do dia em cada cor** (ligada, só aparece com o estoque ligado): “Cor Azul: começou 3 → terminou 2”; desligada fica “Cor Azul: 2”;
-  - avisos ao lado da cor: **🚫 esgotado** só quando tem 0; **🔒 N reservadas** quando há peça guardada para alguém (continua no estoque, só não está livre para vender); **⚠️ repor N**;
-  - **🧾 Totais no final** (ligada): total no estoque, total para repor e “Começo do dia 426 → 🌙 final 385 = −41” (os mesmos números do Início);
-  - **➖ Divisão entre os grupos** (ligada): linha `- - - - - - - -` entre um grupo e outro (só traço e espaço, para pesar pouco);
-  - **📋 Enviar no WhatsApp = copiar + abrir o WhatsApp** (recado em cima do botão): copia a mensagem inteira e abre o app (`whatsapp://`; no computador, WhatsApp Web). Lá é só escolher a conversa e colar. Não usa mais o link `wa.me` com o texto: no iPhone ele abria a página do WhatsApp (com emoji quebrado) e não chegava na conversa. Se não conseguir copiar, não abre o WhatsApp e avisa para usar “Copiar texto”;
-  - **📏 Tamanho da mensagem**: “atual / máximo” em letras, contra o máximo de uma mensagem do WhatsApp (65.536). Os dados reais com tudo ligado dão ~5.700;
-  - **✂️ Mandar em partes se passar** (ligada): passou do máximo → “Enviar” copia a parte 1 (“📨 Parte 1 de 2”) e abre o WhatsApp; ao voltar para o app aparece **“💬 Mandar parte 2”** (copia a próxima e abre de novo). O quadro do tamanho mostra antes quantas partes e o tamanho de cada uma. Corta entre seções ou entre linhas (nunca no meio de uma linha); a parte que continua uma seção repete o título com “↪️ … (continua)”. Nada é cortado;
-  - **🔢 Repor com “tem X de Y”** (desligada): “Precisa repor” fica só “Cor Blanco: 1”; ligada vira “Cor Blanco: 1 (tem 14 de 15)”.
-- O repor de cada cor vem do cadastro: **🔁 Precisa repor?** (desligado = nunca aparece), **📏 Tem estoque mínimo?** (só aparece quando chega no mínimo) e **🎯 Meta** (repõe até quanto).
-- Encerrar bloqueia o dia contra mudanças acidentais (dá para reabrir).
+- Relatório **WhatsApp** (padrão) ou **Caderno**.
+- **Chaves da mensagem do WhatsApp**, na ordem da tela (ficam salvas e valem também para o “Enviar relatório” do Início):
+
+| Chave | Padrão | Ligada | Desligada |
+|---|---|---|---|
+| 📦 Mostrar o estoque | ligada | lista “Estoque agora”, cor por cor, com os avisos ao lado | só “📊 Estoque no fim do dia: 385 peças” |
+| 🌅 Começo → fim do dia em cada cor (só com o estoque ligado) | ligada | “Cor Azul: começou 15 → terminou 12” | “Cor Azul: 12” |
+| 🧾 Totais no final | ligada | total no estoque, total para repor, “Começo do dia 426 → 🌙 final 385 = −41” | sem a seção |
+| ➖ Divisão entre os grupos | ligada | linha `- - - - - - - -` entre um grupo e outro | sem a linha |
+| 🔢 Repor com “tem X de Y” | desligada | “Cor Blanco: 1 (tem 14 de 15)” | “Cor Blanco: 1” |
+| ✏️ Editar mensagem | desligada | dá para escrever junto antes de mandar (não muda dados) | vai o texto do app |
+| ✂️ Mandar em partes se passar (no quadro do tamanho) | ligada | passou do máximo → vai em partes | vai inteira |
+
+- Avisos ao lado da cor no “Estoque agora”: **🚫 esgotado** (só com 0), **🔒 N reservadas**, **⚠️ repor N**.
+- **📏 Tamanho da mensagem**: “atual / máximo” em letras (máximo de uma mensagem do WhatsApp: **65.536**), com barra.
+  Com os dados reais e tudo ligado: ~5.700. Passando do máximo com “partes” ligado, o quadro mostra **antes** quantas partes,
+  o tamanho de cada uma e onde cada uma começa.
+- Recado em cima do botão: **“Ao clicar em Enviar no WhatsApp vai copiar e abrir o WhatsApp. Lá é só colar na conversa.”**
+- **Enviar no WhatsApp**, **Copiar texto**, **Outros apps** (compartilhar do celular). Como o envio funciona: ver 4.16.
+- O repor de cada cor vem do cadastro (ver 4.5).
+- **Encerrar o dia** bloqueia o dia contra mudanças acidentais (dá para reabrir).
 
 ### Menu
 | Item | O que faz |
 |---|---|
-| Produtos e grupos | cadastrar/renomear/ordenar grupos e cores, preço, estoque ideal, 44 cores com nome |
+| Produtos e grupos | cadastrar/renomear/ordenar grupos e cores, preço, 44 cores com nome; em cada cor: **📦 No estoque hoje** (corrige a quantidade), **🔁 Precisa repor?**, **📏 Tem estoque mínimo?**, **🎯 Meta**; arquivar e **🗑️ Excluir** (também direto na lista de arquivadas) |
 | Mostrar meu Pix | QR code do Pix na tela (valor opcional), copiar código, onde conferir (Neon/iPhone) |
 | Histórico | calendário do mês, resumo do mês, melhor dia, cartões por dia, comparar dois dias |
 | Juntar com outro celular | gera código com tudo / cola o código do outro e **soma** |
@@ -149,6 +160,9 @@ valores absurdos (`MAX_CENTS`, `MAX_QTY`). Digitação aceita “1.474,80”, �
 - **Iniciar o dia (continuar)** copia o `currentQuantity` do último dia anterior. Primeiro dia: usa a quantidade do cadastro.
 - **Do zero**: todas as peças em 0 e caixa 0 (para recontar tudo).
 - Se um dia anterior for corrigido depois que o seguinte começou, aparece o aviso **“o dia anterior mudou”** com botão para acertar.
+- **Virou a data, o dia de ontem encerra sozinho** (`autoCloseOldDays`): ao abrir o app e quando passa da meia-noite com o
+  app aberto, todo dia ainda aberto **antes de hoje** é encerrado (marca `autoClosedAt`; o caixa contado fica como estava).
+  Dia **reaberto de propósito** (`reopenedAt`) não fecha de novo. A tela segue para o novo dia.
 - **Cor nova cadastrada com quantidade**: a quantidade é o estoque com que a cor **começa** o dia (não é “Entrou”). Dados antigos que registravam como entrada são convertidos sozinhos ao abrir o app (`migrateCadastroEntries`), sem mudar o estoque final.
 
 ### 4.3 Todo movimento de estoque é registrado
@@ -161,10 +175,18 @@ Nem tudo que está no estoque está à venda. Cada cor tem `forSale` (padrão: �
 pode ser vendida/reservada (exceto convertendo uma reserva que já existia). **Grupo novo**: a primeira cor já nasce à venda
 e o grupo entra em ⭐ Para vender.
 
-### 4.5 Estoque ideal e “repor”
-`ideal = meta da cor (ou a quantidade do cadastro)`; **repor = meta − agora** (nunca negativo).
-Ex.: cadastrou 15, vendeu 1 → repor 1. Mudar a **meta** (ex.: 15 → 18) **não mexe no estoque**: só muda o repor (3).
-Para corrigir quantas peças tem, use **“No estoque hoje”** na cor (vira ajuste).
+### 4.5 Estoque ideal e “repor” (configurado em cada cor)
+Uma regra só (`restockOf` em `summary.ts`), usada no Início, no Estoque e no WhatsApp:
+
+| Cadastro da cor | Repor |
+|---|---|
+| 🔁 Precisa repor? **desligado** | nunca (0) |
+| 📏 Tem estoque mínimo? **ligado** (ex.: mínimo 3, meta 10) | só quando chega no mínimo: com 5 → 0; com 3 → 7; com 0 → 10 |
+| sem mínimo | **meta − agora** (nunca negativo) |
+
+- **Meta** = `idealStock` da cor ou, vazio, a quantidade do cadastro. Ex.: cadastrou 15, vendeu 1 → repor 1.
+- Mudar a **meta** (ex.: 15 → 18) **não mexe no estoque**: só muda o repor (3).
+- Para corrigir quantas peças tem, use **“📦 No estoque hoje”** na cor (vira ajuste, não “Entrou”).
 
 ### 4.5b Arquivar e excluir
 - **Arquivar**: some do Vender, do Estoque e do **relatório** (Entrou, Repor, total do estoque); dá para reativar.
@@ -173,7 +195,8 @@ Para corrigir quantas peças tem, use **“No estoque hoje”** na cor (vira aju
 ### 4.6 Reservas
 Reserva separa peças para uma cliente: **disponível = estoque − reservado**. Vale para o dia da reserva e os seguintes.
 Saída/ajuste que deixaria menos peças que o reservado pergunta antes. Converter reserva = venda; cancelar venda que veio
-de reserva pode devolver a reserva.
+de reserva pode devolver a reserva. Cor com tudo reservado **não é esgotada**: continua no estoque e aparece como
+“🔒 2 reservadas” (ex.: começou 3, vendeu 1, 2 reservadas para Kelly → “Cor Azul: 2 🔒 2 reservadas”).
 
 ### 4.7 Vendas
 - Uma venda = uma cliente, várias peças (`order` + `sales`). Toque repetido no Confirmar não duplica (id da venda gerado ao abrir o carrinho).
@@ -247,6 +270,24 @@ Cada celular guarda os próprios dados. **Juntar** soma os dois:
 - **Configurações › Verificar dados** roda `runDiagnostics`: estoque × movimentos, venda × peças × caixa, caixa por dia,
   reservas, avisos (dia no futuro, estoque negativo após juntar…).
 
+### 4.16 Relatório do WhatsApp (como é montado e enviado)
+- **Ordem das seções** (`whatsappReport` em `report.ts`): 📒 Fechamento → 💰 Vendas → 🧮 Caixa (ontem, conta linha por
+  linha, = Hoje, ✅ Total, na mão, no banco, contado) → 🛍️ O que saiu → 📦 Entrou no estoque → 🔁 Precisa repor →
+  🚫 Esgotados → 📦 Estoque agora (ou 📊 Estoque no fim do dia) → 🧾 Totais. Cores agrupadas por grupo.
+- **Fora da mensagem**: cores arquivadas/excluídas e grupos arquivados (não entram em Entrou, Repor, Estoque nem totais);
+  a quantidade do cadastro não é “Entrou”.
+- **A conta fecha** (teste `conta-estoque.test.ts`): começou − saiu + entrou ± ajuste = terminou, em cada cor e no total.
+  Venda cancelada devolve a peça e não conta em “O que saiu”. Dados reais de 02/11: 426 − 41 = 385.
+- **Esgotados (N)** = o mesmo número do Início (todas as cores com 0, mesmo as que também estão em “repor”).
+- **Enviar = copiar + abrir** (`sendWhatsApp`): copia a mensagem inteira e abre o app (`whatsapp://`; no computador,
+  WhatsApp Web). Lá a pessoa escolhe a conversa e cola. Não usa o link `wa.me/?text=`: no iPhone ele abria a página do
+  WhatsApp (com emoji quebrado) e “Abrir app” não chegava na conversa. Se não conseguir copiar, **não** abre o WhatsApp e
+  avisa para usar “Copiar texto”.
+- **Partes** (`splitForWhatsApp`, só se passar de 65.536 letras e com a chave ligada): copia a parte 1 (“📨 *Parte 1 de 2*”)
+  e abre o WhatsApp; ao voltar para o app aparece a faixa **“💬 Mandar parte 2”** (`PartsBanner`, guarda as partes só na
+  memória). Corta entre seções ou, se der menos partes, entre linhas — **nunca no meio de uma linha**; a parte que continua uma
+  seção começa com “↪️ título (continua)”. Juntando as partes estão todas as linhas, na ordem (teste).
+
 ---
 
 ## 5. Tecnologia e por que cada escolha
@@ -284,7 +325,7 @@ dia-dia/
 ├─ MELHORIAS.md / README.md       histórico de melhorias e guia rápido
 └─ src/
    ├─ main.tsx                    liga o React na página
-   ├─ App.tsx                     casca do app: cabeçalho, abas, menu, janelas, atualização, recuperação de erro
+   ├─ App.tsx                     casca do app: cabeçalho, abas, menu, janelas, atualização, “Mandar parte 2”, recuperação de erro
    ├─ state.tsx                   estado global: dia escolhido, carrinho, aba, janela aberta, configurações
    ├─ index.css                   estilos globais (Tailwind) e regras de rolagem no celular
    ├─ db/
@@ -295,14 +336,16 @@ dia-dia/
    │  ├─ util.ts                  dinheiro (centavos ↔ texto), datas, formas de pagamento, 44 cores com nome
    │  ├─ pix.ts                   QR do Pix (base64), código copia e cola, CRC, iPhone × Android
    │  ├─ changelog.ts             lista do Menu › Atualizações
-   │  └─ updateState.ts           situação da versão (selo do cabeçalho)
+   │  ├─ updateState.ts           situação da versão (selo do cabeçalho)
+   │  ├─ applyUpdate.ts           botão Atualizar: ativa a versão nova e recarrega sempre
+   │  └─ pendingParts.ts          partes da mensagem que faltam mandar (“Mandar parte 2”)
    ├─ services/                   REGRAS (sem tela): tudo testável
-   │  ├─ days.ts                  iniciar/desfazer/encerrar/reabrir dia, movimentos de estoque, desfazer, dias do caderno
+   │  ├─ days.ts                  iniciar/desfazer/encerrar/reabrir dia, encerrar sozinho na virada, movimentos de estoque, desfazer, dias do caderno, conserto do cadastro antigo
    │  ├─ sales.ts                 vendas, pagamento por peça, cancelar, corrigir valor, trocar peça, reservas, Pix conferido
    │  ├─ cash.ts                  lançamentos de caixa, diária automática, vendas do caderno, “ontem”, contado
-   │  ├─ summary.ts               contas: caixa de todos os dias, resumo do dia, linhas da conta, estoque com repor
-   │  ├─ catalog.ts               grupos e cores (criar, renomear, ordenar, arquivar, à venda/guardada)
-   │  ├─ report.ts                relatório WhatsApp e caderno, copiar, compartilhar
+   │  ├─ summary.ts               contas: caixa de todos os dias, resumo do dia, linhas da conta, estoque com repor (`restockOf`), estoque de agora
+   │  ├─ catalog.ts               grupos e cores (criar, renomear, ordenar, arquivar, excluir, à venda/guardada, repor/mínimo)
+   │  ├─ report.ts                relatório WhatsApp e caderno, tamanho, partes, copiar + abrir o WhatsApp, compartilhar
    │  ├─ backup.ts                backup/restauração, texto comprimido em partes, recomeçar
    │  ├─ sync.ts                  juntar celulares (mesclar dois bancos) e lista de apagados
    │  ├─ storage.ts               armazenamento permanente e teste de gravação
@@ -332,9 +375,9 @@ IndexedDB (via Dexie), nome `dia-dia`, versão 2. Índices:
 | Tabela | Índices | Para quê |
 |---|---|---|
 | `groups` | id, displayOrder, active | grupos (Plomo, Lila…) |
-| `variants` | id, groupId, displayOrder, active | cores de cada grupo (`forSale`, `idealStock`, `startQuantity`, `color`) |
+| `variants` | id, groupId, displayOrder, active | cores de cada grupo (`forSale`, `idealStock` = meta, `minimumStock`, `restockOff`, `startQuantity`, `color`, `archivedAt`, `deletedAt`) |
 | `categories` | id, displayOrder | etiquetas |
-| `dailyRecords` | id, **&date** (único), status | um registro por dia (aberto/encerrado) |
+| `dailyRecords` | id, **&date** (único), status | um registro por dia (aberto/encerrado, `autoClosedAt`, `reopenedAt`) |
 | `dailyStockItems` | id, dailyRecordId, variantId, **&[dailyRecordId+variantId]** | estoque de cada cor em cada dia |
 | `stockMovements` | id, dailyRecordId, variantId, type, createdAt, orderId | todo movimento de estoque |
 | `orders` | id, dailyRecordId, createdAt | vendas (`payments`, `payByLine`, `pixConfirmedAt/Cents`) |
@@ -342,7 +385,7 @@ IndexedDB (via Dexie), nome `dia-dia`, versão 2. Índices:
 | `reservations` | id, dailyRecordId, variantId, status | reservas |
 | `cashRecords` | id, **&dailyRecordId** | caixa do dia (ontem digitado, contado, `dailyPayDone`) |
 | `cashMovements` | id, dailyRecordId, type, relatedOrderId, createdAt | todo lançamento de caixa (`venda`, `entrada`, `dar`, `despesa`, `retirada`, `pagamento`, `estorno`) |
-| `settings` | id, **&key** | configurações, marcas (`seedDone`), lista de apagados (`tombstones`) |
+| `settings` | id, **&key** | configurações (inclusive as chaves do relatório: `reportShowStock`, `reportStockStartEnd`, `reportRestockDetail`, `reportTotals`, `reportDividers`, `reportSplit`), marcas (`seedDone`, `migrCadastroV1`), lista de apagados (`tombstones`) |
 | `auditLogs` | id, entityType, entityId, createdAt | auditoria |
 | `safety` | id | cópia de segurança para “Voltar como estava” |
 
@@ -355,7 +398,9 @@ Campos novos são opcionais (não exigem migração). Mudança de índice exige 
 - **PWA**: o service worker (Workbox) guarda todos os arquivos do app; abre sem internet.
 - **Instalar**: Android (Chrome/Samsung Internet) “Instalar app”; iPhone (Safari) Compartilhar › “Adicionar à Tela de Início”.
 - **Atualização**: o app procura versão nova ao abrir, **de hora em hora** e ao **voltar para a tela**. Achou: faixa
-  “🆕 Nova versão… Atualizar” e selo no cabeçalho. Tocar recarrega na nova versão; **dados não mudam**. Não recarrega
+  “🆕 Nova versão… Atualizar” e selo no cabeçalho. Tocar ativa a versão nova e **recarrega sempre** (`applyUpdate`: quando a
+  nova ativa, quando troca o controle ou, no máximo, em 4 s; sem versão esperando, só recarrega). Antes, no computador, às
+  vezes não recarregava (página aberta com Ctrl+Shift+R ou versão baixada por outra aba). **Dados não mudam**. Não recarrega
   sozinho de propósito (não perder um carrinho no meio da venda). Qualquer mudança no app (até um texto) gera aviso;
   mudar só testes/documentação não gera.
 - **Dados protegidos**: o app pede `navigator.storage.persist()` (ao abrir e ao iniciar o dia) para o navegador nunca apagar
@@ -393,7 +438,7 @@ Acompanhe em **Actions**; em ~2 min está no ar. Ao publicar algo que a usuária
 
 ### Comandos
 ```bash
-npm test                 # suíte completa (~80 s, um arquivo por vez)
+npm test                 # suíte completa (~75 s, um arquivo por vez)
 npx vitest run src/__tests__/app.test.ts     # um arquivo
 npx tsc --noEmit -p .    # só checar os tipos
 npm run build            # tipos + build de produção
@@ -411,35 +456,39 @@ HOJE=2028-07-15 npm test
 O setup também: banco em memória (`fake-indexeddb`), espera de até 10 s pelas telas (GitHub é lento), simula download de arquivo no jsdom.
 Configuração (`vite.config.ts`): 60 s por teste, **um arquivo por vez** (os testes pesados não atrasam os de tela).
 
-### Arquivos de teste (134 testes + 1 com dados reais)
+### Arquivos de teste (165 testes + 2 com dados reais = 167)
 
 | Arquivo | Testes | O que garante |
 |---|---|---|
 | `app.test.ts` | 36 | regras principais: iniciar dia, estoque, vendas, reservas, caixa, diária, dados iniciais (números dos cadernos), relatório exato do WhatsApp, recomeçar |
 | `quebrar.test.ts` | 33 | tentativas de quebrar: valores absurdos, toque repetido, dia encerrado, venda forjada, backup com lixo, CSV malicioso, voltar atrás |
+| `cadastro-relatorio.test.ts` | 14 + 1 real | cadastro não é “entrou”, meta não mexe no estoque, arquivadas fora do relatório, excluir, repor/mínimo, estoque na mensagem, reservadas, totais, divisão, conserto dos dados antigos, copiar inteira; **dados reais** |
+| `novidades.test.tsx` | 11 | armazenamento permanente, Atualizações, selo da versão, carrinho ao recomeçar, juntar pela tela, chaves do repor e da mensagem, tamanho e recado do botão |
 | `pix.test.tsx` | 9 | código Pix válido (CRC), base64 é PNG 480×480, iPhone × Android, QR na venda, botão Mostrar Pix, ✅ Caiu, Pix mudou |
-| `abas.test.tsx` | 9 | cada aba pela tela: Início, Vender, Estoque, Caixa, Menu, pagamento por peça, diária automática |
-| `novidades.test.tsx` | 7 | armazenamento permanente, Menu › Atualizações, selo da versão, recomeçar com venda aberta (carrinho), juntar pela tela |
-| `extremo.test.ts` | 4 | **macaco**: milhares de ações aleatórias; tempestade (operações ao mesmo tempo); escala (meses de uso); relógio errado |
+| `abas.test.tsx` | 9 | cada aba pela tela: Início (inclusive Enviar = copiar + abrir), Vender, Estoque, Caixa, Menu, pagamento por peça, diária automática |
+| `extremo.test.ts` | 9 | **macaco**: milhares de ações aleatórias; tempestade (operações ao mesmo tempo); escala (meses de uso); relógio errado |
+| `partes.test.tsx` | 7 | dividir em partes (todas as linhas, na ordem, título repetido), copiar + abrir no celular e no computador, não abrir se não copiou, “Mandar parte 2” pela tela |
+| `conta-estoque.test.ts` | 5 + 1 real | **a conta do estoque na mensagem**: começou 15, vendeu 3 → saiu 3, terminou 12, repor 3, totais −3; cancelar, entrada, ajuste, reserva, dia seguinte; **dados reais** cor por cor |
+| `virada.test.tsx` | 6 | dia de ontem encerra sozinho (ao abrir e à meia-noite com o app aberto), reaberto não fecha, “Bom dia” com último backup |
+| `atualizar.test.ts` | 5 | botão Atualizar sempre recarrega (página sem controle, outra aba, sem eventos, uma vez só); tamanho da mensagem |
 | `juntar.test.ts` | 4 | dois celulares: exemplo 3+2=5, caderno/diária sem duplicar, cancelada no outro, **teste maluco** de rodadas aleatórias |
+| `macaco-tela.test.tsx` | 4 | toques aleatórios na tela sem quebrar (4 sorteios) |
 | `recomecar.test.ts` | 3 | voltar aos iniciais / do zero, continua vazio ao reabrir, backtest de ciclos com “voltar como estava” |
 | `dez-dias.test.ts` | 2 | 10 dias simulados contra um modelo independente (estoque e caixa batem dia a dia) |
 | `pagamento-misto.test.ts` | 2 | pagamento por peça + backtest (vendas, correções, cancelamentos, trocas) batendo por forma |
 | `troca.test.ts` | 2 | trocar peça vendida + backtest (estoque cor por cor) |
-| `tela.test.tsx` | 2 | um dia completo pela tela (iniciar, vender, lançar, encerrar, relatório) |
+| `tela.test.tsx` | 2 | um dia completo pela tela (iniciar, vender, lançar, encerrar, relatório copiado) |
 | `rolagem.test.ts` | 2 | impede `overflow` em html/body (travava a rolagem no Android) e altura das janelas |
-| `macaco-tela.test.tsx` | 1 (×4 sorteios) | toques aleatórios na tela sem quebrar |
-| `cadastro-relatorio.test.ts` | 13 | cadastro não é “entrou”, meta não mexe no estoque, arquivadas fora do relatório, excluir, conserto dos dados antigos, WhatsApp grande; **dados reais** (opcional) |
-| `virada.test.tsx` | 6 | virada da data: dia de ontem encerra sozinho (ao abrir e à meia-noite com o app aberto), reaberto não fecha, “Bom dia” com último backup e pergunta |
-| `partes.test.tsx` | 5 | mensagem em partes: cada parte cabe, juntas têm todas as linhas na ordem, “Mandar parte 2” pela tela |
-| `atualizar.test.ts` | 5 | botão Atualizar sempre recarrega (página sem controle, outra aba, sem eventos); tamanho da mensagem |
 
 ### Testar com os dados reais do celular
 Exporte em Menu › Passar para outro celular › Enviar tudo e rode (o arquivo **não** vai para o repositório):
 ```bash
 DADOS_REAIS="C:/caminho/dia-dia_passar-para-outro-celular.json" npm test
 ```
-O teste restaura os dados num banco de teste, confere o relatório, conserta os dados antigos, exclui as arquivadas e confere que o estoque e o dinheiro não mudaram.
+Os testes restauram os dados num banco de teste (nunca no celular) e conferem: relatório sem arquivadas, conserto dos dados
+antigos, excluir as arquivadas sem mudar estoque nem dinheiro, esgotados do Início = da mensagem, totais, tamanho da mensagem
+e quanto cada chave pesa, e **a conta do estoque cor por cor** (começou − saiu ± movimentos = terminou).
+Para rodar em outra data junto: `HOJE=2027-03-01 DADOS_REAIS=... npm test`.
 
 ### Testes “malucos” em tamanho grande
 Os backtests rodam em tamanho menor na suíte normal (para o GitHub ser rápido). Para rodar pesado:
@@ -476,6 +525,8 @@ npm run dev              # http://localhost:5173 (também abre no celular pela r
 npm run build && npm run preview   # versão de produção com service worker: http://localhost:4173
 ```
 No Chrome: F12 › ícone de celular (modo dispositivo) para simular tamanhos (320, 360, 390, 412, 430).
+Para testar sem mexer nos dados de uso, abra o app em **outra porta** (`npm run preview -- --port 4175`): cada endereço tem
+o próprio banco no navegador.
 Para recomeçar limpo: Configurações › Recomeçar, ou F12 › Application › Storage › Clear site data.
 
 **No celular (roteiro rápido)**
@@ -484,9 +535,11 @@ Para recomeçar limpo: Configurações › Recomeçar, ou F12 › Application �
 3. Vender 2 peças (uma no Pix, outra no dinheiro) → QR aparece → confirmar → “✅ Caiu”.
 4. Caixa: conferir a conta (ontem, hoje linha por linha, total, na mão).
 5. Trocar uma peça, corrigir um valor, cancelar uma venda.
-6. Encerrar o dia: digitar o contado, ver “faltam/sobram/bateu” na mensagem, enviar no WhatsApp.
-7. Rolar todas as telas e janelas para cima e para baixo; testar com letra grande do celular.
-8. Dois celulares: Juntar nos dois sentidos e conferir que os números ficam iguais.
+6. Encerrar o dia: digitar o contado, ver “faltam/sobram/bateu” na mensagem, ver o 📏 tamanho, tocar em **Enviar no WhatsApp**
+   → o WhatsApp abre → escolher a conversa → **colar**.
+7. Conferir na mensagem uma cor que vendeu: “começou X → terminou Y” e os totais iguais ao Início.
+8. Rolar todas as telas e janelas para cima e para baixo; testar com letra grande do celular.
+9. Dois celulares: Juntar nos dois sentidos e conferir que os números ficam iguais.
 
 ---
 
@@ -504,6 +557,15 @@ Para recomeçar limpo: Configurações › Recomeçar, ou F12 › Application �
 | Dois celulares com caixas separados | dados ficam em cada aparelho | Juntar celulares (mescla segura, testada com milhares de ações) |
 | QR do Pix de foto de tela | foto pode não escanear bem | QR regenerado limpo a partir do código conferido pelo CRC |
 | Cadernos sem a cor vendida | não dá para inventar a peça | vendas no caixa sem peça, sem mexer no estoque |
+| “Invalid argument to Table.get()” | cor salva sem grupo | exige grupo; sem grupos, cria o grupo ali mesmo; erros técnicos viram mensagem em português |
+| “Entrou no estoque: 664” | a quantidade do cadastro era lançada como entrada | cadastro = estoque inicial; dados antigos convertidos sozinhos (`migrateCadastroEntries`) |
+| Meta 15 → 18 tratada como peça a mais | meta e estoque misturados | “No estoque hoje” (ajuste) separado da “Meta” (só repor) |
+| Cores arquivadas na mensagem | o relatório não filtrava | arquivadas/excluídas fora de Entrou, Repor, Estoque e totais |
+| “Cor Azul: 2 🚫 esgotado” | esgotado olhava o livre (estoque − reservadas) | esgotado = 0 peças; reservadas aparecem como “🔒 N reservadas” |
+| Início com 9 esgotados, mensagem com 1 | duas regras diferentes | uma regra só (0 peças) e “Esgotados (N)” lista todas; teste compara os dois |
+| WhatsApp abria uma página e não chegava na conversa (iPhone) | link `wa.me` com o texto | copiar + abrir o app; a pessoa cola |
+| “Atualizar” sem efeito no computador | o recarregar dependia de um evento que nem sempre vem | `applyUpdate` recarrega sempre (testado no caso que travava) |
+| Testes de tela falhando às vezes | `await import()` dentro de transação do banco fechava a transação antes da hora | import normal no topo do arquivo |
 
 ---
 
@@ -536,7 +598,8 @@ Para recomeçar limpo: Configurações › Recomeçar, ou F12 › Application �
 2. Tela nova → em `src/screens/`, usando os componentes de `src/components/ui.tsx`; pensar no celular (letra grande, 320 px,
    nada de `overflow` em html/body).
 3. Valor de dinheiro → sempre centavos inteiros; mostrar com `money()`.
-4. Campo novo no banco → opcional em `types.ts`; índice novo → nova versão em `db.ts`.
-5. Rodar `npm test` (e, se mexeu em data, `HOJE=2027-03-01 npm test`) e `npm run build`.
+4. Campo novo no banco → opcional em `types.ts`; índice novo → nova versão em `db.ts`. **Nunca** `await import()` (nem
+   outro `await` que não seja do banco) dentro de `db.transaction`: fecha a transação no meio.
+5. Rodar `npm test` (e, se mexeu em data, `HOJE=2027-03-01 npm test`; se tiver o arquivo, `DADOS_REAIS=... npm test`) e `npm run build`.
 6. Algo que a usuária deve saber → entrada nova no topo de `src/lib/changelog.ts`.
 7. `git add -A && git commit -m "..." && git push` → o GitHub testa e publica.
