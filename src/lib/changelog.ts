@@ -34,6 +34,7 @@ export const CHANGELOG: ChangeEntry[] = [
       ['📤', '“Outros apps” sem o compartilhar do aparelho: copia o texto (não abre mais a página antiga do WhatsApp)'],
       ['💾', 'Gerar o código do “Juntar com outro celular” conta como backup'],
       ['🔄', 'Juntar com outro celular: dia encerrado/reaberto e as chaves da mensagem seguem o que foi feito por último'],
+      ['⚡', 'Atualizar o app baixa metade (só a parte do app; React e o banco ficam guardados) e a tela de abertura explica quando está baixando pela internet'],
     ],
   },
   {

@@ -411,6 +411,11 @@ Campos novos são opcionais (não exigem migração). Mudança de índice exige 
 ## 8. Offline, instalação, atualização e segurança dos dados
 
 - **PWA**: o service worker (Workbox) guarda todos os arquivos do app; abre sem internet.
+- **Tempo para abrir** (medido em 02/11): com os arquivos guardados, ~25 ms para carregar e ~40 ms de início com os dados reais.
+  Só demora quando os arquivos vêm da internet: primeira vez, depois de limpar o navegador ou recarregar forçado
+  (Ctrl+Shift+R). Por isso o código é dividido em 3 arquivos (`vite.config.ts`, `manualChunks`): **react** (~43 KB) e
+  **banco** (Dexie, ~36 KB) quase nunca mudam e ficam guardados; numa atualização o celular baixa só o **app** (~75 KB, compactado).
+  A tela de abertura do `index.html` é igual à do app (ícone + “Abrindo…”) e, passando de 2,5 s, explica que está baixando.
 - **Instalar**: Android (Chrome/Samsung Internet) “Instalar app”; iPhone (Safari) Compartilhar › “Adicionar à Tela de Início”.
 - **Atualização**: o app procura versão nova ao abrir, **de hora em hora** e ao **voltar para a tela**. Achou: faixa
   “🆕 Nova versão… Atualizar” e selo no cabeçalho. Tocar ativa a versão nova e **recarrega sempre** (`applyUpdate`: quando a

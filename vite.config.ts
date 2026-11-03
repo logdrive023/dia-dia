@@ -30,6 +30,15 @@ export default defineConfig({
       workbox: { globPatterns: ['**/*.{js,css,html,svg,png,ico,webmanifest}'] },
     }),
   ],
+  // React e o banco ficam em arquivos próprios, que não mudam entre versões: numa atualização o celular
+  // baixa só a parte do app (menos internet, abre mais rápido com internet ruim)
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: { react: ['react', 'react-dom'], banco: ['dexie', 'dexie-react-hooks'] },
+      },
+    },
+  },
   // um arquivo de teste por vez: os backtests pesados não roubam CPU dos testes de tela (no GitHub há poucos núcleos)
   test: { environment: 'node', setupFiles: ['./src/__tests__/setup.ts'], testTimeout: 60_000, hookTimeout: 30_000, fileParallelism: false },
 });

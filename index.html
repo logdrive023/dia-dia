@@ -13,8 +13,18 @@
     <title>Dia a Dia</title>
   </head>
   <body class="bg-slate-100">
-    <div id="root"><p style="font-family:system-ui;color:#64748b;text-align:center;margin-top:45vh">Abrindo…</p></div>
+    <!-- igual à tela de abertura do app (ícone + “Abrindo…”), para não piscar; aparece enquanto os arquivos chegam -->
+    <div id="root"><div style="min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;font-family:system-ui;color:#64748b;background:#f1f5f9">
+      <img src="./icon-192.png" alt="" width="64" height="64" style="border-radius:16px" />
+      <span style="font-size:14px">Abrindo…</span>
+      <span id="boot-slow" style="display:none;font-size:13px;max-width:300px;text-align:center;line-height:1.4">Baixando o app pela internet. Só demora assim na primeira vez, depois de atualizar ou com a internet fraca.</span>
+    </div></div>
     <script>
+      // internet lenta: explica a espera (some sozinho quando o app abre)
+      setTimeout(function () {
+        var el = document.getElementById('boot-slow');
+        if (!window.__appStarted && el) el.style.display = 'block';
+      }, 2500);
       // Se o código do app nem chegar a rodar (arquivo velho em cache, rede), não fica preso em "Abrindo…".
       setTimeout(function () {
         if (window.__appStarted) return;
