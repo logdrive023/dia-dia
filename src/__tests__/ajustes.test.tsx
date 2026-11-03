@@ -203,3 +203,19 @@ describe('4) juntar: situação do dia e chaves da mensagem', () => {
     } finally { vi.setSystemTime(real); }
   });
 });
+
+describe('📅 calendário (bug: não abria no celular)', () => {
+  it('o toque cai no próprio campo de data (não um botão com o campo escondido) e escolher a data muda o dia', async () => {
+    render(<App />);
+    const input = (await screen.findByLabelText('Outra data', {}, { timeout: 5000 })) as HTMLInputElement;
+    expect(input.type).toBe('date');
+    expect(input.closest('button')).toBeNull(); // campo dentro de botão: o iPhone não abre o calendário
+    expect(input.className).not.toMatch(/pointer-events-none/);
+    const showPicker = vi.fn();
+    (input as unknown as { showPicker: () => void }).showPicker = showPicker;
+    fireEvent.click(input);
+    expect(showPicker).toHaveBeenCalledTimes(1); // no computador abre com um clique (uma vez só)
+    fireEvent.change(input, { target: { value: addDays(todayStr(), -12) } });
+    expect((await screen.findAllByRole('button', { name: /Voltar para hoje/ })).length).toBeGreaterThan(0);
+  });
+});

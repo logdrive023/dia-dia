@@ -476,7 +476,7 @@ HOJE=2028-07-15 npm test
 O setup também: banco em memória (`fake-indexeddb`), espera de até 10 s pelas telas (GitHub é lento), simula download de arquivo no jsdom.
 Configuração (`vite.config.ts`): 60 s por teste, **um arquivo por vez** (os testes pesados não atrasam os de tela).
 
-### Arquivos de teste (175 testes + 2 com dados reais = 177)
+### Arquivos de teste (176 testes + 2 com dados reais = 178)
 
 | Arquivo | Testes | O que garante |
 |---|---|---|
@@ -499,7 +499,7 @@ Configuração (`vite.config.ts`): 60 s por teste, **um arquivo por vez** (os te
 | `troca.test.ts` | 2 | trocar peça vendida + backtest (estoque cor por cor) |
 | `tela.test.tsx` | 2 | um dia completo pela tela (iniciar, vender, lançar, encerrar, relatório copiado) |
 | `rolagem.test.ts` | 2 | impede `overflow` em html/body (travava a rolagem no Android) e altura das janelas |
-| `ajustes.test.tsx` | 10 | venda no meio na meia-noite (espera e fica no dia certo), juntar (dia encerrado/reaberto e chaves: vale o último), mínimo ≤ meta, Outros apps copia, código do Juntar = backup, partes guardadas no aparelho, aviso de dia reaberto |
+| `ajustes.test.tsx` | 11 | venda no meio na meia-noite (espera e fica no dia certo), juntar (dia encerrado/reaberto e chaves: vale o último), mínimo ≤ meta, Outros apps copia, código do Juntar = backup, partes guardadas no aparelho, aviso de dia reaberto, 📅 calendário abre |
 
 ### Testar com os dados reais do celular
 Exporte em Menu › Passar para outro celular › Enviar tudo e rode (o arquivo **não** vai para o repositório):
@@ -587,6 +587,7 @@ Para recomeçar limpo: Configurações › Recomeçar, ou F12 › Application �
 | WhatsApp abria uma página e não chegava na conversa (iPhone) | link `wa.me` com o texto | copiar + abrir o app; a pessoa cola |
 | Venda no meio à meia-noite sumia (carrinho limpo, dia encerrado) | a virada não olhava a venda aberta | espera a venda terminar; fica no dia em que começou |
 | Dois celulares com o dia em situações diferentes | Juntar mantinha a situação local | vale a ação mais recente (encerrar/reabrir); chaves da mensagem idem |
+| 📅 calendário não abria no celular | campo de data escondido dentro de um botão, aberto “por código” (o iPhone só abre tocando no campo) | o próprio campo fica por cima do 📅, invisível; no computador o clique chama `showPicker` |
 | “Atualizar” sem efeito no computador | o recarregar dependia de um evento que nem sempre vem | `applyUpdate` recarrega sempre (testado no caso que travava) |
 | Testes de tela falhando às vezes | `await import()` dentro de transação do banco fechava a transação antes da hora | import normal no topo do arquivo |
 

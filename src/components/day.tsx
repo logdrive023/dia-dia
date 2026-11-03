@@ -48,12 +48,15 @@ export function DayBar({ compact }: { compact?: boolean } = {}) {
             </button>
           );
         })}
-        <button onClick={() => ref.current?.showPicker?.() ?? ref.current?.click()} aria-label="Outra data"
-          className="relative w-11 shrink-0 rounded-xl text-xl text-slate-600 active:bg-slate-100 flex items-center justify-center">
-          📅
-          <input ref={ref} type="date" value={date} onChange={(e) => e.target.value && setDate(e.target.value)}
-            className="absolute inset-0 opacity-0 pointer-events-none" tabIndex={-1} />
-        </button>
+        {/* o próprio campo de data fica por cima do 📅 (invisível): tocar nele abre o calendário do celular.
+            No iPhone o calendário só abre tocando no campo (abrir “por código” um campo escondido não funciona). */}
+        <span className="relative w-11 shrink-0 rounded-xl text-xl text-slate-600 active:bg-slate-100 flex items-center justify-center">
+          <span aria-hidden>📅</span>
+          <input ref={ref} type="date" aria-label="Outra data" value={date}
+            onChange={(e) => e.target.value && setDate(e.target.value)}
+            onClick={() => { try { ref.current?.showPicker?.(); } catch { /* o toque já abre o calendário */ } }}
+            className="absolute inset-0 w-full h-full min-w-0 opacity-0 cursor-pointer text-base appearance-none" />
+        </span>
       </div>
       {date === today && compact && day?.status === 'open' ? null : date === today ? (
         <div className="mt-2 flex items-center gap-3 bg-white rounded-xl border border-slate-200 pl-3 pr-2 py-2">
