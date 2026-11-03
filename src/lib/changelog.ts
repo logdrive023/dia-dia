@@ -32,6 +32,7 @@ export const CHANGELOG: ChangeEntry[] = [
       ['⬆️', 'Histórico da peça do mais novo para o mais antigo: hoje em cima e, em cada dia, “agora” primeiro'],
       ['🔗', 'Dois registros no mesmo instante ficam na ordem certa no histórico (segue o saldo: 8 → 36 → 40)'],
       ['📱', 'Atualizações: o selo “mais nova” não quebra mais em duas linhas'],
+      ['🧾', 'Fechar venda: o nome da peça aparece inteiro e o preço fica embaixo (os preços mais usados quebram linha sem estragar a tela)'],
       ['🔢', 'Sobre mostra a versão certa do app (a mesma das Atualizações)'],
     ],
   },

@@ -480,23 +480,23 @@ function useRecentPrices() {
   }, []) ?? [];
 }
 
-function PriceInput({ cents, onChange, quick, autoFocus }: { cents: number | null; onChange: (c: number | null) => void; quick: number[]; autoFocus?: boolean }) {
+/**
+ * Preço da peça: a caixa e os preços mais usados lado a lado, quebrando linha quando não cabe
+ * (celular estreito ou letra grande). Ocupa a largura toda: nunca espreme o nome da peça.
+ */
+function PriceInput({ cents, onChange, quick, autoFocus, label }: { cents: number | null; onChange: (c: number | null) => void; quick: number[]; autoFocus?: boolean; label?: string }) {
   const [text, setText] = useState(cents === null ? '' : money(cents));
   const [last, setLast] = useState(cents);
   if (cents !== last) { setLast(cents); setText(cents === null ? '' : money(cents)); }
   return (
-    <div>
-      <input inputMode="decimal" placeholder="Preço" value={text} autoFocus={autoFocus}
+    <div className="flex flex-wrap items-center gap-1.5 min-w-0">
+      <input inputMode="decimal" placeholder="Preço" value={text} autoFocus={autoFocus} aria-label={label ?? 'Preço'}
         onChange={(e) => { setText(e.target.value); const c = toCents(e.target.value); setLast(c); onChange(c); }}
-        className="w-24 h-11 px-2 rounded-lg border border-slate-300 text-right font-bold text-lg tabular-nums outline-none focus:border-blue-500" />
-      {quick.length > 0 && (
-        <div className="flex gap-1 mt-1 justify-end flex-wrap">
-          {quick.map((p) => (
-            <button key={p} onClick={() => onChange(p)}
-              className={`px-2.5 h-9 rounded-lg text-sm font-semibold ${cents === p ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600'}`}>{money(p)}</button>
-          ))}
-        </div>
-      )}
+        className="w-[5.5rem] h-11 px-2 rounded-lg border border-slate-300 text-right font-bold text-lg tabular-nums outline-none focus:border-blue-500 shrink-0" />
+      {quick.map((p) => (
+        <button key={p} type="button" onClick={() => onChange(p)} aria-pressed={cents === p}
+          className={`min-w-[2.75rem] px-2 h-11 rounded-lg text-[15px] font-semibold tabular-nums ${cents === p ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600'}`}>{money(p)}</button>
+      ))}
     </div>
   );
 }
@@ -569,12 +569,24 @@ export function CheckoutSheet({ open, onClose }: { open: boolean; onClose: () =>
           const r = info?.get(l.variantId);
           return (
             <Card key={l.variantId + i} className="p-3">
-              <div className="flex items-start gap-2">
+              {/* 1) peça com a largura toda; embaixo, disponível e quantidade */}
+              <div className="flex items-center gap-2">
                 <Swatch color={r?.variant.color} size={22} />
-                <div className="flex-1 min-w-0">
-                  <div className="font-bold text-slate-800 break-words">{r?.group.name} · {r?.variant.name}</div>
-                  <div className="text-xs text-slate-500">disponível {r?.available ?? '–'}</div>
-                  <div className="mt-2"><Stepper value={l.quantity} onChange={(v) => update(i, { quantity: v })} min={0} max={r?.available} /></div>
+                <div className="flex-1 min-w-0 font-bold text-slate-800 leading-tight break-words">{r?.group.name} · {r ? variantLabel(r.variant) : ''}</div>
+              </div>
+              <div className="flex items-center justify-between gap-2 mt-1.5">
+                <span className="text-xs text-slate-500">disponível {r?.available ?? '–'}</span>
+                <Stepper value={l.quantity} onChange={(v) => update(i, { quantity: v })} min={0} max={r?.available} />
+              </div>
+              {/* 2) preço (sem foco automático: o teclado só abre quando a pessoa toca) */}
+              <div className="mt-2.5 pt-2.5 border-t border-slate-100">
+                <div className="flex items-center justify-between mb-1.5">
+                  <span className="text-[12px] font-semibold text-slate-500">Preço da peça</span>
+                  {l.quantity > 1 && l.unitPriceInCents !== null && <span className="text-[12px] text-slate-500 tabular-nums">{l.quantity} × {money(l.unitPriceInCents)} = <b className="text-slate-700">{money(l.quantity * l.unitPriceInCents)}</b></span>}
+                </div>
+                <PriceInput cents={l.unitPriceInCents} onChange={(c) => update(i, { unitPriceInCents: c })} quick={quick} label={`Preço de ${r ? variantLabel(r.variant) : 'peça'}`} />
+              </div>
+              <div className="min-w-0">
                   {perLine && (
                     <div className="mt-2">
                       <div className="text-[12px] font-semibold text-slate-500 mb-1">Esta peça foi paga no:</div>
@@ -591,9 +603,6 @@ export function CheckoutSheet({ open, onClose }: { open: boolean; onClose: () =>
                       </div>
                     </div>
                   )}
-                </div>
-                {/* sem foco automático: o teclado só abre quando a pessoa toca no preço */}
-                <PriceInput cents={l.unitPriceInCents} onChange={(c) => update(i, { unitPriceInCents: c })} quick={quick} />
               </div>
             </Card>
           );
@@ -649,7 +658,7 @@ function ConvertSheet({ reservation, name, onClose }: { reservation: Reservation
       })}>Confirmar venda · {money((price ?? 0) * reservation.quantity)}</Button>}>
       <div className="font-bold text-slate-800 mb-1">{reservation.quantity}× {name}</div>
       <div className="text-sm text-slate-500 mb-3">{reservation.customer || 'Sem nome'}</div>
-      <div className="flex items-center justify-between mb-4"><span className="font-semibold">Preço por peça</span><PriceInput cents={price} onChange={setPrice} quick={quick} /></div>
+      <div className="mb-4"><div className="font-semibold mb-1.5">Preço por peça</div><PriceInput cents={price} onChange={setPrice} quick={quick} /></div>
       <PaymentPicker value={payment} onChange={setPayment} />
     </Sheet>
   );
