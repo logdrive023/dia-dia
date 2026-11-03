@@ -386,6 +386,20 @@ describe('Vender › “Chegou mais” (entrada pela tela de vender)', () => {
   });
 });
 
+describe('ordem com o mesmo horário', () => {
+  it('segue a corrente do saldo (8→36 antes de 36→40 antes de 40→37), seja qual for a ordem em que vieram', async () => {
+    const { sortChronological } = await import('../services/history');
+    const at = '2026-11-03T10:00:00.000Z';
+    const ev = [{ id: 'a', at, before: 8, after: 36 }, { id: 'b', at, before: 36, after: 40 }, { id: 'c', at, before: 40, after: 37 }];
+    for (const order of [[2, 1, 0], [1, 0, 2], [0, 2, 1], [2, 0, 1], [1, 2, 0]]) {
+      const got = sortChronological(order.map((i) => ev[i])).map((e) => e.id);
+      expect(got).toEqual(['a', 'b', 'c']);
+    }
+    // horários diferentes: manda o horário
+    expect(sortChronological([{ at: '2026-11-03T10:00:01.000Z', before: 0, after: 1 }, { at, before: 5, after: 6 }])[0].at).toBe(at);
+  });
+});
+
 describe('histórico da peça: do mais novo para o mais antigo', () => {
   it('hoje em cima; dentro do dia: agora → último registro → … → começou', async () => {
     const d1 = await startDay(addDays(todayStr(), -1));
@@ -393,9 +407,16 @@ describe('histórico da peça: do mais novo para o mais antigo', () => {
     const v = await createVariant({ groupId: g.id, name: 'Lilás', startQuantity: 8, dailyRecordId: d1.id });
     await closeDay(d1.id);
     const d2 = await startDay(todayStr());
-    await moveStock(d2.id, v.id, 28, 'entrada', undefined, { entryKind: 'reposicao' });
-    await new Promise((r) => setTimeout(r, 5));
-    await moveStock(d2.id, v.id, 4, 'entrada', undefined, { entryKind: 'nova' });
+    // os dois no MESMO milissegundo (aconteceu no GitHub): a ordem segue a corrente do saldo, não o id sorteado
+    const real = new Date();
+    vi.setSystemTime(new Date(real.getTime()));
+    try {
+      vi.useFakeTimers({ toFake: ['Date'], now: real }); // relógio parado
+      await moveStock(d2.id, v.id, 28, 'entrada', undefined, { entryKind: 'reposicao' });
+      await moveStock(d2.id, v.id, 4, 'entrada', undefined, { entryKind: 'nova' });
+    } finally { vi.useFakeTimers({ toFake: ['Date'], shouldAdvanceTime: true, now: real }); }
+    const same = await db.stockMovements.where('variantId').equals(v.id).toArray();
+    expect(new Set(same.map((m) => m.createdAt)).size).toBe(1); // mesmo horário de verdade
     render(<App />);
     await screen.findByRole('navigation', {}, { timeout: 5000 });
     const { openHistoryForTest } = await import('./helpers-historico');

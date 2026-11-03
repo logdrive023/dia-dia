@@ -30,6 +30,7 @@ export const CHANGELOG: ChangeEntry[] = [
       ['⌨️', 'O teclado não abre mais sozinho na tela de entrada/saída do estoque'],
       ['▾', 'Tudo que abre com um toque mostra “ver mais” / “detalhes” (histórico, importações, reservas, texto colado)'],
       ['⬆️', 'Histórico da peça do mais novo para o mais antigo: hoje em cima e, em cada dia, “agora” primeiro'],
+      ['🔗', 'Dois registros no mesmo instante ficam na ordem certa no histórico (segue o saldo: 8 → 36 → 40)'],
       ['📱', 'Atualizações: o selo “mais nova” não quebra mais em duas linhas'],
       ['🔢', 'Sobre mostra a versão certa do app (a mesma das Atualizações)'],
     ],

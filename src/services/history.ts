@@ -61,6 +61,34 @@ export interface DayLine {
 
 const signed = (n: number) => (n > 0 ? `+${n}` : n < 0 ? `−${Math.abs(n)}` : '0');
 
+type Timed = { at: string; before?: number; after?: number };
+
+/**
+ * Do mais antigo para o mais novo. Mesmo horário (dois toques no mesmo milissegundo): monta a corrente
+ * do saldo — “8 → 36”, depois “36 → 40”, depois “40 → 37” (o id do registro é sorteado e não diz a ordem).
+ */
+export function sortChronological<T extends Timed>(list: T[]): T[] {
+  const sorted = [...list].sort((a, b) => a.at.localeCompare(b.at));
+  const out: T[] = [];
+  for (let i = 0; i < sorted.length;) {
+    let j = i;
+    while (j < sorted.length && sorted[j].at === sorted[i].at) j++;
+    const rest = sorted.slice(i, j);
+    const chain: T[] = [];
+    while (rest.length) {
+      const last = chain[chain.length - 1];
+      // continua do último saldo; senão, começa por quem não continua nenhum outro do grupo
+      let k = last && last.after !== undefined ? rest.findIndex((e) => e.before === last.after) : -1;
+      if (k < 0) k = rest.findIndex((e) => !rest.some((o) => o !== e && o.after !== undefined && o.after === e.before && o.before !== e.after));
+      if (k < 0) k = 0;
+      chain.push(rest.splice(k, 1)[0]);
+    }
+    out.push(...chain);
+    i = j;
+  }
+  return out;
+}
+
 /** Converte um movimento gravado em um registro do histórico. */
 export function movementEvent(m: StockMovement, date: string, undoneIds: Set<string>): HistEvent {
   const n = Math.abs(m.quantity);
@@ -138,7 +166,8 @@ export async function productTimeline(variantId: string): Promise<{ variant: Var
   let prevEnd: number | null = null;
   for (const day of d.days) {
     const item = d.items.find((i) => i.dailyRecordId === day.id);
-    const moves = d.moves.filter((m) => m.dailyRecordId === day.id).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+    const moves = sortChronological(d.moves.filter((m) => m.dailyRecordId === day.id)
+      .map((m) => ({ m, at: m.createdAt, before: m.previousBalance, after: m.newBalance }))).map((x) => x.m);
     if (!item && !moves.length) continue;
     const start = item?.initialQuantity ?? 0;
     const end = item?.currentQuantity ?? 0;
@@ -168,7 +197,7 @@ export async function productTimeline(variantId: string): Promise<{ variant: Var
     const line = out.find((l) => l.date === local) ?? out.filter((l) => l.date <= local).slice(-1)[0];
     if (line && a.action !== 'create') line.events.push(auditEvent(a, line.date));
   }
-  for (const l of out) l.events.sort((a, b) => (a.kind === 'inicial' ? -1 : b.kind === 'inicial' ? 1 : a.at.localeCompare(b.at)));
+  for (const l of out) l.events = [...l.events.filter((e) => e.kind === 'inicial'), ...sortChronological(l.events.filter((e) => e.kind !== 'inicial'))];
   return { variant, group, days: out };
 }
 
@@ -188,7 +217,8 @@ export async function historyEvents(f: HistoryFilter = {}) {
     const dt = new Date(a.createdAt);
     ev.push(auditEvent(a, `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`));
   }
-  const list = ev.filter((e) => {
+  // do mais novo para o mais antigo
+  const list = sortChronological(ev.filter((e) => {
     const v = vOf.get(e.variantId);
     if (f.from && e.date < f.from) return false;
     if (f.to && e.date > f.to) return false;
@@ -197,7 +227,7 @@ export async function historyEvents(f: HistoryFilter = {}) {
     if (f.by && e.by !== f.by) return false;
     if (f.origin && e.origin !== f.origin) return false;
     return true;
-  }).sort((a, b) => b.at.localeCompare(a.at));
+  })).reverse();
   const users = [...new Set(ev.map((e) => e.by).filter(Boolean) as string[])].sort();
   return { events: list, users, variants: d.variants, groups: d.groups };
 }
