@@ -11,6 +11,7 @@
  *  - antes de juntar, guarda uma cópia ("Voltar como estava").
  * Importar o mesmo código duas vezes não muda nada.
  */
+import { REPORT_PREFS_AT } from './settings';
 import { db } from '../db/db';
 import type {
   CashMovement, CashRecord, DailyRecord, DailyStockItem, Group, Order, Reservation, Sale, StockMovement, Variant,
@@ -87,9 +88,20 @@ export async function mergeBackup(raw: unknown): Promise<MergeResult> {
     const dMap = new Map<string, string>();
     const touchedDays = new Set<string>();
     const localDays = await db.dailyRecords.toArray();
+    // situação do dia (aberto/encerrado): vale o que foi feito por último nos dois celulares
+    // (encerrar, encerrar sozinho na virada ou reabrir de propósito)
+    const statusAt = (x: DailyRecord) => (x.status === 'closed' ? (x.closedAt ?? x.updatedAt ?? '') : (x.reopenedAt ?? ''));
+    const statusChanged = new Set<string>();
     for (const day of d.dailyRecords) {
       const same = localDays.find((x) => x.date === day.date);
-      if (same) { dMap.set(day.id, same.id); touchedDays.add(same.id); continue; }
+      if (same) {
+        dMap.set(day.id, same.id); touchedDays.add(same.id);
+        if (same.status !== day.status && statusAt(day) > statusAt(same)) {
+          const patch = { status: day.status, closedAt: day.closedAt ?? null, autoClosedAt: day.autoClosedAt ?? null, reopenedAt: day.reopenedAt ?? null };
+          await db.dailyRecords.update(same.id, patch); Object.assign(same, patch); statusChanged.add(same.id);
+        }
+        continue;
+      }
       await db.dailyRecords.add(day); localDays.push(day); dMap.set(day.id, day.id); touchedDays.add(day.id); res.days++;
     }
     const md = (id: string) => dMap.get(id) ?? id;
@@ -110,6 +122,27 @@ export async function mergeBackup(raw: unknown): Promise<MergeResult> {
       if ((has.countedBalanceInCents ?? null) === null && cr.countedBalanceInCents != null) patch.countedBalanceInCents = cr.countedBalanceInCents;
       if (cr.dailyPayDone && !has.dailyPayDone) patch.dailyPayDone = true;
       if (Object.keys(patch).length) await db.cashRecords.update(has.id, patch);
+    }
+    // o caixa do dia acompanha a situação do dia
+    for (const id of statusChanged) {
+      const cr = await db.cashRecords.where('dailyRecordId').equals(id).first();
+      const day = localDays.find((x) => x.id === id);
+      if (cr && day) await db.cashRecords.update(cr.id, { status: day.status });
+    }
+
+    // ---- chaves da mensagem do WhatsApp: vale o celular que mudou por último
+    const inPrefsAt = d.settings.find((x) => x.key === REPORT_PREFS_AT)?.value as string | undefined;
+    const localPrefsAt = (await db.settings.where('key').equals(REPORT_PREFS_AT).first())?.value as string | undefined;
+    if (inPrefsAt && (!localPrefsAt || inPrefsAt > localPrefsAt)) {
+      // o outro celular manda em todas: chave que ele nunca mudou volta ao padrão aqui também
+      const inKeys = new Set(d.settings.filter((x) => x.key.startsWith('report')).map((x) => x.key));
+      for (const row of await db.settings.toArray())
+        if (row.key.startsWith('report') && !inKeys.has(row.key)) await db.settings.delete(row.id);
+      for (const row of d.settings.filter((x) => x.key.startsWith('report'))) {
+        const has = await db.settings.where('key').equals(row.key).first();
+        if (has) await db.settings.update(has.id, { value: row.value });
+        else await db.settings.add({ id: uid(), key: row.key, value: row.value });
+      }
     }
 
     // ---- vendas: por id; mexida dos dois lados → vale a versão com mais mudanças (movimentos)

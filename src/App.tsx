@@ -13,7 +13,7 @@ import { PixSheet } from './components/Pix';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { AppProvider, useApp, type Tab } from './state';
 import { Card, closeTopSheet, InfoTip, Sheet, UiProvider } from './components/ui';
-import { todayStr } from './lib/util';
+import { fmtDate, todayStr } from './lib/util';
 import Home from './screens/Home';
 import Stock from './screens/Stock';
 import Sell, { CheckoutSheet } from './screens/Sell';
@@ -124,6 +124,7 @@ function Shell() {
       <BackButton />
       <UpdateBanner />
       <PartsBanner />
+      <NewDayBanner />
     </div>
   );
 }
@@ -312,6 +313,19 @@ function AboutSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
         </div>
       </div>
     </Sheet>
+  );
+}
+
+/** Virou a data com uma venda no meio: avisa que a venda fica no dia em que começou. */
+function NewDayBanner() {
+  const { newDayWaiting, date } = useApp();
+  if (!newDayWaiting) return null;
+  return (
+    <div role="status" aria-label="Virou o dia"
+      className="fixed top-[calc(8px+env(safe-area-inset-top))] inset-x-3 z-[75] max-w-lg mx-auto rounded-xl bg-indigo-700 text-white px-3 py-2 text-[13px] leading-snug shadow-xl">
+      🌙 Já é <b>{fmtDate(newDayWaiting, false)}</b>. Termine esta venda: ela fica no dia <b>{fmtDate(date, false)}</b>.
+      Depois o app passa sozinho para o novo dia.
+    </div>
   );
 }
 

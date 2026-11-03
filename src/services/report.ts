@@ -192,14 +192,17 @@ function stockNote(r: DaySummary['stockNow'][number]) {
   return notes.length ? ' ' + notes.join(' ') : '';
 }
 
-export async function shareText(text: string, title = 'Relatório') {
+/**
+ * “Outros apps”: abre o compartilhar do aparelho. Sem ele (comum no computador), copia o texto
+ * (não usa mais o link do WhatsApp com o texto, que no iPhone não chegava na conversa).
+ */
+export async function shareText(text: string, title = 'Relatório'): Promise<'shared' | 'aborted' | 'copied' | 'copy-failed'> {
   if (navigator.share) {
     try { await navigator.share({ title, text }); return 'shared'; } catch (e) {
       if ((e as Error).name === 'AbortError') return 'aborted';
     }
   }
-  window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank');
-  return 'whatsapp';
+  return (await copyText(text)) ? 'copied' : 'copy-failed';
 }
 
 /** Cabeçalho de cada parte (conta no tamanho de cada uma). */

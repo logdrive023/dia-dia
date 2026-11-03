@@ -163,6 +163,10 @@ valores absurdos (`MAX_CENTS`, `MAX_QTY`). Digitação aceita “1.474,80”, �
 - **Virou a data, o dia de ontem encerra sozinho** (`autoCloseOldDays`): ao abrir o app e quando passa da meia-noite com o
   app aberto, todo dia ainda aberto **antes de hoje** é encerrado (marca `autoClosedAt`; o caixa contado fica como estava).
   Dia **reaberto de propósito** (`reopenedAt`) não fecha de novo. A tela segue para o novo dia.
+- **Venda no meio na virada**: se há peça no carrinho ou o “Fechar venda” está aberto, o dia **não vira**: aparece a faixa
+  “🌙 Já é dd/mm. Termine esta venda: ela fica no dia dd/mm” e a venda é gravada no dia em que começou. Terminou (carrinho
+  vazio), o dia de ontem encerra sozinho e a tela vai para o novo dia (`state.tsx`, `newDayWaiting`).
+- **Dia reaberto esquecido aberto**: o Início mostra “📂 O dia dd/mm foi reaberto e continua aberto” com **Ver** e **Encerrar**.
 - **Cor nova cadastrada com quantidade**: a quantidade é o estoque com que a cor **começa** o dia (não é “Entrou”). Dados antigos que registravam como entrada são convertidos sozinhos ao abrir o app (`migrateCadastroEntries`), sem mudar o estoque final.
 
 ### 4.3 Todo movimento de estoque é registrado
@@ -185,6 +189,8 @@ Uma regra só (`restockOf` em `summary.ts`), usada no Início, no Estoque e no W
 | sem mínimo | **meta − agora** (nunca negativo) |
 
 - **Meta** = `idealStock` da cor ou, vazio, a quantidade do cadastro. Ex.: cadastrou 15, vendeu 1 → repor 1.
+- **Mínimo nunca maior que a meta**: o cadastro recusa (“O estoque mínimo (6) não pode ser maior que a meta (5).”), também
+  ao baixar a meta abaixo do mínimo. Dado antigo com mínimo acima da meta conta como a meta (não aparece “repor 1” à toa).
 - Mudar a **meta** (ex.: 15 → 18) **não mexe no estoque**: só muda o repor (3).
 - Para corrigir quantas peças tem, use **“📦 No estoque hoje”** na cor (vira ajuste, não “Entrou”).
 
@@ -257,12 +263,18 @@ Cada celular guarda os próprios dados. **Juntar** soma os dois:
   (lista de “apagados”, `tombstones`, que também viaja no código);
 - o estoque de cada dia é **refeito**: começou + movimentos;
 - se os dois venderam a mesma última peça, o estoque fica negativo e o app **avisa** (“Peça vendida nos dois celulares”);
+- **dia encerrado × aberto**: vale o que foi feito **por último** nos dois celulares (encerrar, encerrar sozinho na virada ou
+  reabrir); o caixa do dia acompanha;
+- **chaves da mensagem do WhatsApp** (todas as `report…`): vale o celular que mudou **por último** (marca `reportPrefsAt`);
+  chave que ele nunca mudou volta ao padrão no outro também;
 - **idempotente**: importar o mesmo código de novo não muda nada; faça nos dois sentidos para os dois ficarem iguais.
 
 ### 4.14 Backup e transferência
 - Backup em **arquivo JSON** ou **texto** (o mesmo formato do Juntar). Validação completa antes de restaurar; se falhar,
   **nada muda** (transação única).
 - Antes de restaurar/receber/recomeçar/juntar, guarda **cópia de segurança** (tabela `safety`): “Voltar como estava”.
+- **Último backup** (mostrado no “Bom dia”, no Início e no Backup) é atualizado por: backup em arquivo ou texto, “Passar para
+  outro celular” e **gerar o código do Juntar** (o código tem tudo).
 - CSV para planilha (estoque, vendas, histórico) com proteção contra “fórmula” no Excel.
 
 ### 4.15 Auditoria e diagnóstico
@@ -284,9 +296,12 @@ Cada celular guarda os próprios dados. **Juntar** soma os dois:
   WhatsApp (com emoji quebrado) e “Abrir app” não chegava na conversa. Se não conseguir copiar, **não** abre o WhatsApp e
   avisa para usar “Copiar texto”.
 - **Partes** (`splitForWhatsApp`, só se passar de 65.536 letras e com a chave ligada): copia a parte 1 (“📨 *Parte 1 de 2*”)
-  e abre o WhatsApp; ao voltar para o app aparece a faixa **“💬 Mandar parte 2”** (`PartsBanner`, guarda as partes só na
-  memória). Corta entre seções ou, se der menos partes, entre linhas — **nunca no meio de uma linha**; a parte que continua uma
-  seção começa com “↪️ título (continua)”. Juntando as partes estão todas as linhas, na ordem (teste).
+  e abre o WhatsApp; ao voltar para o app aparece a faixa **“💬 Mandar parte 2”** (`PartsBanner`; as partes ficam guardadas no
+  aparelho por até 12 h, então continua lá mesmo se o celular fechar o app enquanto está no WhatsApp). Corta entre seções
+  ou, se der menos partes, entre linhas — **nunca no meio de uma linha**; a parte que continua uma seção começa com
+  “↪️ título (continua)”. Juntando as partes estão todas as linhas, na ordem (teste).
+- **Outros apps** (`shareText`): abre o compartilhar do aparelho; sem ele (comum no computador), **copia** o texto e avisa.
+  Não usa mais o link `wa.me`.
 
 ---
 
@@ -456,7 +471,7 @@ HOJE=2028-07-15 npm test
 O setup também: banco em memória (`fake-indexeddb`), espera de até 10 s pelas telas (GitHub é lento), simula download de arquivo no jsdom.
 Configuração (`vite.config.ts`): 60 s por teste, **um arquivo por vez** (os testes pesados não atrasam os de tela).
 
-### Arquivos de teste (165 testes + 2 com dados reais = 167)
+### Arquivos de teste (175 testes + 2 com dados reais = 177)
 
 | Arquivo | Testes | O que garante |
 |---|---|---|
@@ -479,6 +494,7 @@ Configuração (`vite.config.ts`): 60 s por teste, **um arquivo por vez** (os te
 | `troca.test.ts` | 2 | trocar peça vendida + backtest (estoque cor por cor) |
 | `tela.test.tsx` | 2 | um dia completo pela tela (iniciar, vender, lançar, encerrar, relatório copiado) |
 | `rolagem.test.ts` | 2 | impede `overflow` em html/body (travava a rolagem no Android) e altura das janelas |
+| `ajustes.test.tsx` | 10 | venda no meio na meia-noite (espera e fica no dia certo), juntar (dia encerrado/reaberto e chaves: vale o último), mínimo ≤ meta, Outros apps copia, código do Juntar = backup, partes guardadas no aparelho, aviso de dia reaberto |
 
 ### Testar com os dados reais do celular
 Exporte em Menu › Passar para outro celular › Enviar tudo e rode (o arquivo **não** vai para o repositório):
@@ -564,6 +580,8 @@ Para recomeçar limpo: Configurações › Recomeçar, ou F12 › Application �
 | “Cor Azul: 2 🚫 esgotado” | esgotado olhava o livre (estoque − reservadas) | esgotado = 0 peças; reservadas aparecem como “🔒 N reservadas” |
 | Início com 9 esgotados, mensagem com 1 | duas regras diferentes | uma regra só (0 peças) e “Esgotados (N)” lista todas; teste compara os dois |
 | WhatsApp abria uma página e não chegava na conversa (iPhone) | link `wa.me` com o texto | copiar + abrir o app; a pessoa cola |
+| Venda no meio à meia-noite sumia (carrinho limpo, dia encerrado) | a virada não olhava a venda aberta | espera a venda terminar; fica no dia em que começou |
+| Dois celulares com o dia em situações diferentes | Juntar mantinha a situação local | vale a ação mais recente (encerrar/reabrir); chaves da mensagem idem |
 | “Atualizar” sem efeito no computador | o recarregar dependia de um evento que nem sempre vem | `applyUpdate` recarrega sempre (testado no caso que travava) |
 | Testes de tela falhando às vezes | `await import()` dentro de transação do banco fechava a transação antes da hora | import normal no topo do arquivo |
 

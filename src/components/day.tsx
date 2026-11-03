@@ -2,7 +2,7 @@ import { useRef } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../db/db';
 import { addDays, fmtDate, money, parseDate, todayStr, weekday } from '../lib/util';
-import { dayIsEmpty, previousDay, reopenDay, resyncFromPrevious, startDay, undoStartDay } from '../services/days';
+import { closeDay, dayIsEmpty, previousDay, reopenDay, resyncFromPrevious, startDay, undoStartDay } from '../services/days';
 import { computeCash, syncGap } from '../services/summary';
 import { ensureDailyPay } from '../services/cash';
 import { requestPersist } from '../services/storage';
@@ -241,7 +241,36 @@ export function StartDayCard() {
 
 /** Avisos do dia selecionado: encerrado (reabrir), dia anterior corrigido (atualizar), começou errado (desfazer). */
 export function DayNotices() {
-  return <><ClosedBanner /><SyncBanner /><UndoStartBanner /></>;
+  return <><ReopenedOpenBanner /><ClosedBanner /><SyncBanner /><UndoStartBanner /></>;
+}
+
+/** Dia antigo reaberto de propósito não fecha sozinho: se ficar esquecido aberto, avisa. */
+function ReopenedOpenBanner() {
+  const { date, setDate } = useApp();
+  const { run, confirm } = useUi();
+  const days = useLiveQuery(async () => (await db.dailyRecords.where('status').equals('open').toArray())
+    .filter((d) => d.reopenedAt && d.date < todayStr()).sort((a, b) => (a.date < b.date ? -1 : 1)), []);
+  if (!days?.length) return null;
+  return (
+    <>
+      {days.map((d) => (
+        <div key={d.id} role="status" aria-label={`Dia ${fmtDate(d.date, false)} reaberto`}
+          className="flex items-center gap-2 rounded-2xl bg-orange-50 border border-orange-200 px-3 py-2.5 mb-3">
+          <span className="text-xl shrink-0" aria-hidden>📂</span>
+          <span className="flex-1 min-w-0 text-[13px] leading-snug text-orange-900">
+            O dia <b>{fmtDate(d.date, false)}</b> foi reaberto e continua aberto.
+          </span>
+          {d.date !== date && (
+            <button className="shrink-0 h-9 px-2.5 rounded-xl bg-white border border-orange-300 text-[13px] font-bold text-orange-800" onClick={() => setDate(d.date)}>Ver</button>
+          )}
+          <button className="shrink-0 h-9 px-2.5 rounded-xl bg-orange-500 text-white text-[13px] font-bold" onClick={async () => {
+            if (await confirm({ title: `Encerrar ${fmtDate(d.date, false)}?`, message: 'O dia volta a ficar só para consulta. Dá para reabrir de novo.', confirm: 'Encerrar' }))
+              run(() => closeDay(d.id), 'Dia encerrado');
+          }}>Encerrar</button>
+        </div>
+      ))}
+    </>
+  );
 }
 
 /** Enquanto nada foi lançado no dia, dá para voltar e escolher de novo (continuar x do zero). */

@@ -142,12 +142,16 @@ export const idealOf = (v: Variant) => v.idealStock ?? v.startQuantity;
 /**
  * Quanto repor de uma cor (configurado no cadastro de cada produto):
  *  - “Precisa repor?” desligado → 0 (nunca aparece em repor);
- *  - com estoque mínimo → só quando chega no mínimo (ou abaixo), e repõe até a meta;
+ *  - com estoque mínimo → só quando chega no mínimo (ou abaixo), e repõe até a meta (mínimo acima da meta, de dado
+ *    antigo, conta como a meta);
  *  - sem mínimo → meta − o que tem.
  */
 export function restockOf(v: Pick<Variant, 'restockOff' | 'minimumStock'>, current: number, ideal: number) {
   if (v.restockOff) return 0;
-  if (v.minimumStock !== null && v.minimumStock !== undefined) return current <= v.minimumStock ? Math.max(ideal - current, 1) : 0;
+  if (v.minimumStock !== null && v.minimumStock !== undefined) {
+    const min = Math.min(v.minimumStock, ideal);
+    return current <= min ? Math.max(0, ideal - current) : 0;
+  }
   return Math.max(0, ideal - current);
 }
 

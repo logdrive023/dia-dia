@@ -26,6 +26,8 @@ interface Ctx {
   addToCart: (variantId: string, price?: number | null) => void;
   setCart: (lines: CartLine[]) => void;
   resetCart: () => void;
+  /** virou a data com uma venda no meio: o novo dia espera a venda terminar (data nova) */
+  newDayWaiting: string | null;
 }
 
 const AppCtx = createContext<Ctx | null>(null);
@@ -58,19 +60,30 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const lastToday = useRef(todayStr());
   const dateRef = useRef(date);
   dateRef.current = date;
+  // venda no meio (peça no carrinho ou fechando a venda): o dia não vira até ela terminar,
+  // senão o carrinho sumiria e a venda iria para um dia já encerrado
+  const busyRef = useRef(false);
+  busyRef.current = cart.length > 0 || overlay === 'checkout';
+  const [newDayWaiting, setNewDayWaiting] = useState<string | null>(null);
+  const checkRef = useRef<() => void>(() => undefined);
   useEffect(() => {
     const check = () => {
       const now = todayStr();
-      if (now === lastToday.current) return;
+      if (now === lastToday.current) { setNewDayWaiting(null); return; }
+      if (busyRef.current) { setNewDayWaiting(now); return; } // termina a venda primeiro (fica no dia em que começou)
+      setNewDayWaiting(null);
       autoCloseOldDays(now).catch(() => undefined); // virou a data: o dia de ontem encerra sozinho
       if (dateRef.current === lastToday.current) setDate(now);
       lastToday.current = now;
     };
+    checkRef.current = check;
     const id = setInterval(check, 60_000);
     document.addEventListener('visibilitychange', check);
     window.addEventListener('focus', check);
     return () => { clearInterval(id); document.removeEventListener('visibilitychange', check); window.removeEventListener('focus', check); };
   }, [setDate]);
+  // a venda terminou (carrinho vazio e fora do fechar venda): se a data já virou, vira agora
+  useEffect(() => { if (!busyRef.current) checkRef.current(); }, [cart.length, overlay]);
   const setTab = useCallback((t: Tab) => { setTabRaw(t); window.scrollTo({ top: 0 }); }, []);
   const addToCart = useCallback((variantId: string, price: number | null = null) => {
     setCart((c) => {
@@ -82,8 +95,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const resetCart = useCallback(() => { setCart([]); setCartId(uid()); }, []);
 
   const value = useMemo(() => ({
-    date, setDate, day, settings, tab, setTab, overlay, setOverlay, cart, cartId, addToCart, setCart, resetCart,
-  }), [date, setDate, day, settings, tab, setTab, overlay, cart, cartId, addToCart, resetCart]);
+    date, setDate, day, settings, tab, setTab, overlay, setOverlay, cart, cartId, addToCart, setCart, resetCart, newDayWaiting,
+  }), [date, setDate, day, settings, tab, setTab, overlay, cart, cartId, addToCart, resetCart, newDayWaiting]);
   return <AppCtx.Provider value={value}>{children}</AppCtx.Provider>;
 }
 

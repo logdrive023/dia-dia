@@ -44,7 +44,11 @@ export default function CloseDaySheet({ open, onClose }: { open: boolean; onClos
             <Button variant={copied ? 'success' : 'outline'} onClick={async () => {
               if (await copyText(text)) { setCopied(true); setTimeout(() => setCopied(false), 2000); } else toast('Não foi possível copiar', 'err');
             }}>{copied ? '✓ Copiado!' : '📋 Copiar texto'}</Button>
-            <Button variant="outline" onClick={() => shareText(text, `Fechamento ${day.date}`)}>📤 Outros apps</Button>
+            <Button variant="outline" onClick={async () => {
+              const r = await shareText(text, `Fechamento ${day.date}`);
+              if (r === 'copied') toast('📋 Este aparelho não tem “compartilhar”: o texto foi copiado, cole onde quiser');
+              else if (r === 'copy-failed') toast('Não deu para copiar. Toque em “Copiar texto”.', 'err');
+            }}>📤 Outros apps</Button>
           </div>
           {!closed && (
             <Button size="lg" className="w-full" disabled={busy} onClick={() => wrap(async () => {

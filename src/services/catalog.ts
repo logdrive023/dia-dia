@@ -12,6 +12,13 @@ export class UserError extends Error { name = 'UserError'; }
 const MAX_NAME = 40;
 
 /** Estoque ideal/mínimo: inteiro de 0 a MAX_QTY; preço: centavos válidos. null = não definido. */
+/** Estoque mínimo nunca maior que a meta (a meta é o “repõe até quanto”). */
+function checkMinVsMeta(v: { minimumStock?: number | null; idealStock?: number | null; startQuantity: number }) {
+  const meta = v.idealStock ?? v.startQuantity;
+  if (v.minimumStock !== null && v.minimumStock !== undefined && v.minimumStock > meta)
+    throw new UserError(`O estoque mínimo (${v.minimumStock}) não pode ser maior que a meta (${meta}).`);
+}
+
 function validateNumbers(p: { idealStock?: number | null; minimumStock?: number | null; optionalPriceInCents?: number | null }) {
   for (const k of ['idealStock', 'minimumStock'] as const) {
     const v = p[k];
@@ -147,6 +154,7 @@ export async function createVariant(input: {
   const qty = input.startQuantity ?? 0;
   if (!Number.isInteger(qty) || qty < 0 || qty > MAX_QTY) throw new UserError('Quantidade inválida.');
   validateNumbers(input);
+  checkMinVsMeta({ ...input, startQuantity: qty });
   return db.transaction('rw', [db.variants, db.groups, db.dailyStockItems, db.dailyRecords, db.stockMovements, db.auditLogs, db.settings], async () => {
     if (!(await db.groups.get(input.groupId))) throw new UserError('Grupo não encontrado.');
     const siblings = await db.variants.where('groupId').equals(input.groupId).toArray();
@@ -194,6 +202,7 @@ export async function updateVariant(id: string, patch: Partial<Pick<Variant,
       if (name !== v.name) await audit('variant', id, 'rename', v.name, name);
     }
     validateNumbers(patch);
+    checkMinVsMeta({ ...v, ...patch });
     for (const k of ['minimumStock', 'idealStock', 'optionalPriceInCents'] as const)
       if (patch[k] !== undefined && patch[k] !== v[k]) await audit('variant', id, `set_${k}`, v[k], patch[k]);
     await db.variants.update(id, { ...patch, updatedAt: nowIso() });

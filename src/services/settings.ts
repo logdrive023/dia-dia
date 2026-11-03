@@ -1,5 +1,5 @@
 import { db } from '../db/db';
-import { uid } from '../lib/util';
+import { uid, nowIso } from '../lib/util';
 import type { PaymentMethod } from '../db/types';
 
 export interface SellEntry {
@@ -58,11 +58,18 @@ export async function getSetting<K extends keyof AppSettings>(key: K): Promise<A
   return (row?.value as AppSettings[K]) ?? DEFAULT_SETTINGS[key];
 }
 
+/** marca de quando as chaves da mensagem (report…) mudaram: no Juntar, vale a do celular que mudou por último */
+export const REPORT_PREFS_AT = 'reportPrefsAt';
+
 export async function setSetting<K extends keyof AppSettings>(key: K, value: AppSettings[K]) {
   await db.transaction('rw', db.settings, async () => {
-    const row = await db.settings.where('key').equals(key).first();
-    if (row) await db.settings.update(row.id, { value });
-    else await db.settings.add({ id: uid(), key, value });
+    const put = async (k: string, v: unknown) => {
+      const row = await db.settings.where('key').equals(k).first();
+      if (row) await db.settings.update(row.id, { value: v });
+      else await db.settings.add({ id: uid(), key: k, value: v });
+    };
+    await put(key, value);
+    if (String(key).startsWith('report')) await put(REPORT_PREFS_AT, nowIso());
   });
 }
 

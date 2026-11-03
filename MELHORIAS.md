@@ -512,6 +512,19 @@ correção com teste. Tudo também aparece para a usuária em **Menu › Atualiz
   começa com 12 (teste `conta-estoque.test.ts`).
 - Sem vazamento de memória (tela estável ~300 elementos, 8–19 MB); internet: ~1 KB por conferência de versão.
 
+### Diagnóstico lendo o SISTEMA.md (02/11) — gaps tratados
+| # | Gap | Decisão | O que ficou |
+|---|---|---|---|
+| 1 | “Enviar no WhatsApp” não testado no celular | já testado pela usuária: funciona | — |
+| 2 | Venda no meio à meia-noite | preparar | o dia espera a venda terminar; ela fica no dia em que começou; faixa “🌙 Já é…” |
+| 3 | Totais × vendas do caderno (30 e 31/10) | ok: era só histórico (recomeçou do zero no celular dela) | — |
+| 4 | Dois celulares: situação do dia e chaves não juntavam | preparar | vale a ação mais recente; chaves seguem o celular que mudou por último |
+| 5 | Mínimo maior que a meta aceito | corrigir | recusado no cadastro; dado antigo conta como a meta |
+| 6 | “Outros apps” com o link antigo | corrigir | sem compartilhar: copia o texto |
+| 7 | “Último backup” mais antigo que o real | corrigir | gerar o código do Juntar conta como backup |
+| 8 | Partes só na memória | corrigir | guardadas no aparelho por até 12 h |
+| 9 | Dia reaberto esquecido aberto | corrigir | aviso no Início com Ver / Encerrar |
+
 ### Testes
-- **167 testes** (165 + 2 com dados reais), também rodando em outra data (`HOJE=2027-03-01`). Lista completa em `SISTEMA.md`,
+- **177 testes** (175 + 2 com dados reais), também rodando em outra data (`HOJE=2027-03-01`). Lista completa em `SISTEMA.md`,
   seção 10.

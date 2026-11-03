@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { buildBackup, decodeTextBackup, encodeTextBackup, summarizeBackup } from '../services/backup';
+import { buildBackup, decodeTextBackup, encodeTextBackup, markBackupDone, summarizeBackup } from '../services/backup';
 import { mergeBackup } from '../services/sync';
 import { copyText } from '../services/report';
 import { Button, Card, InfoTip, Sheet, useBusy, useUi } from '../components/ui';
@@ -16,7 +16,8 @@ export default function SyncSheet({ open, onClose }: { open: boolean; onClose: (
   const [text, setText] = useState('');
   if (!open) return null;
 
-  const generate = () => wrap(async () => setParts(await encodeTextBackup(await buildBackup())));
+  // o código tem tudo (é um backup em texto): conta como “último backup” (sem segurar a tela enquanto grava a data)
+  const generate = () => wrap(async () => { setParts(await encodeTextBackup(await buildBackup())); markBackupDone().catch(() => undefined); });
   // compartilhar do celular aceita texto grande (link do WhatsApp corta); sem isso, copia
   const send = (p: string, i: number) => wrap(async () => {
     if (navigator.share) {

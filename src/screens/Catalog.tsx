@@ -377,7 +377,7 @@ function VariantEditor({ id, onClose }: { id: string | null; onClose: () => void
             </div>
             {v.minimumStock !== null && v.minimumStock !== undefined && (
               <NumberField key={'m' + v.id + v.minimumStock} label="Estoque mínimo"
-                hint={`Aparece para repor quando tiver ${v.minimumStock} ou menos.`}
+                hint={`Aparece para repor quando tiver ${v.minimumStock} ou menos. No máximo a meta (${v.idealStock ?? v.startQuantity}).`}
                 value={String(v.minimumStock)}
                 onSave={(t) => run(() => updateVariant(v.id, { minimumStock: t === '' ? null : Number(t) }), 'Salvo')} />
             )}
