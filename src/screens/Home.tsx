@@ -78,7 +78,7 @@ export default function Home() {
 
             {/* exportar: um toque manda o relatório do dia para o WhatsApp */}
             <div className="mt-2.5 flex gap-2">
-              <button onClick={async () => { if ((await sendWhatsApp(whatsappReport(day.date, s, { symbol: sym, title: settings.reportTitle, showStock: settings.reportShowStock, restockDetail: settings.reportRestockDetail, stockStartEnd: settings.reportStockStartEnd, totals: settings.reportTotals, dividers: settings.reportDividers }), settings.reportSplit)) === 'copied') toast('📋 Mensagem grande: copiada. Abra o WhatsApp e cole.'); }}
+              <button onClick={async () => { const r = await sendWhatsApp(whatsappReport(day.date, s, { symbol: sym, title: settings.reportTitle, showStock: settings.reportShowStock, restockDetail: settings.reportRestockDetail, stockStartEnd: settings.reportStockStartEnd, totals: settings.reportTotals, dividers: settings.reportDividers }), settings.reportSplit); toast(r === 'copy-failed' ? 'Não deu para copiar. Use “Ver antes” › Copiar texto.' : r === 'parts' ? '📋 Parte 1 copiada: cole no WhatsApp' : '📋 Copiado! Cole na conversa do WhatsApp', r === 'copy-failed' ? 'err' : undefined); }}
                 className="flex-1 flex items-center gap-3 rounded-2xl bg-[#25D366] text-white px-4 py-3 text-left shadow-sm shadow-emerald-600/30 active:brightness-95">
                 <span className="text-3xl">💬</span>
                 <span className="min-w-0">

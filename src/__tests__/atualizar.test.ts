@@ -4,7 +4,7 @@
  */
 import { describe, expect, it, vi } from 'vitest';
 import { applyUpdate } from '../lib/applyUpdate';
-import { whatsappSize, WHATSAPP_URL_MAX } from '../services/report';
+import { whatsappSize, WHATSAPP_TEXT_MAX } from '../services/report';
 
 /** service worker de mentira: uma versão esperando, que dispara os eventos quando mandamos */
 function fakeSW(opts: { waiting?: boolean } = {}) {
@@ -58,13 +58,9 @@ describe('Atualizar', () => {
 });
 
 describe('tamanho da mensagem (atual / máximo)', () => {
-  it('conta o link de verdade (acento e emoji pesam mais) e diz se cabe', () => {
-    const small = whatsappSize('Oi');
-    expect(small).toMatchObject({ max: WHATSAPP_URL_MAX, fits: true, letters: 2 });
-    expect(small.link).toBe('https://wa.me/?text=Oi'.length);
-    expect(whatsappSize('ç').link - whatsappSize('c').link).toBe(5); // %C3%A7
-    const big = whatsappSize('a'.repeat(WHATSAPP_URL_MAX));
-    expect(big.fits).toBe(false);
-    expect(big.tooBig).toBe(false);
+  it('conta as letras da mensagem contra o máximo de uma mensagem do WhatsApp', () => {
+    expect(whatsappSize('Oi')).toEqual({ letters: 2, max: WHATSAPP_TEXT_MAX, fits: true });
+    expect(whatsappSize('a'.repeat(WHATSAPP_TEXT_MAX)).fits).toBe(true);
+    expect(whatsappSize('a'.repeat(WHATSAPP_TEXT_MAX + 1)).fits).toBe(false);
   });
 });

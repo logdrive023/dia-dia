@@ -34,7 +34,12 @@ export default function CloseDaySheet({ open, onClose }: { open: boolean; onClos
     <Sheet open onClose={() => { setEditing(false); setDraft(null); onClose(); }} title={closed ? `Relatório · ${fmtDate(day.date, false)}` : '🌙 Encerrar o dia'} tall
       footer={
         <div className="space-y-2">
-          <Button className="w-full !bg-[#25D366]" onClick={async () => { const r = await sendWhatsApp(text, settings.reportSplit); if (r === 'copied') toast('📋 Mensagem grande: copiada. Abra o WhatsApp e cole.'); }}>💬 Enviar no WhatsApp</Button>
+          <p className="text-center text-[13px] text-slate-600">📋 Ao clicar em “Enviar no WhatsApp” vai <b>copiar</b> e <b>abrir o WhatsApp</b>. Lá é só colar na conversa.</p>
+          <Button className="w-full !bg-[#25D366]" onClick={async () => {
+            const r = await sendWhatsApp(text, settings.reportSplit);
+            if (r === 'copy-failed') toast('Não deu para copiar. Toque em “Copiar texto”.', 'err');
+            else toast(r === 'parts' ? '📋 Parte 1 copiada: cole no WhatsApp' : '📋 Copiado! Cole na conversa do WhatsApp');
+          }}>💬 Enviar no WhatsApp</Button>
           <div className="grid grid-cols-2 gap-2">
             <Button variant={copied ? 'success' : 'outline'} onClick={async () => {
               if (await copyText(text)) { setCopied(true); setTimeout(() => setCopied(false), 2000); } else toast('Não foi possível copiar', 'err');
@@ -196,39 +201,35 @@ function MessageSize({ text, split, onSplit }: { text: string; split: boolean; o
   const z = whatsappSize(text);
   const parts = !z.fits && split ? splitForWhatsApp(text) : null;
   const n = (v: number) => v.toLocaleString('pt-BR');
-  const pct = Math.min(100, Math.round((z.link / z.max) * 100));
+  const pct = Math.min(100, Math.round((z.letters / z.max) * 100));
   return (
-    <div aria-label="Tamanho da mensagem" className={`mt-3 rounded-xl border px-3 py-2.5 ${z.tooBig ? 'border-red-300 bg-red-50' : z.fits ? 'border-emerald-200 bg-emerald-50' : 'border-amber-300 bg-amber-50'}`}>
+    <div aria-label="Tamanho da mensagem" className={`mt-3 rounded-xl border px-3 py-2.5 ${z.fits ? 'border-emerald-200 bg-emerald-50' : parts ? 'border-amber-300 bg-amber-50' : 'border-red-300 bg-red-50'}`}>
       <div className="flex items-center justify-between gap-2">
         <span className="text-[13px] font-bold text-slate-700">📏 Tamanho da mensagem</span>
-        <span className={`text-[15px] font-bold tabular-nums ${z.fits ? 'text-emerald-700' : 'text-amber-700'}`}>{n(z.link)} / {n(z.max)}</span>
+        <span className={`text-[15px] font-bold tabular-nums ${z.fits ? 'text-emerald-700' : 'text-amber-700'}`}>{n(z.letters)} / {n(z.max)}</span>
       </div>
       <div className="h-2 rounded-full bg-white/80 mt-1.5 overflow-hidden">
-        <div className={`h-full rounded-full ${z.fits ? 'bg-emerald-500' : 'bg-amber-500'}`} style={{ width: `${pct}%` }} />
+        <div className={`h-full rounded-full ${z.fits ? 'bg-emerald-500' : 'bg-amber-500'}`} style={{ width: `${Math.max(pct, 1)}%` }} />
       </div>
       <p className="text-[12.5px] text-slate-700 mt-1.5 leading-snug">
-        {z.tooBig
-          ? <>🚫 Grande demais até para o WhatsApp ({n(z.letters)} de {n(65536)} letras). Desligue a lista do estoque.</>
-          : z.fits
-            ? <>✅ Cabe: “Enviar no WhatsApp” abre direto a conversa.</>
-            : parts
-              ? <>✂️ Passou do máximo: vai em <b>{parts.length} partes</b>. Toque em “Enviar no WhatsApp” → manda a parte 1; volte para o app e toque em <b>“Mandar parte 2”</b>. Nada é cortado.</>
-              : <>📤 Passou do máximo do link direto: ao tocar em “Enviar no WhatsApp” abre o <b>compartilhar</b> do celular (escolha o WhatsApp). A mensagem vai <b>inteira</b>, nada é cortado.</>}
+        {z.fits
+          ? <>✅ Cabe numa mensagem do WhatsApp (máximo {n(z.max)} letras).</>
+          : parts
+            ? <>✂️ Passou do máximo: vai em <b>{parts.length} partes</b>. “Enviar no WhatsApp” copia a parte 1; volte para o app e toque em <b>“Mandar parte 2”</b>. Nada é cortado.</>
+            : <>🚫 Passou do máximo de uma mensagem do WhatsApp. Ligue “Mandar em partes” ou desligue a lista do estoque.</>}
       </p>
       {parts && (
         <ul className="mt-1.5 space-y-0.5" aria-label="Como vai ficar">
           {parts.map((p, i) => (
             <li key={i} className="text-[12.5px] text-slate-700 tabular-nums">
-              📨 Parte {i + 1}: <b>{n(whatsappSize(p).link)} / {n(z.max)}</b> · começa em “{firstTitle(p)}”
+              📨 Parte {i + 1}: <b>{n(p.length)} / {n(z.max)}</b> · começa em “{firstTitle(p)}”
             </li>
           ))}
         </ul>
       )}
-      {!z.tooBig && (
-        <div className="mt-1 border-t border-black/5">
-          <Toggle label="✂️ Mandar em partes se passar" checked={split} onChange={onSplit} />
-        </div>
-      )}
+      <div className="mt-1 border-t border-black/5">
+        <Toggle label="✂️ Mandar em partes se passar" checked={split} onChange={onSplit} />
+      </div>
     </div>
   );
 }

@@ -3,7 +3,7 @@ import { db } from './db/db';
 import { useRegisterSW } from 'virtual:pwa-register/react';
 import { applyUpdate } from './lib/applyUpdate';
 import { setPendingParts, usePendingParts } from './lib/pendingParts';
-import { openWhatsAppLink } from './services/report';
+import { copyText, openWhatsAppApp } from './services/report';
 import { seedIfNeeded } from './db/seed';
 import { autoCloseOldDays, migrateCadastroEntries } from './services/days';
 import { setUpdateState, useUpdateState } from './lib/updateState';
@@ -324,10 +324,10 @@ function PartsBanner() {
     <div role="dialog" aria-label="Mandar a próxima parte"
       className="fixed bottom-[calc(72px+env(safe-area-inset-bottom))] inset-x-4 z-[46] max-w-lg mx-auto bg-emerald-700 text-white rounded-2xl p-3.5 shadow-xl">
       <div className="text-[15px] font-bold">📨 Parte {p.next} de {total} enviada</div>
-      <div className="text-[13px] text-white/90 mt-0.5">Falta {total - p.next === 1 ? 'a parte' : 'as partes'} {Array.from({ length: total - p.next }, (_, i) => p.next + 1 + i).join(' e ')}. Toque para mandar no WhatsApp.</div>
+      <div className="text-[13px] text-white/90 mt-0.5">Falta {total - p.next === 1 ? 'a parte' : 'as partes'} {Array.from({ length: total - p.next }, (_, i) => p.next + 1 + i).join(' e ')}. Toque: copia e abre o WhatsApp, é só colar.</div>
       <div className="flex gap-2 mt-2.5">
         <button className="flex-1 h-12 rounded-xl bg-white text-emerald-800 font-bold text-[16px]"
-          onClick={() => { openWhatsAppLink(p.parts[p.next]); setPendingParts({ ...p, next: p.next + 1 }); }}>
+          onClick={async () => { if (await copyText(p.parts[p.next])) { openWhatsAppApp(); setPendingParts({ ...p, next: p.next + 1 }); } }}>
           💬 Mandar parte {p.next + 1}
         </button>
         <button className="h-12 px-3 rounded-xl bg-white/15 text-white text-sm font-semibold" onClick={() => setPendingParts(null)}>Fechar</button>

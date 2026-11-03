@@ -72,15 +72,16 @@ describe('dia de trabalho completo pela tela', () => {
     await confirmDialog(/^Encerrar$/);
     await waitFor(async () => expect((await db.dailyRecords.toArray())[0].status).toBe('closed'));
 
-    // relatório pronto: um toque manda para o WhatsApp (mensagem curta: link direto; grande: menu de compartilhar do celular)
-    const share = vi.fn().mockResolvedValue(undefined);
-    Object.defineProperty(navigator, 'share', { value: share, configurable: true });
+    // relatório pronto: um toque copia a mensagem e abre o WhatsApp (lá é só colar)
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
     const opened = (window.open as unknown as ReturnType<typeof vi.fn>);
     opened.mockClear();
     click(await screen.findByRole('button', { name: /Enviar relatório do dia no WhatsApp/ }));
-    await waitFor(() => expect(opened.mock.calls.length + share.mock.calls.length).toBe(1));
-    const url = opened.mock.calls.length ? decodeURIComponent(opened.mock.calls[0][0] as string) : (share.mock.calls[0][0] as { text: string }).text;
-    delete (navigator as { share?: unknown }).share;
+    await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
+    expect(opened).toHaveBeenCalledWith('https://web.whatsapp.com/', '_blank'); // no computador: WhatsApp Web
+    await screen.findByText(/Copiado! Cole na conversa do WhatsApp/);
+    const url = writeText.mock.calls[0][0] as string;
     expect(url).toContain('Vendeu: *140*');
     expect(url).toContain('Dei a Chico: 50');
     expect(url).toContain('➖ 🤝 Dei a Chico: 50');

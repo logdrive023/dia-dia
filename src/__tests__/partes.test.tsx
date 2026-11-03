@@ -9,7 +9,7 @@ import App from '../App';
 import { seedIfNeeded } from '../db/seed';
 import { AppDB, db, useDatabase } from '../db/db';
 import { getPendingParts, setPendingParts } from '../lib/pendingParts';
-import { CONTINUES, partHeader, sendWhatsApp, splitForWhatsApp, whatsappSize, WHATSAPP_URL_MAX } from '../services/report';
+import { CONTINUES, partHeader, sendWhatsApp, splitForWhatsApp, whatsappNav, WHATSAPP_TEXT_MAX } from '../services/report';
 
 beforeAll(() => {
   window.scrollTo = vi.fn() as never;
@@ -43,33 +43,47 @@ function bigReport(groups = 10, colors = 12) {
 const body = (p: string, i: number, n: number) => { expect(p.startsWith(partHeader(i, n))).toBe(true); return p.slice(partHeader(i, n).length); };
 const lines = (t: string) => t.split('\n').filter((l) => l.trim() && !l.startsWith(CONTINUES));
 
+/** limite pequeno só para testar o corte (a regra é a mesma do limite de verdade, 65.536 letras) */
+const MAX = 3000;
+const spies: { mockRestore: () => void }[] = [];
+/** área de transferência e abrir o WhatsApp de mentira */
+function fakePhone() {
+  const writeText = vi.fn().mockResolvedValue(undefined);
+  Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+  const go = vi.spyOn(whatsappNav, 'go').mockImplementation(() => undefined);
+  const open = vi.spyOn(whatsappNav, 'open').mockImplementation(() => undefined);
+  const phone = vi.spyOn(whatsappNav, 'isPhone').mockReturnValue(true);
+  spies.push(go, open, phone);
+  return { writeText, go, open, phone };
+}
+afterEach(() => { spies.splice(0).forEach((x) => x.mockRestore()); });
+
 describe('dividir em partes', () => {
-  it('cabe no link: uma parte só, sem cabeçalho', () => {
+  it('cabe: uma parte só, sem cabeçalho (o limite de verdade é 65.536 letras)', () => {
     expect(splitForWhatsApp('Oi\n\ntudo bem')).toEqual(['Oi\n\ntudo bem']);
+    expect(splitForWhatsApp(bigReport())).toEqual([bigReport()]); // relatório grande cabe numa mensagem
+    expect(WHATSAPP_TEXT_MAX).toBe(65536);
   });
-  it('grande: cada parte cabe; juntas têm todas as linhas, na ordem; cabeçalho “Parte i de n”', () => {
+  it('passou: cada parte cabe; juntas têm todas as linhas, na ordem; cabeçalho “Parte i de n”', () => {
     const t = bigReport();
-    expect(whatsappSize(t).fits).toBe(false);
-    const parts = splitForWhatsApp(t);
+    expect(t.length).toBeGreaterThan(MAX);
+    const parts = splitForWhatsApp(t, MAX);
     expect(parts.length).toBeGreaterThan(1);
-    for (const p of parts) expect(whatsappSize(p).link).toBeLessThanOrEqual(WHATSAPP_URL_MAX);
+    for (const p of parts) expect(p.length).toBeLessThanOrEqual(MAX);
     const joined = parts.flatMap((p, i) => lines(body(p, i + 1, parts.length)));
     expect(joined).toEqual(lines(t)); // nenhuma linha perdida, nenhuma repetida, mesma ordem
     // o menor número de partes (sem parte quase vazia sobrando)
-    const room = WHATSAPP_URL_MAX - whatsappSize(partHeader(99, 99)).link;
-    expect(parts.length).toBeLessThanOrEqual(Math.ceil(whatsappSize(t).link / room) + 1);
-    // parte que continua uma seção repete o título, marcado “(continua)”
+    expect(parts.length).toBeLessThanOrEqual(Math.ceil(t.length / (MAX - partHeader(99, 99).length)) + 1);
     for (let i = 1; i < parts.length; i++) {
       const first = body(parts[i], i + 1, parts.length).split('\n')[0];
       if (first.startsWith(CONTINUES)) expect(first).toMatch(/\(continua\)$/);
     }
   });
-  it('seção maior que uma parte inteira: corta entre linhas, nunca no meio de uma linha', () => {
-    const t = bigReport(1, 400); // uma seção gigante
-    const parts = splitForWhatsApp(t);
-    for (const p of parts) expect(whatsappSize(p).link).toBeLessThanOrEqual(WHATSAPP_URL_MAX);
+  it('seção maior que uma parte inteira: corta entre linhas, nunca no meio de uma linha; repete o título', () => {
+    const t = bigReport(1, 120);
+    const parts = splitForWhatsApp(t, MAX);
+    for (const p of parts) expect(p.length).toBeLessThanOrEqual(MAX);
     expect(parts.flatMap((p, i) => lines(body(p, i + 1, parts.length)))).toEqual(lines(t));
-    // toda parte depois da 1ª que começa no meio da seção repete o título
     for (let i = 1; i < parts.length; i++) {
       const first = body(parts[i], i + 1, parts.length).split('\n')[0];
       if (!first.startsWith('📦 *') && !first.startsWith('🔁 *') && !first.startsWith('🧾')) expect(first).toMatch(/^↪️ .+ \(continua\)$/);
@@ -77,30 +91,45 @@ describe('dividir em partes', () => {
   });
 });
 
-describe('mandar em partes', () => {
-  it('ligado: “Enviar” abre a parte 1 e guarda a 2; desligado: vai tudo de uma vez (compartilhar)', async () => {
+describe('Enviar no WhatsApp = copiar e abrir o WhatsApp', () => {
+  it('celular: copia a mensagem inteira e abre o app (sem link com o texto)', async () => {
+    const f = fakePhone();
     const t = bigReport();
-    const parts = splitForWhatsApp(t);
-    expect(await sendWhatsApp(t, true)).toBe('parts');
-    expect(decodeURIComponent((window.open as ReturnType<typeof vi.fn>).mock.calls[0][0])).toBe(`https://wa.me/?text=${parts[0]}`);
-    expect(getPendingParts()).toEqual({ parts, next: 1 });
-    setPendingParts(null);
-    const share = vi.fn().mockResolvedValue(undefined);
-    Object.defineProperty(navigator, 'share', { value: share, configurable: true });
-    expect(await sendWhatsApp(t, false)).toBe('shared');
-    expect(share.mock.calls[0][0].text).toBe(t);
-    delete (navigator as { share?: unknown }).share;
+    expect(await sendWhatsApp(t, true)).toBe('copied');
+    expect(f.writeText).toHaveBeenCalledWith(t); // inteira
+    expect(f.go).toHaveBeenCalledWith('whatsapp://');
+    expect(f.open).not.toHaveBeenCalled();
+    expect(getPendingParts()).toBeNull();
   });
-  it('pela tela: “Mandar parte 2” abre a parte 2 e some quando acabou', async () => {
-    const parts = splitForWhatsApp(bigReport());
+  it('computador: copia e abre o WhatsApp Web', async () => {
+    const f = fakePhone();
+    f.phone.mockReturnValue(false);
+    expect(await sendWhatsApp('Oi', false)).toBe('copied');
+    expect(f.writeText).toHaveBeenCalledWith('Oi');
+    expect(f.open).toHaveBeenCalledWith('https://web.whatsapp.com/');
+  });
+  it('não conseguiu copiar: não abre o WhatsApp (senão chegaria lá sem nada para colar)', async () => {
+    const f = fakePhone();
+    f.writeText.mockRejectedValue(new Error('negado'));
+    document.execCommand = vi.fn().mockReturnValue(false) as never;
+    expect(await sendWhatsApp('Oi', false)).toBe('copy-failed');
+    expect(f.go).not.toHaveBeenCalled();
+  });
+  it('maior que o máximo, com partes: copia a parte 1 e guarda as outras; pela tela “Mandar parte 2” copia a 2', async () => {
+    const f = fakePhone();
+    const t = 'x'.repeat(40) + '\n' + Array.from({ length: 2000 }, (_, i) => `linha ${i} ção ✅ começou 3 → terminou 2`).join('\n');
+    expect(t.length).toBeGreaterThan(WHATSAPP_TEXT_MAX);
+    const parts = splitForWhatsApp(t);
+    expect(parts.length).toBe(2);
+    expect(await sendWhatsApp(t, true)).toBe('parts');
+    expect(f.writeText).toHaveBeenLastCalledWith(parts[0]);
+    expect(getPendingParts()).toEqual({ parts, next: 1 });
     render(<App />);
-    await screen.findByRole('navigation', {}, { timeout: 5000 });
-    act(() => setPendingParts({ parts, next: 1 }));
-    expect((await screen.findByRole('dialog', { name: /Mandar a próxima parte/ })).textContent).toContain(`Parte 1 de ${parts.length} enviada`);
-    for (let i = 1; i < parts.length; i++) {
-      fireEvent.click(await screen.findByRole('button', { name: new RegExp(`Mandar parte ${i + 1}`) }));
-      expect(decodeURIComponent((window.open as ReturnType<typeof vi.fn>).mock.calls.slice(-1)[0][0])).toBe(`https://wa.me/?text=${parts[i]}`);
-    }
+    expect((await screen.findByRole('dialog', { name: /Mandar a próxima parte/ }, { timeout: 5000 })).textContent).toContain('Parte 1 de 2 enviada');
+    fireEvent.click(await screen.findByRole('button', { name: /Mandar parte 2/ }));
+    await waitFor(() => expect(f.writeText).toHaveBeenLastCalledWith(parts[1]));
+    expect(f.go).toHaveBeenCalledTimes(2);
     await waitFor(() => expect(screen.queryByRole('dialog', { name: /Mandar a próxima parte/ })).toBeNull());
+    act(() => setPendingParts(null));
   });
 });

@@ -198,7 +198,9 @@ describe('chaves do repor e do estoque na mensagem (pela tela)', () => {
     await screen.findByText(/Total para repor/);
     // tamanho da mensagem: atual / máximo, bem à vista
     const size = await screen.findByLabelText('Tamanho da mensagem');
-    expect(size.textContent).toMatch(/📏 Tamanho da mensagem[\d.]+ \/ 7\.000/);
+    expect(size.textContent).toMatch(/📏 Tamanho da mensagem[\d.]+ \/ 65\.536/);
+    // recado em cima do botão: copia e abre o WhatsApp
+    screen.getByText(/Ao clicar em “Enviar no WhatsApp” vai/);
     click(tot);
     await waitFor(() => expect(screen.queryByText(/Total para repor/)).toBeNull());
     click(dv);

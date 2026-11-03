@@ -74,8 +74,12 @@ describe('Aba Início', () => {
     click(await screen.findByRole('button', { name: /Saldo do caixa/ }));
     await waitFor(() => expect(screen.getByRole('heading').textContent).toBe('Caixa'));
     click(nav('Início'));
+    // copia a mensagem e abre o WhatsApp (no computador, WhatsApp Web)
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
     click(await screen.findByRole('button', { name: /Enviar relatório do dia no WhatsApp/ }));
-    expect((window.open as unknown as ReturnType<typeof vi.fn>).mock.calls.slice(-1)[0][0]).toMatch(/^https:\/\/wa\.me\/\?text=/);
+    await waitFor(() => expect(writeText.mock.calls[0]?.[0]).toMatch(/Fechamento/));
+    expect((window.open as unknown as ReturnType<typeof vi.fn>).mock.calls.slice(-1)[0][0]).toBe('https://web.whatsapp.com/');
     // selo "Tudo salvo" abre explicação
     click(screen.getByRole('button', { name: /Ver quando foi salvo/ }));
     await screen.findByText(/Última vez que salvou/);

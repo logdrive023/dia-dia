@@ -10,7 +10,7 @@ type Opts = { symbol?: string; title?: string; /** mostrar o estoque de agora (c
   /** linha de divisão entre os grupos (Plomo ┈┈┈ Lila) */ dividers?: boolean };
 
 /** divisão entre os grupos na mensagem do WhatsApp */
-export const DIVIDER = '- - - - - - - -'; // só traço e espaço: ocupa pouco no link do WhatsApp
+export const DIVIDER = '- - - - - - - -'; // só traço e espaço: simples e leve
 
 /** Linha do caderno para uma venda: "2x70 = 140 Dinheiro" ou "1x70 + 1x85 = 155 Pix". */
 export function orderLine(lines: { quantity: number; unitPriceInCents: number | null; paymentMethod?: PaymentMethod }[], total: number, method: PaymentMethod,
@@ -206,16 +206,23 @@ export async function shareText(text: string, title = 'Relatório') {
 export const partHeader = (i: number, n: number) => `📨 *Parte ${i} de ${n}*\n\n`;
 /** marca da linha repetida no começo da parte que continua uma seção (não é informação nova) */
 export const CONTINUES = '↪️ ';
+/** limite de uma mensagem do próprio WhatsApp (letras) */
+export const WHATSAPP_TEXT_MAX = 65536;
+
+/** Tamanho da mensagem para mostrar na tela: “atual / máximo” (letras de uma mensagem do WhatsApp). */
+export function whatsappSize(text: string) {
+  return { letters: text.length, max: WHATSAPP_TEXT_MAX, fits: text.length <= WHATSAPP_TEXT_MAX };
+}
 
 /**
- * Divide a mensagem em partes que cabem no link direto do WhatsApp. Nunca corta uma linha:
+ * Divide a mensagem em partes que cabem numa mensagem do WhatsApp. Nunca corta uma linha:
  * juntando as partes (sem o cabeçalho e sem as linhas “↪️ … (continua)”) tem todas as linhas, na ordem.
  * Prefere cortar entre as seções; se cortar entre linhas der menos partes, corta entre linhas
  * e repete o título da seção no começo da parte seguinte.
  */
-export function splitForWhatsApp(text: string, max = WHATSAPP_URL_MAX): string[] {
-  if (whatsappSize(text).link <= max) return [text];
-  const fits = (t: string) => whatsappSize(partHeader(99, 99) + t).link <= max;
+export function splitForWhatsApp(text: string, max = WHATSAPP_TEXT_MAX): string[] {
+  if (text.length <= max) return [text];
+  const fits = (t: string) => partHeader(99, 99).length + t.length <= max;
   const bySections = splitBySections(text, fits);
   const byLines = splitByLines(text, fits);
   const parts = byLines.length < bySections.length ? byLines : bySections;
@@ -265,54 +272,33 @@ function splitByLines(text: string, fits: (t: string) => boolean) {
   return parts.map((p) => p.replace(/^\n+/, ''));
 }
 
-const waLink = (text: string) => `https://wa.me/?text=${encodeURIComponent(text)}`;
+/** Como abrir o WhatsApp (separado para os testes). */
+export const whatsappNav = {
+  isPhone: () => /Android|iPhone|iPad|iPod/i.test(navigator.userAgent),
+  /** celular: abre o app do WhatsApp */
+  go: (url: string) => { location.href = url; },
+  /** computador: abre o WhatsApp Web numa aba */
+  open: (url: string) => { window.open(url, '_blank'); },
+};
 
-/** Abre o WhatsApp com uma parte (link direto). Usado também pelo “Mandar parte 2”. */
-export function openWhatsAppLink(text: string) { window.open(waLink(text), '_blank'); }
-
-/**
- * Enviar no WhatsApp. Com “mandar em partes” ligado e mensagem maior que o link: manda a parte 1 e
- * guarda as outras; ao voltar para o app aparece “Mandar parte 2”. Desligado: tudo de uma vez.
- */
-export async function sendWhatsApp(text: string, split: boolean): Promise<'whatsapp' | 'shared' | 'copied' | 'aborted' | 'parts'> {
-  if (split) {
-    const parts = splitForWhatsApp(text);
-    if (parts.length > 1) {
-      openWhatsAppLink(parts[0]);
-      setPendingParts({ parts, next: 1 });
-      return 'parts';
-    }
-  }
-  return openWhatsApp(text);
+/** Abre o WhatsApp (sem texto no link: o texto já foi copiado, é só colar na conversa). */
+export function openWhatsAppApp() {
+  if (whatsappNav.isPhone()) whatsappNav.go('whatsapp://');
+  else whatsappNav.open('https://web.whatsapp.com/');
 }
 
 /**
- * Abre o WhatsApp com o texto. Link muito comprido trava/corta no celular: aí usa o compartilhar
- * do celular (aceita texto grande); sem ele, copia para colar. Devolve o que fez.
+ * “Enviar no WhatsApp”: copia o texto e abre o WhatsApp; lá é só colar na conversa.
+ * (O link com o texto abria a página do WhatsApp no iPhone, com emoji quebrado, e não chegava na conversa.)
+ * Com “mandar em partes” e mensagem maior que o limite: copia a parte 1 e guarda as outras
+ * para o “Mandar parte 2” ao voltar para o app.
  */
-export async function openWhatsApp(text: string): Promise<'whatsapp' | 'shared' | 'copied' | 'aborted'> {
-  const url = `https://wa.me/?text=${encodeURIComponent(text)}`;
-  if (url.length > WHATSAPP_URL_MAX) {
-    if (navigator.share) {
-      try { await navigator.share({ text }); return 'shared'; } catch (e) { if ((e as Error).name === 'AbortError') return 'aborted'; }
-    }
-    await copyText(text);
-    return 'copied';
-  }
-  window.open(url, '_blank');
-  return 'whatsapp';
-}
-export const WHATSAPP_URL_MAX = 7000;
-/** limite de uma mensagem do próprio WhatsApp (letras) */
-export const WHATSAPP_TEXT_MAX = 65536;
-
-/**
- * Tamanho da mensagem para mostrar na tela: “atual / máximo” do link direto do WhatsApp.
- * Passou do link: vai inteira pelo compartilhar do celular (ou copiada) — nada é cortado.
- */
-export function whatsappSize(text: string) {
-  const link = `https://wa.me/?text=${encodeURIComponent(text)}`.length;
-  return { link, max: WHATSAPP_URL_MAX, fits: link <= WHATSAPP_URL_MAX, letters: text.length, tooBig: text.length > WHATSAPP_TEXT_MAX };
+export async function sendWhatsApp(text: string, split: boolean): Promise<'copied' | 'parts' | 'copy-failed'> {
+  const parts = split ? splitForWhatsApp(text) : [text];
+  if (!(await copyText(parts[0]))) return 'copy-failed';
+  openWhatsAppApp();
+  if (parts.length > 1) { setPendingParts({ parts, next: 1 }); return 'parts'; }
+  return 'copied';
 }
 
 export async function copyText(text: string) {
