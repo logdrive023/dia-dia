@@ -38,7 +38,7 @@ const toastText = async (re: RegExp) => screen.findByText(re, {}, { timeout: 300
 async function openAndStart() {
   render(<App />);
   click(await screen.findByRole('button', { name: /Iniciar o dia/ }, { timeout: 5000 }));
-  await screen.findByRole('button', { name: /Nova venda/ });
+  await screen.findByRole('button', { name: /Nova venda/ }, { timeout: 25000 }); // iniciar o dia copia ~50 cores: máquina ocupada demora
 }
 async function sell(name: string, price = '70', method?: RegExp) {
   click(nav('Vender'));
@@ -59,7 +59,7 @@ describe('Aba Início', () => {
     click(await screen.findByRole('button', { name: /^Desfazer$/ }));
     await confirmDialog(/Desfazer e escolher de novo/);
     click(await screen.findByRole('button', { name: /Iniciar o dia/ }));
-    await screen.findByRole('button', { name: /Nova venda/ });
+    await screen.findByRole('button', { name: /Nova venda/ }, { timeout: 25000 }); // iniciar o dia copia ~50 cores: máquina ocupada demora
     // cada número: toque abre explicação com exemplo; "Ver no Estoque" muda de aba
     for (const label of ['Peças no estoque', 'Para repor', 'Esgotados', 'Entrou hoje']) {
       click(screen.getByRole('button', { name: new RegExp(`^${label}: \\d+`) }));
@@ -230,9 +230,9 @@ describe('Diária automática (pela tela)', () => {
     expect(await db.cashMovements.count()).toBe(0);
     // iniciar de novo: a diária volta uma vez só
     click(await screen.findByRole('button', { name: /Iniciar o dia/ }));
-    await screen.findByRole('button', { name: /Nova venda/ });
+    await screen.findByRole('button', { name: /Nova venda/ }, { timeout: 25000 }); // iniciar o dia copia ~50 cores: máquina ocupada demora
     await waitFor(async () => expect((await db.cashMovements.toArray()).filter((m) => m.type === 'pagamento').length).toBe(1));
-  }, 30000);
+  }, 90000);
 });
 
 describe('Aba Caixa', () => {

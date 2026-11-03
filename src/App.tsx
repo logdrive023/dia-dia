@@ -7,7 +7,7 @@ import { copyText, openWhatsAppApp } from './services/report';
 import { seedIfNeeded } from './db/seed';
 import { autoCloseOldDays, migrateCadastroEntries } from './services/days';
 import { setUpdateState, useUpdateState } from './lib/updateState';
-import { CHANGELOG, LATEST_CHANGE } from './lib/changelog';
+import { APP_VERSION, CHANGELOG, LATEST_CHANGE } from './lib/changelog';
 import { requestPersist } from './services/storage';
 import { PixSheet } from './components/Pix';
 import { useLiveQuery } from 'dexie-react-hooks';
@@ -52,7 +52,6 @@ const SyncSheet = lazyRetry(() => import('./screens/Sync'));
 
 // Navegação: 4 abas embaixo (Vender no meio, em destaque) + um único Menu no topo para o resto.
 const TABS: [Tab, string, string][] = [['inicio', '🏠', 'Início'], ['vender', '🛍️', 'Vender'], ['estoque', '📦', 'Estoque'], ['caixa', '💰', 'Caixa']];
-const APP_VERSION = '1.0';
 const TITLES: Record<Tab, string> = { inicio: 'Dia a Dia', estoque: 'Estoque', vender: 'Vender', caixa: 'Caixa', historico: 'Histórico' };
 
 function Shell() {
@@ -274,12 +273,13 @@ function ChangelogSheet({ open, onClose }: { open: boolean; onClose: () => void 
       <div className="space-y-3">
         {CHANGELOG.map((e, i) => (
           <Card key={e.id} className="p-3.5">
-            <div className="flex items-center gap-2 mb-1.5">
-              <span className="font-extrabold text-slate-800">{e.title}</span>
-              {i === 0 && <span className="rounded-full bg-violet-600 text-white px-2 py-0.5 text-[11px] font-bold">mais nova</span>}
+            {/* selo e data numa linha; o título embaixo, com a largura toda (título comprido não espreme o selo) */}
+            <div className="flex items-center gap-2 mb-1">
+              {i === 0 && <span className="shrink-0 whitespace-nowrap rounded-full bg-violet-600 text-white px-2 py-0.5 text-[11px] font-bold">mais nova</span>}
               <span className="flex-1" />
-              <span className="text-[12px] text-slate-500">{e.date}</span>
+              <span className="shrink-0 whitespace-nowrap text-[12px] text-slate-500 tabular-nums">versão {e.version} · {e.date}</span>
             </div>
+            <div className="font-extrabold text-slate-800 leading-snug break-words mb-1.5">{e.title}</div>
             <ul className="space-y-1">
               {e.items.map(([icon, t], j) => (
                 <li key={j} className="flex gap-2 text-[14px] text-slate-700"><span className="shrink-0">{icon}</span><span className="min-w-0">{t}</span></li>
@@ -300,7 +300,7 @@ function AboutSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
       <div className="text-center pt-2 pb-4">
         <img src="./icon-192.png" alt="" className="w-20 h-20 rounded-3xl shadow-md mx-auto" />
         <div className="text-2xl font-extrabold text-slate-800 mt-3">Dia a Dia</div>
-        <div className="text-sm text-slate-500">versão {APP_VERSION}</div>
+        <div className="text-sm text-slate-500">versão {APP_VERSION} · {CHANGELOG[0].date}</div>
         <p className="text-[15px] text-slate-600 mt-3 px-4 leading-relaxed">
           Estoque, vendas e caixa do seu negócio, direto no celular — mesmo sem internet.
         </p>

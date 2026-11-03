@@ -2,7 +2,9 @@ import { variantLabel } from '../services/catalog';
 import { Fragment, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../db/db';
-import type { PaymentMethod, Reservation } from '../db/types';
+import type { EntryKind, PaymentMethod, Reservation } from '../db/types';
+import { moveStock } from '../services/days';
+import { EntryReasonPicker, type IncreaseReason } from '../components/EntryReason';
 import { money, normalize, PAYMENT_EMOJI, PAYMENT_LABEL, PAYMENTS, toCents, uid } from '../lib/util';
 import { setForSale } from '../services/catalog';
 import { cancelReservation, confirmPix, convertReservation, createOrder, createReservation, pixAmountOf, type CartLine } from '../services/sales';
@@ -13,7 +15,7 @@ import { loadStockRows, type StockRow } from '../services/summary';
 import { useApp } from '../state';
 import { DayNotices, DayBar, StartDayCard } from '../components/day';
 import { StockFlow } from '../components/StockFlow';
-import { Button, Card, Chip, Empty, Field, HelpButton, InfoTip, Input, Sheet, Stepper, Swatch, Toggle, useBusy, useUi } from '../components/ui';
+import { Button, Card, Chip, Empty, ExpandHint, Field, HelpButton, InfoTip, Input, Sheet, Stepper, Swatch, Toggle, useBusy, useUi } from '../components/ui';
 
 type Filter = 'todos' | 'disp' | 'baixo' | 'esg' | 'res' | 'ideal' | 'semideal';
 const FILTERS: [Filter, string][] = [['todos', 'Todos'], ['disp', 'Disponíveis'], ['baixo', 'Para repor'], ['esg', 'Esgotados'], ['res', 'Com reservas'], ['ideal', '🎯 Com ideal'], ['semideal', 'Sem ideal']];
@@ -31,6 +33,8 @@ export default function Sell() {
   const [resQ, setResQ] = useState('');
   const [q, setQ] = useState('');
   const [reserveRow, setReserveRow] = useState<StockRow | null>(null);
+  // “chegou mais” desta peça: entrada no estoque pela tela Vender
+  const [addRow, setAddRow] = useState<StockRow | null>(null);
   const [convert, setConvert] = useState<Reservation | null>(null);
   const [config, setConfig] = useState(false);
   const rows = useLiveQuery(() => (day ? loadStockRows(day.id, day.date) : Promise.resolve([])), [day?.id]);
@@ -211,6 +215,10 @@ export default function Sell() {
                             className="font-bold text-slate-800 text-[16px] leading-tight break-words text-left">{variantLabel(r.variant)} <span className="text-[12px] font-normal text-slate-400" aria-hidden>📜</span></button>
                           {r.available > 0 && <div className="text-[13px] font-bold text-slate-700 mt-0.5 tabular-nums">🏷️ {r.available} à venda</div>}
                           <StockFlow size="sm" start={r.item.initialQuantity} now={r.item.currentQuantity} restock={r.restock} out={r.out} reserved={r.reserved} />
+                          {!locked && (
+                            <button onClick={() => setAddRow(r)} aria-label={`Chegou mais de ${variantLabel(r.variant)}`}
+                              className="mt-1.5 h-8 px-2.5 rounded-lg border border-emerald-300 bg-emerald-50 text-emerald-800 text-[12px] font-bold active:bg-emerald-100">＋ Chegou mais</button>
+                          )}
                         </div>
                         {!locked && (c > 0 ? (
                           <div className="flex items-center gap-1 bg-white rounded-xl border-2 border-emerald-500 p-0.5 shadow-sm">
@@ -246,7 +254,7 @@ export default function Sell() {
           {!!reservations?.length && (
             <>
               <h3 className="flex items-center gap-1.5 text-[13px] font-bold uppercase tracking-wide text-slate-500 mt-5 mb-2 px-1">
-                <button onClick={() => setResOpen(!resOpen)} aria-expanded={resOpen} className="flex items-center gap-1 uppercase">{resOpen ? '▾' : '▸'} Reservas ativas ({reservations.length})</button>
+                <button onClick={() => setResOpen(!resOpen)} aria-expanded={resOpen} className="flex items-center gap-1.5 uppercase">Reservas ativas ({reservations.length}) <ExpandHint open={resOpen} more="mostrar" less="recolher" /></button>
                 <InfoTip title="Reservas" example={[
                   ['📌', 'Ana pediu 1 Plomo Rosa para amanhã → Reservar 1 para Ana'],
                   ['🏷️', 'A peça sai do “à venda”'],
@@ -305,6 +313,7 @@ export default function Sell() {
       )}
 
       <ReserveSheet row={reserveRow} onClose={() => setReserveRow(null)} />
+      <AddStockSheet row={addRow} onClose={() => setAddRow(null)} />
       <ConvertSheet reservation={convert} name={convert ? names.get(convert.variantId) : ''} onClose={() => setConvert(null)} />
       <SellConfigSheet open={config} onClose={() => setConfig(false)} />
       <PutForSaleSheet open={putSale} onClose={() => setPutSale(false)} />
@@ -332,6 +341,55 @@ function StepsBar({ steps, color, tip }: { steps: [string, string][]; color: str
       </div>
       {tip}
     </div>
+  );
+}
+
+/**
+ * Chegou mais de uma peça (pela tela Vender): é uma ENTRADA no estoque, igual ao “+” do Estoque
+ * (mesma função, mesmo registro): aparece no Estoque, em “Entrou hoje”, no relatório e no histórico.
+ */
+function AddStockSheet({ row, onClose }: { row: StockRow | null; onClose: () => void }) {
+  const { settings } = useApp();
+  const { run } = useUi();
+  const [busy, wrap] = useBusy();
+  const [qty, setQty] = useState(1);
+  const [kind, setKind] = useState<IncreaseReason | null>(null);
+  if (!row) return null;
+  const entryKind = (kind ?? (settings.entryNewByDefault ? 'nova' : 'reposicao')) as EntryKind;
+  const label = `${row.group.name} · ${variantLabel(row.variant)}`;
+  const close = () => { setQty(1); setKind(null); onClose(); };
+  return (
+    <Sheet open onClose={close} title="📦 Chegou mais"
+      footer={<Button className="w-full" variant="success" size="lg" disabled={busy || qty < 1} onClick={() => wrap(async () => {
+        const r = await run(() => moveStock(row.item.dailyRecordId, row.variant.id, qty, 'entrada', 'Pela tela Vender', { entryKind }),
+          `${label}: +${qty} no estoque`);
+        if (r) close();
+      })}>＋ Pôr {qty} {qty === 1 ? 'peça' : 'peças'} no estoque</Button>}>
+      <div className="flex items-center gap-3 mb-3">
+        <Swatch color={row.variant.color} size={30} />
+        <div className="flex-1 min-w-0">
+          <div className="font-bold text-slate-800 text-[17px] break-words">{label}</div>
+          <div className="text-sm text-slate-500 tabular-nums">No estoque agora: <b>{row.item.currentQuantity}</b>{row.reserved ? ` · ${row.reserved} reservada(s)` : ''}</div>
+        </div>
+      </div>
+      <Field label="Quantas chegaram?">
+        {/* dá para digitar (chegaram 20) ou usar − e + */}
+        <div className="flex items-center gap-1">
+          <button type="button" onClick={() => setQty(Math.max(1, qty - 1))} disabled={qty <= 1} aria-label="Menos uma"
+            className="w-11 h-11 rounded-xl bg-slate-100 text-xl font-bold text-slate-700 disabled:opacity-30">−</button>
+          <input inputMode="numeric" aria-label="Quantas chegaram" value={qty}
+            onChange={(e) => setQty(Math.min(10000, Math.max(0, Number(e.target.value.replace(/\D/g, '')) || 0)))}
+            className="w-20 h-11 text-center text-lg font-extrabold border border-slate-200 rounded-xl" />
+          <button type="button" onClick={() => setQty(qty + 1)} aria-label="Mais uma"
+            className="w-11 h-11 rounded-xl bg-emerald-600 text-white text-xl font-bold">+</button>
+        </div>
+      </Field>
+      <EntryReasonPicker value={kind ?? entryKind} onChange={setKind} />
+      <div className="rounded-xl bg-emerald-50 border border-emerald-200 px-3 py-2.5 text-[14px] text-emerald-900 tabular-nums">
+        Estoque: <b>{row.item.currentQuantity}</b> → <b>{row.item.currentQuantity + qty}</b> · à venda: <b>{Math.max(0, row.available)}</b> → <b>{Math.max(0, row.available) + qty}</b>
+        <div className="text-[12px] text-emerald-800/80 mt-0.5">Entra como entrada de hoje (aparece no Estoque, no relatório e no histórico). Errou? Desfaça em Estoque › Movimentos do dia.</div>
+      </div>
+    </Sheet>
   );
 }
 

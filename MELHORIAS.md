@@ -592,6 +592,10 @@ Conferência completa dos 3 arquivos (estoque de cada dia, movimentos, vendas, r
 - Estoque ideal: “🎯 Usar estoque ideal (repor)?” por peça; editar a meta mostra a prévia (o real continua N, repor vira X).
 - Filtros “🎯 Com ideal / Sem ideal” no Estoque e no Vender; filtro de tamanho no Vender; “🔒 Reservadas” no Estoque.
 - **Novo produto pela aba Vender** (origem “vender”): entra no cadastro, no estoque de hoje e à venda.
+- Tudo que abre com um toque mostra “ver mais” / “detalhes” (`ExpandHint`); histórico da peça do mais novo para o mais antigo;
+  versão do app (Sobre) vem da entrada mais nova das Atualizações (1.6).
+- **＋ Chegou mais** em cada peça do Vender: entrada no estoque (nova/reposição) com prévia; é a mesma função do Estoque
+  (`moveStock`), então não existe um segundo controle de quantidade (teste: esgotada → +3 → vende de novo).
 - Reservas ativas: recolher (lembra no aparelho) e filtrar por grupo e por peça, cor, tamanho ou cliente.
 
 ### Armazenamento e migração (não destrutiva)
@@ -603,7 +607,7 @@ Conferência completa dos 3 arquivos (estoque de cada dia, movimentos, vendas, r
 - Juntar celulares leva as importações pelo id (não duplica).
 
 ### Testes (todos passando)
-- **199 testes** (195 + 4 com dados reais), também em outra data (`HOJE=2027-03-01`) e com o backup antigo de 02/11.
+- **202 testes** (198 + 4 com dados reais), também em outra data (`HOJE=2027-03-01`) e com o backup antigo de 02/11.
 - `cenarios.test.tsx` (21): os 9 cenários pedidos — divergência (explicada; inventada nunca; entre dias), venda 10→8 com
   referência, reposição 8→13, ajuste 10→7 que não é venda, “Definir” que vira entrada, reserva 5/2/3 e cancelamento,
   “reservadas” no Vender, importação (formatos, prévia, confirmar, vender depois, desfazer respeitando a venda,

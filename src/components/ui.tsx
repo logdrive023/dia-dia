@@ -96,6 +96,15 @@ export function ColorField({ value, onChange, label = 'Cor', colors }: {
   );
 }
 
+/** Mostra que dá para tocar e abrir: “ver mais ▾” / “fechar ▴” (o mesmo em todo lugar que abre e fecha). */
+export function ExpandHint({ open, more = 'ver mais', less = 'fechar' }: { open: boolean; more?: string; less?: string }) {
+  return (
+    <span aria-hidden className={`inline-flex items-center gap-0.5 shrink-0 rounded-full px-2 py-0.5 text-[11px] font-bold whitespace-nowrap ${open ? 'bg-slate-200 text-slate-600' : 'bg-blue-50 text-blue-700 border border-blue-200'}`}>
+      {open ? less : more} <span className="text-[10px]">{open ? '▴' : '▾'}</span>
+    </span>
+  );
+}
+
 export function SectionTitle({ children, right }: { children: ReactNode; right?: ReactNode }) {
   return (
     <div className="flex items-center justify-between mt-5 mb-2 px-1">

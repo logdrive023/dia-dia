@@ -4,7 +4,7 @@ import { db } from '../db/db';
 import type { ImportRecord } from '../db/types';
 import { fmtDate, todayStr } from '../lib/util';
 import { useApp } from '../state';
-import { Button, Card, InfoTip, Sheet, Toggle, useBusy, useUi } from '../components/ui';
+import { Button, Card, ExpandHint, InfoTip, Sheet, Toggle, useBusy, useUi } from '../components/ui';
 import { copyText } from '../services/report';
 import {
   applyImport, buildImportPlan, importTemplate, planProblems, resolveChoice, undoImport, undoImportPreview,
@@ -120,7 +120,7 @@ function NewImport({ onDone }: { onDone: () => void }) {
             </tbody>
           </table>
         </div>
-        <button className="text-[13px] font-semibold text-blue-600 mb-2" onClick={() => setShowRaw(!showRaw)}>{showRaw ? '▾' : '▸'} Texto colado</button>
+        <button className="flex items-center gap-2 text-[13px] font-semibold text-slate-700 mb-2" onClick={() => setShowRaw(!showRaw)} aria-expanded={showRaw}>Texto colado <ExpandHint open={showRaw} /></button>
         {showRaw && <pre className="text-[12px] bg-slate-50 border border-slate-200 rounded-xl p-2 mb-3 whitespace-pre-wrap break-words">{text}</pre>}
         {!todayOpen && <p className="text-[13px] text-red-600 mb-2">Inicie o dia de hoje antes de importar (a mercadoria entra hoje).</p>}
         <div className="grid grid-cols-2 gap-2">
@@ -206,7 +206,10 @@ function PastImport({ r, open, onToggle }: { r: ImportRecord; open: boolean; onT
           <span className="flex-1 font-bold text-slate-800">{fmtDate(r.date, false)} · {new Date(r.createdAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</span>
           <span className="text-[12px] font-semibold">{statusLabel}</span>
         </div>
-        <div className="text-[12px] text-slate-500">{r.lines.length} produto(s) · {signed(units)} peças · {r.lines.filter((l) => l.created).length} novo(s){r.by ? ` · por ${r.by}` : ''}</div>
+        <div className="flex items-center justify-between gap-2 mt-1">
+          <span className="text-[12px] text-slate-500">{r.lines.length} produto(s) · {signed(units)} peças · {r.lines.filter((l) => l.created).length} novo(s){r.by ? ` · por ${r.by}` : ''}</span>
+          <ExpandHint open={open} more="ver o que mudou" />
+        </div>
       </button>
       {open && (
         <div className="mt-2 pt-2 border-t border-slate-100">

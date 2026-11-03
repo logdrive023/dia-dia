@@ -4,7 +4,7 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../db/db';
 import { addDays, fmtDate, todayStr } from '../lib/util';
 import { useApp } from '../state';
-import { Button, Card, InfoTip, Sheet, Swatch, useUi } from '../components/ui';
+import { Button, Card, ExpandHint, InfoTip, Sheet, Swatch, useUi } from '../components/ui';
 import { undoMovement } from '../services/days';
 import {
   historyEvents, KIND_ICON, KIND_LABEL, productTimeline, type HistEvent, type HistKind, type HistOrigin,
@@ -148,9 +148,10 @@ function EventRow({ e, product, color, onProduct }: { e: HistEvent; product?: st
           <span className={`block text-[14px] font-semibold ${e.kind === 'divergencia' ? 'text-amber-800' : 'text-slate-800'}`}>{e.text}{e.undone ? ' · desfeito' : ''}</span>
           {product && <span className="flex items-center gap-1 text-[12px] text-slate-500 min-w-0">{color !== undefined && <Swatch color={color} size={12} />}<span className="truncate">{product}</span></span>}
         </span>
-        <span className="text-right shrink-0">
-          <span className="block text-[12px] text-slate-400 tabular-nums">{e.kind === 'inicial' ? '' : hhmm(e.at)}</span>
+        <span className="text-right shrink-0 flex flex-col items-end gap-0.5">
+          {e.kind !== 'inicial' && <span className="block text-[12px] text-slate-400 tabular-nums">{hhmm(e.at)}</span>}
           {e.before !== undefined && e.after !== undefined && e.kind !== 'inicial' && <span className="block text-[13px] font-bold tabular-nums text-slate-700">{e.before} → {e.after}</span>}
+          <ExpandHint open={open} more="detalhes" />
         </span>
       </button>
       {open && (
@@ -176,7 +177,8 @@ function ProductTimeline({ variantId, onBack }: { variantId: string; onBack: () 
   const data = useLiveQuery(() => productTimeline(variantId), [variantId]);
   const [showAll, setShowAll] = useState(false);
   if (!data) return <p className="text-center text-slate-400 py-8">Carregando…</p>;
-  const days = showAll ? data.days : data.days.slice(-7);
+  // do mais novo para o mais antigo: hoje em cima; dentro do dia, “agora” em cima e “começou” embaixo
+  const days = (showAll ? data.days : data.days.slice(-7)).slice().reverse();
   const divs = data.days.reduce((n, d) => n + (d.gap ? 1 : 0) + (d.carryGap ? 1 : 0), 0);
   return (
     <>
@@ -200,30 +202,30 @@ function ProductTimeline({ variantId, onBack }: { variantId: string; onBack: () 
           ⚠️ {divs} divergência{divs > 1 ? 's' : ''} sem registro que explique. O app mostra a diferença e não inventa ajuste.
         </div>
       )}
-      {data.days.length > 7 && !showAll && (
-        <button className="w-full text-[13px] font-semibold text-blue-600 mb-2" onClick={() => setShowAll(true)}>Ver desde o começo ({data.days.length} dias)</button>
-      )}
       {!data.days.length && <p className="text-center text-slate-500 py-8">Esta peça ainda não tem registro em nenhum dia.</p>}
       {days.map((d) => (
-        <div key={d.date} className="mb-4">
+        <div key={d.date} className="mb-4" aria-label={`Dia ${fmtDate(d.date, false)}`}>
           <div className="flex items-center gap-2 mb-1.5 px-1">
             <span className="text-[13px] font-bold text-slate-700">{fmtDate(d.date, false)}</span>
             <span className={`text-[11px] font-bold rounded-full px-2 py-0.5 ${d.status === 'closed' ? 'bg-purple-100 text-purple-700' : 'bg-emerald-100 text-emerald-700'}`}>{d.status === 'closed' ? 'encerrado' : 'aberto'}</span>
           </div>
           <ol className="relative border-l-2 border-slate-200 ml-3 pl-4 space-y-1.5">
-            {d.events.map((e) => (
+            <li className="relative">
+              <span className="absolute -left-[23px] top-1.5 w-3 h-3 rounded-full bg-blue-600" aria-hidden />
+              <div className="text-[14px] font-bold text-slate-800 py-1">{d.status === 'closed' ? 'Terminou o dia com' : 'Agora'} {d.end} {d.end === 1 ? 'peça' : 'peças'}</div>
+            </li>
+            {d.events.slice().reverse().map((e) => (
               <li key={e.id} className="relative">
                 <span className="absolute -left-[23px] top-2.5 w-3 h-3 rounded-full bg-white border-2 border-slate-300" aria-hidden />
                 <EventRow e={e} />
               </li>
             ))}
-            <li className="relative">
-              <span className="absolute -left-[23px] top-1.5 w-3 h-3 rounded-full bg-blue-600" aria-hidden />
-              <div className="text-[14px] font-bold text-slate-800 py-1">{d.status === 'closed' ? 'Terminou o dia com' : 'Agora'} {d.end} {d.end === 1 ? 'peça' : 'peças'}</div>
-            </li>
           </ol>
         </div>
       ))}
+      {data.days.length > 7 && !showAll && (
+        <button className="w-full text-[13px] font-semibold text-blue-600 mb-2" onClick={() => setShowAll(true)}>Ver os dias mais antigos ({data.days.length - 7})</button>
+      )}
     </>
   );
 }

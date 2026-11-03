@@ -77,7 +77,10 @@ O app substitui o caderno sem mudar o jeito de pensar:
 - Busca, escopo **⭐ Para vender / Todos os grupos** e filtros (disponíveis, repor, esgotadas, reservadas).
 - **Estoque ⇄ Venda**: janela única para trazer peças guardadas para a venda ou guardar de volta (grupo inteiro ou cor a cor).
 - Grupos que abrem e fecham (lembra a escolha no aparelho), “Abrir/Fechar todos”.
-- Cada cor: quantas à venda, **começou → agora**, 📌 reservar, **+ Vender** / − +.
+- Cada cor: quantas à venda, **começou → agora**, 📌 reservar, **+ Vender** / − +, **＋ Chegou mais** (entrada no estoque pela
+  própria tela: quantidade + mercadoria nova/reposição, prévia “estoque 8 → 11”; é a mesma entrada do Estoque, aparece em
+  “Entrou hoje”, no relatório e no histórico), o nome abre o **📜 histórico** da peça.
+- **＋ Novo produto**: cadastro pela tela Vender (entra no estoque de hoje e já à venda).
 - **Fechar venda**:
   - preço por peça (sugere o último preço do grupo; “usar em todas”);
   - **“Pagou tudo numa forma só”** (ligado) ou desligado = **cada peça escolhe a sua forma** (2 peças iguais viram 2 linhas);
@@ -497,7 +500,8 @@ git commit -m "o que mudou"
 git push
 ```
 Acompanhe em **Actions**; em ~2 min está no ar. Ao publicar algo que a usuária deve saber, acrescente uma entrada no topo de
-`src/lib/changelog.ts`.
+`src/lib/changelog.ts` com o **próximo número de versão** (`version`): o Sobre mostra a versão da entrada mais nova
+(hoje **1.6**) e um teste confere que as versões são únicas e em ordem.
 
 ---
 
@@ -523,7 +527,7 @@ HOJE=2028-07-15 npm test
 O setup também: banco em memória (`fake-indexeddb`), espera de até 10 s pelas telas (GitHub é lento), simula download de arquivo no jsdom.
 Configuração (`vite.config.ts`): 60 s por teste, **um arquivo por vez** (os testes pesados não atrasam os de tela).
 
-### Arquivos de teste (195 testes + 4 com dados reais = 199)
+### Arquivos de teste (198 testes + 4 com dados reais = 202)
 
 | Arquivo | Testes | O que garante |
 |---|---|---|
@@ -546,7 +550,7 @@ Configuração (`vite.config.ts`): 60 s por teste, **um arquivo por vez** (os te
 | `troca.test.ts` | 2 | trocar peça vendida + backtest (estoque cor por cor) |
 | `tela.test.tsx` | 2 | um dia completo pela tela (iniciar, vender, lançar, encerrar, relatório copiado) |
 | `rolagem.test.ts` | 2 | impede `overflow` em html/body (travava a rolagem no Android) e altura das janelas |
-| `cenarios.test.tsx` | 19 + 2 real | os 9 cenários de 03/11: divergência, venda, reposição, ajuste, reserva, importação, produto criado no Vender, dia fechado, reversões; bugs do cadastro e do excluir; backup antigo; **dados reais**: 0 divergências e a “Celeste 7” explicada |
+| `cenarios.test.tsx` | 22 + 2 real | os 9 cenários de 03/11: divergência, venda, reposição, ajuste, reserva, importação, produto criado no Vender, dia fechado, reversões; bugs do cadastro e do excluir; backup antigo; **dados reais**: 0 divergências e a “Celeste 7” explicada |
 | `ajustes.test.tsx` | 11 | venda no meio na meia-noite (espera e fica no dia certo), juntar (dia encerrado/reaberto e chaves: vale o último), mínimo ≤ meta, Outros apps copia, código do Juntar = backup, partes guardadas no aparelho, aviso de dia reaberto, 📅 calendário abre |
 
 ### Testar com os dados reais do celular

@@ -228,7 +228,7 @@ describe('7) produto criado em Vender', () => {
     fireEvent.click(await screen.findByRole('button', { name: /Novo produto/ }));
     fireEvent.change(await screen.findByLabelText('Nome do produto'), { target: { value: 'Turquesa nova' } });
     fireEvent.change(screen.getByLabelText('Quantidade'), { target: { value: '3' } });
-    fireEvent.click(screen.getByRole('button', { name: /Salvar Turquesa nova/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /Salvar Turquesa nova/ }));
     await waitFor(async () => expect((await db.variants.toArray()).some((v) => v.name === 'Turquesa nova')).toBe(true));
     const v = (await db.variants.toArray()).find((x) => x.name === 'Turquesa nova')!;
     expect(v).toMatchObject({ origin: 'vender', forSale: true });
@@ -350,5 +350,72 @@ describe.skipIf(!env.DADOS_REAIS_B)('dados reais das 03:11: a “Celeste 7”', 
     expect(all.filter((e) => e.delta !== undefined && e.kind !== 'inicial').reduce((n, e) => n + (e.delta ?? 0), 0)).toBe(0);
     expect(all.every((e) => Math.abs(e.delta ?? 0) < 4)).toBe(true);
     expect(t.days.every((d) => !d.gap && !d.carryGap)).toBe(true);
+  });
+});
+
+describe('Vender › “Chegou mais” (entrada pela tela de vender)', () => {
+  it('peça esgotada recebe +3 pelo Vender: estoque, à venda, “Entrou”, histórico e diagnóstico certos', async () => {
+    const d = await startDay(todayStr());
+    const g = await createGroup({ name: 'Cenário' });
+    const v = await createVariant({ groupId: g.id, name: 'Verde Cenário', startQuantity: 2, intoToday: true, forSale: true });
+    await sell(d.id, v.id, 2); // esgotou
+    render(<App />);
+    fireEvent.click(within(await screen.findByRole('navigation', {}, { timeout: 5000 })).getByRole('button', { name: /Vender/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /Todos os grupos/ }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Chegou mais de Verde Cenário' }));
+    fireEvent.change(await screen.findByLabelText('Quantas chegaram'), { target: { value: '3' } });
+    fireEvent.click(screen.getByRole('radio', { name: 'Reposição' }));
+    expect(screen.getByText(/Estoque:/).textContent).toMatch(/0 → 3/);
+    fireEvent.click(screen.getByRole('button', { name: /Pôr 3 peças no estoque/ }));
+    await waitFor(async () => expect(await stock(d.id, v.id)).toBe(3));
+    const m = (await db.stockMovements.where('variantId').equals(v.id).toArray()).find((x) => x.type === 'entrada')!;
+    expect(m).toMatchObject({ quantity: 3, entryKind: 'reposicao', description: 'Pela tela Vender' });
+    const s = await daySummary(d.id, d.date);
+    expect(s.enteredUnits).toBe(3);
+    expect(s.soldUnits).toBe(2); // a venda de antes continua igual
+    expect((await loadStockRows(d.id, d.date)).find((r) => r.variant.id === v.id)!.available).toBe(3);
+    // dá para vender de novo na hora
+    await screen.findByRole('button', { name: 'Vender Verde Cenário' });
+    expect((await productTimeline(v.id)).days[0].events.map((e) => e.kind)).toEqual(['inicial', 'venda', 'reposicao']);
+    expect(await erros()).toEqual([]);
+  });
+});
+
+describe('histórico da peça: do mais novo para o mais antigo', () => {
+  it('hoje em cima; dentro do dia: agora → último registro → … → começou', async () => {
+    const d1 = await startDay(addDays(todayStr(), -1));
+    const g = await createGroup({ name: 'Ordem' });
+    const v = await createVariant({ groupId: g.id, name: 'Lilás', startQuantity: 8, dailyRecordId: d1.id });
+    await closeDay(d1.id);
+    const d2 = await startDay(todayStr());
+    await moveStock(d2.id, v.id, 28, 'entrada', undefined, { entryKind: 'reposicao' });
+    await new Promise((r) => setTimeout(r, 5));
+    await moveStock(d2.id, v.id, 4, 'entrada', undefined, { entryKind: 'nova' });
+    render(<App />);
+    await screen.findByRole('navigation', {}, { timeout: 5000 });
+    const { openHistoryForTest } = await import('./helpers-historico');
+    await openHistoryForTest(v.id);
+    const days = await screen.findAllByLabelText(/^Dia \d{2}\/\d{2}/);
+    expect(days[0].getAttribute('aria-label')).toContain(todayStr().split('-').reverse().join('/').slice(0, 5));
+    const lines = days[0].innerText ?? days[0].textContent ?? '';
+    const order = ['Agora 40', 'mercadoria nova +4', 'reposição +28', 'Começou o dia com 8'].map((t) => lines.indexOf(t));
+    expect(order.every((i) => i >= 0)).toBe(true);
+    expect([...order].sort((a, b) => a - b)).toEqual(order); // nessa ordem
+    expect((days[1].textContent ?? '').indexOf('Terminou o dia com 8')).toBeLessThan((days[1].textContent ?? '').indexOf('Estoque inicial: 8'));
+  });
+});
+
+describe('versão do app', () => {
+  it('cada atualização tem versão (única, da mais nova para a mais antiga) e o Sobre mostra a mais nova', async () => {
+    const { APP_VERSION, CHANGELOG } = await import('../lib/changelog');
+    const vs = CHANGELOG.map((e) => e.version);
+    expect(new Set(vs).size).toBe(vs.length);
+    const num = (v: string) => v.split('.').map(Number).reduce((a, b) => a * 1000 + b, 0);
+    expect(vs.map(num)).toEqual([...vs.map(num)].sort((a, b) => b - a));
+    expect(APP_VERSION).toBe(CHANGELOG[0].version);
+    render(<App />);
+    fireEvent.click(await screen.findByRole('button', { name: /Abrir menu/ }, { timeout: 5000 }));
+    fireEvent.click(await screen.findByRole('button', { name: /Sobre/ }));
+    await screen.findByText(new RegExp(`versão ${APP_VERSION.replace('.', '\.')} · ${CHANGELOG[0].date}`));
   });
 });

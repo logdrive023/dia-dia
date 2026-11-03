@@ -2,11 +2,12 @@
  * O que mudou no app (Menu › Atualizações). A primeira é a mais nova.
  * Ao publicar uma versão: acrescente uma entrada no topo com um id novo.
  */
-export interface ChangeEntry { id: string; date: string; title: string; items: [string, string][] }
+/** `version`: o número que aparece em Sobre (a entrada mais nova é a versão do app). Nova entrada = próximo número. */
+export interface ChangeEntry { id: string; version: string; date: string; title: string; items: [string, string][] }
 
 export const CHANGELOG: ChangeEntry[] = [
   {
-    id: '2026-11-03a', date: '03/11/2026', title: 'Histórico de movimentações, importação e cadastro mais claro',
+    id: '2026-11-03a', version: '1.6', date: '03/11/2026', title: 'Histórico de movimentações, importação e cadastro mais claro',
     items: [
       ['📜', 'Novo: Histórico de movimentações (Menu e Configurações). A vida de cada peça desde o cadastro: começou, entrou, vendeu, reservou, ajustou, quem fez e quanto tem agora'],
       ['🔎', 'Filtros no histórico: data, grupo, peça, tipo, quem fez e origem (você ou o sistema)'],
@@ -20,16 +21,21 @@ export const CHANGELOG: ChangeEntry[] = [
       ['📏', 'Tamanhos (P, M, G…) e tipos de produto (Vestido, Blusa…), opcionais e editáveis em Configurações'],
       ['🎨', 'Cores separadas em neutras, quentes e frias; dá para criar cores e ícones novos'],
       ['🛍️', '“Novo produto” direto na aba Vender: entra no cadastro, no estoque de hoje e já à venda'],
+      ['➕', '“Chegou mais” em cada peça da aba Vender: põe mais no estoque (mercadoria nova ou reposição) e já fica à venda'],
       ['🔒', 'Peça toda reservada aparece como “reservadas” (não mais “sem peça”); no Estoque: físico, reservado e disponível'],
       ['📌', 'Reservas ativas: dá para recolher a lista e filtrar por grupo, peça ou cliente'],
       ['🙋', 'Configurações › Seu nome: aparece em cada registro feito por você'],
       ['🐛', 'Corrigido: cadastrar com quantidade olhando outro dia perdia a quantidade (agora entra sempre no dia de hoje)'],
       ['🗂️', 'Excluir uma cor não apaga mais o histórico dela'],
       ['⌨️', 'O teclado não abre mais sozinho na tela de entrada/saída do estoque'],
+      ['▾', 'Tudo que abre com um toque mostra “ver mais” / “detalhes” (histórico, importações, reservas, texto colado)'],
+      ['⬆️', 'Histórico da peça do mais novo para o mais antigo: hoje em cima e, em cada dia, “agora” primeiro'],
+      ['📱', 'Atualizações: o selo “mais nova” não quebra mais em duas linhas'],
+      ['🔢', 'Sobre mostra a versão certa do app (a mesma das Atualizações)'],
     ],
   },
   {
-    id: '2026-11-02a', date: '02/11/2026', title: 'Cadastro e relatório corrigidos',
+    id: '2026-11-02a', version: '1.5', date: '02/11/2026', title: 'Cadastro e relatório corrigidos',
     items: [
       ['🗑️', 'Cor arquivada agora tem “Excluir” direto na lista (se já teve vendas, as vendas antigas ficam no histórico)'],
       ['📦', 'A quantidade do cadastro é o estoque com que a cor começa o dia — não aparece mais em “Entrou no estoque”'],
@@ -62,7 +68,7 @@ export const CHANGELOG: ChangeEntry[] = [
     ],
   },
   {
-    id: '2026-11-01b', date: '01/11/2026', title: 'Dois celulares e mais segurança',
+    id: '2026-11-01b', version: '1.4', date: '01/11/2026', title: 'Dois celulares e mais segurança',
     items: [
       ['🔄', 'Juntar celulares: um celular gera um código com tudo, o outro importa e as vendas se somam (Menu › Juntar com outro celular)'],
       ['🛡️', 'O app pede ao navegador para nunca apagar os dados e mostra em Configurações se está protegido'],
@@ -78,7 +84,7 @@ export const CHANGELOG: ChangeEntry[] = [
     ],
   },
   {
-    id: '2026-11-01a', date: '01/11/2026', title: 'Pix na tela',
+    id: '2026-11-01a', version: '1.3', date: '01/11/2026', title: 'Pix na tela',
     items: [
       ['⚡', 'QR code do Pix aparece na venda ao escolher Pix, com o valor'],
       ['⚡', 'Botão “Mostrar Pix” no Início e no Menu, sem precisar de venda'],
@@ -87,7 +93,7 @@ export const CHANGELOG: ChangeEntry[] = [
     ],
   },
   {
-    id: '2026-10-31c', date: '31/10/2026', title: 'Caixa em forma de conta',
+    id: '2026-10-31c', version: '1.2', date: '31/10/2026', title: 'Caixa em forma de conta',
     items: [
       ['🧮', 'Caixa: ontem separado, hoje linha por linha (vendas por forma, saídas) e o total no fim'],
       ['💼', 'Diária de 150 por dia, lançada sozinha ao iniciar o dia (Configurações › Sua diária)'],
@@ -95,7 +101,7 @@ export const CHANGELOG: ChangeEntry[] = [
     ],
   },
   {
-    id: '2026-10-31b', date: '31/10/2026', title: 'Vendas',
+    id: '2026-10-31b', version: '1.1', date: '31/10/2026', title: 'Vendas',
     items: [
       ['🔀', 'Cada peça pode ser paga de um jeito (uma no Pix, outra no dinheiro)'],
       ['🔄', 'Trocar a peça de uma venda já feita (a errada volta ao estoque, a certa sai)'],
@@ -104,7 +110,7 @@ export const CHANGELOG: ChangeEntry[] = [
     ],
   },
   {
-    id: '2026-10-31a', date: '31/10/2026', title: 'Primeira versão',
+    id: '2026-10-31a', version: '1.0', date: '31/10/2026', title: 'Primeira versão',
     items: [
       ['📦', 'Estoque do dia, vender, reservar, caixa e relatório no WhatsApp'],
       ['📒', 'Dados iniciais: lista oficial do estoque e cadernos de 30/10 e 31/10'],
@@ -113,3 +119,5 @@ export const CHANGELOG: ChangeEntry[] = [
 ];
 
 export const LATEST_CHANGE = CHANGELOG[0].id;
+/** versão do app = a da entrada mais nova (Sobre e Atualizações) */
+export const APP_VERSION = CHANGELOG[0].version;
