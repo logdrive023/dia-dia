@@ -19,6 +19,7 @@ export const CHANGELOG: ChangeEntry[] = [
       ['🏷️', '“Nome repetido neste grupo” aparece quando duas cores ativas têm o mesmo nome'],
       ['📜', 'Histórico e Movimentações mostram “(cor arquivada)” / “(cor excluída)” ao lado do nome'],
       ['🩺', 'Diagnóstico avisa cor antiga com peças e cor repetida no mesmo grupo'],
+      ['🐛', 'Corrigido: “Atualizar” (trazer correções de ontem) zerava a cor cadastrada no mesmo dia (ex.: Dorado › Azul 5 → 0). Cor nova do dia também não aparece mais como “começou diferente do fim de ontem”'],
     ],
   },
   {

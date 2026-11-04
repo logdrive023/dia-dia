@@ -288,8 +288,9 @@ export async function syncGap(dailyRecordId: string): Promise<SyncGap | null> {
   const expected = new Map(prevItems.map((i) => [i.variantId, i.currentQuantity]));
   const initial = new Map(items.map((i) => [i.variantId, i.initialQuantity]));
   const diffs: SyncGap['diffs'] = [];
-  for (const id of new Set([...expected.keys(), ...initial.keys()])) {
-    const e = expected.get(id) ?? 0, i = initial.get(id) ?? 0;
+  // cor que não estava no dia anterior (cadastrada hoje) não é diferença: não pede “Atualizar” à toa
+  for (const id of expected.keys()) {
+    const e = expected.get(id)!, i = initial.get(id) ?? 0;
     if (e !== i) diffs.push({ variantId: id, expected: e, initial: i });
   }
   if (!diffs.length) return null;

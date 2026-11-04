@@ -273,15 +273,14 @@ export async function resyncFromPrevious(dailyRecordId: string) {
     const day = await assertOpen(dailyRecordId);
     const prev = await previousDay(day.date);
     if (!prev) return 0;
-    const [prevItems, items] = await Promise.all([
-      db.dailyStockItems.where('dailyRecordId').equals(prev.id).toArray(),
-      db.dailyStockItems.where('dailyRecordId').equals(day.id).toArray(),
-    ]);
+    const prevItems = await db.dailyStockItems.where('dailyRecordId').equals(prev.id).toArray();
     const expected = new Map(prevItems.map((i) => [i.variantId, i.currentQuantity]));
     const changes: { variantId: string; from: number; to: number }[] = [];
-    for (const id of new Set([...expected.keys(), ...items.map((i) => i.variantId)])) {
+    // só as cores que existiam ontem: cor cadastrada hoje (não estava no dia anterior) começa com a
+    // quantidade do cadastro. Antes ela ia para 0 aqui (caso real: Dorado › Azul 5 → 0 em 03/11).
+    for (const id of expected.keys()) {
       const item = await ensureItem(day.id, id);
-      const to = expected.get(id) ?? 0;
+      const to = expected.get(id)!;
       const delta = to - item.initialQuantity;
       if (!delta) continue;
       if (item.currentQuantity + delta < 0) throw new UserError('A correção deixaria um estoque negativo. Revise as vendas do dia.');
