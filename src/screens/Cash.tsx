@@ -4,7 +4,9 @@ import { db } from '../db/db';
 import type { CashMovement, CashType, PaymentMethod, Sale } from '../db/types';
 import { addDays, money, PAYMENT_EMOJI, PAYMENT_LABEL, PAYMENTS, toCents, todayStr } from '../lib/util';
 import { addCashMovement, CASH_IN, CASH_LABEL, removeCashMovement, setCountedBalance, setOpeningBalance, updateNotebookSale } from '../services/cash';
-import { activeReservedByVariant, cancelOrder, confirmPix, correctOrderPrices, pixStatus, reservationsOfOrder, returnSaleItem, swapSaleItem } from '../services/sales';
+import { activeReservedByVariant, cancelOrder, confirmPix, correctOrderPrices, creditBalances, openFiado, owedOf, pixStatus, receiveFiado, reservationsOfOrder, returnSaleItem, swapSaleItem } from '../services/sales';
+import { receiptText } from '../services/insights';
+import { sendWhatsApp } from '../services/report';
 import { cashStatement, daySummary, loadStockRows } from '../services/summary';
 import { useApp } from '../state';
 import { DayNotices, DayBar, StartDayCard } from '../components/day';
@@ -42,8 +44,37 @@ export default function Cash() {
       const gr = g.get(v.groupId);
       return [v.id, { group: gr?.name ?? '—', icon: gr?.icon ?? '📦', groupColor: gr?.color ?? '#94a3b8', name: v.name, color: v.color }];
     }));
-    return { s, allOrders, sales, names, pieces };
+    const owed = new Map<string, number>();
+    for (const o of allOrders) if (o.fiado) owed.set(o.id, await owedOf(o));
+    return { s, allOrders, sales, names, pieces, owed };
   }, [day?.id]);
+  // fiado em aberto (de qualquer dia) e vales das clientes
+  const fiados = useLiveQuery(() => openFiado(), []) ?? [];
+  const vales = useLiveQuery(() => creditBalances(), []) ?? [];
+  const [showFiado, setShowFiado] = useState(false);
+  const [showVales, setShowVales] = useState(false);
+
+  /** Dinheiro de volta ou vale? (só pergunta quando a venda tem o nome da cliente) */
+  const refundHow = async (customer: string | undefined, cents: number): Promise<'dinheiro' | 'vale' | null> => {
+    if (!customer || cents <= 0) return 'dinheiro';
+    const pick = await choose({ title: `Como devolver ${money(cents)} para ${customer}?`, options: [
+      { value: 'dinheiro', label: <span className="block">💵 Devolver o dinheiro<span className="block text-[12px] font-normal opacity-80">sai do caixa</span></span> },
+      { value: 'vale', tone: 'success', label: <span className="block">🎟️ Virar vale<span className="block text-[12px] font-normal opacity-90">fica para ela usar numa próxima compra</span></span> },
+    ] });
+    return pick as 'dinheiro' | 'vale' | null;
+  };
+  const pagou = async (orderId: string, customer: string | undefined, owed: number) => {
+    if (!day) return;
+    const pick = await choose({ title: `${customer ?? 'Ela'} pagou ${money(owed)}?`, options: PAYMENTS.filter((p) => settings.paymentMethods.includes(p)).map((p) => ({ value: p, label: `${PAYMENT_EMOJI[p]} Pagou no ${PAYMENT_LABEL[p]}` })) });
+    if (pick) run(() => receiveFiado(orderId, day.id, pick as PaymentMethod), `✅ Fiado pago: ${money(owed)} entrou no caixa de hoje`);
+  };
+  const recibo = async (orderId: string) => {
+    const o = await db.orders.get(orderId);
+    if (!o || !data) return;
+    const ls = await db.sales.where('orderId').equals(orderId).toArray();
+    const r = await sendWhatsApp(receiptText(o, ls, (id) => data.names.get(id) ?? 'peça'), false);
+    if (r === 'copy-failed') run(async () => { throw new Error('Não deu para copiar o recibo.'); });
+  };
   const locked = day?.status !== 'open';
   const sym = settings.currencySymbol;
 
@@ -52,21 +83,27 @@ export default function Cash() {
       message: locked
         ? 'Esta venda é de um dia encerrado: as peças voltam ao estoque de HOJE e o valor sai do caixa de HOJE. O dia encerrado não muda. Fica registrado.'
         : 'As peças voltam ao estoque e o valor sai do caixa. Fica registrado.' }))) return;
+    const o = await db.orders.get(orderId);
+    const paid = o ? o.totalInCents - (o.fiado ? await owedOf(o) : 0) : 0;
+    const how = await refundHow(o?.customer, paid);
+    if (!how) return;
     const res = await reservationsOfOrder(orderId);
     const restore = res.length > 0 && await confirm({ title: 'Esta venda veio de uma reserva',
       message: `Voltar a reservar para ${res.map((r) => r.customer || 'a cliente').join(', ')}?`, confirm: 'Sim, voltar a reservar' });
-    run(() => cancelOrder(orderId, { restoreReservations: restore }), 'Venda cancelada');
+    run(() => cancelOrder(orderId, { restoreReservations: restore, refund: how }), how === 'vale' ? `Venda cancelada · 🎟️ vale de ${money(paid)}` : 'Venda cancelada');
   };
 
   /** Devolver parte da venda: a peça volta ao estoque e o valor dela sai do caixa (dia encerrado: entra hoje). */
-  const devolver = async (saleId: string, name: string, max: number, cents: number | null) => {
+  const devolver = async (saleId: string, name: string, max: number, cents: number | null, customer?: string) => {
     const opts = Array.from({ length: Math.min(max, 10) }, (_, i) => i + 1);
     const pick = opts.length === 1 ? '1' : await choose({ title: `Quantas ${name} voltaram?`, options: opts.map((n) => ({ value: String(n), label: `${n} ${n === 1 ? 'peça' : 'peças'}` })) });
     if (!pick) return;
     const n = Number(pick);
+    const how = await refundHow(customer, (cents ?? 0) * n);
+    if (!how) return;
     if (!(await confirm({ title: `Devolver ${n} ${name}?`, confirm: 'Devolver', tone: 'warning',
-      message: <>A peça volta ao estoque{cents ? <> e <b>{money(cents * n)}</b> sai do caixa</> : ''}{locked ? <> — <b>hoje</b> (o dia encerrado não muda)</> : ''}. O resto da venda continua. Fica registrado.</> }))) return;
-    run(() => returnSaleItem(saleId, n), `↩️ ${n} ${name} devolvida${n > 1 ? 's' : ''}`);
+      message: <>A peça volta ao estoque{cents ? (how === 'vale' ? <> e <b>{money(cents * n)}</b> vira vale de {customer}</> : <> e <b>{money(cents * n)}</b> sai do caixa</>) : ''}{locked ? <> — <b>hoje</b> (o dia encerrado não muda)</> : ''}. O resto da venda continua. Fica registrado.</> }))) return;
+    run(() => returnSaleItem(saleId, n, how), `↩️ ${n} ${name} devolvida${n > 1 ? 's' : ''}`);
   };
 
   return (
@@ -79,9 +116,13 @@ export default function Cash() {
         // linha do tempo única: vendas + lançamentos, do mais novo para o mais antigo
         // vendas do caderno (sem peça) aparecem junto com os lançamentos
         const manual = c.movements.filter((m) => (m.type !== 'venda' || !m.relatedOrderId) && m.type !== 'estorno');
+        // dinheiro de venda de OUTRO dia (fiado pago hoje, devolução hoje de venda antiga): entra na conta, então aparece
+        const dayOrders = new Set(data.allOrders.map((o) => o.id));
+        const linked = c.movements.filter((m) => m.relatedOrderId && !dayOrders.has(m.relatedOrderId));
         const timeline = [
           ...data.allOrders.map((o) => ({ kind: 'order' as const, at: o.createdAt, o })),
           ...manual.map((m) => ({ kind: 'cash' as const, at: m.createdAt, m })),
+          ...linked.map((m) => ({ kind: 'linked' as const, at: m.createdAt, m })),
         ].sort((a, b) => b.at.localeCompare(a.at));
         const methods = PAYMENTS.filter((p) => settings.paymentMethods.includes(p) || c.salesByMethod[p]);
         return (
@@ -258,6 +299,44 @@ export default function Cash() {
             </button>
             {showCount && <div className="mt-2"><CountedCard dayId={day.id} expected={c.cashOnHand} counted={c.counted} diff={c.difference} locked={locked} /></div>}
 
+            {fiados.length > 0 && (
+              <Card className="mt-3 overflow-hidden border-amber-200">
+                <button onClick={() => setShowFiado(!showFiado)} className="w-full flex items-center gap-3 px-3.5 py-3 text-left bg-amber-50 active:bg-amber-100">
+                  <span className="text-2xl">📒</span>
+                  <span className="flex-1 min-w-0"><b className="block text-amber-900">Fiado a receber: {money(fiados.reduce((s, f) => s + f.owed, 0))}</b>
+                    <span className="block text-[12px] text-amber-800">{fiados.length} {fiados.length === 1 ? 'venda' : 'vendas'} · entra no caixa quando ela pagar</span></span>
+                  <span className={`text-amber-700 transition ${showFiado ? 'rotate-90' : ''}`}>›</span>
+                </button>
+                {showFiado && (
+                  <div className="divide-y divide-amber-100">
+                    {fiados.map((f) => (
+                      <div key={f.order.id} className="flex items-center gap-2 px-3.5 py-2">
+                        <span className="flex-1 min-w-0 text-[14px]"><b className="text-slate-800">{f.order.customer}</b>
+                          <span className="block text-[12px] text-slate-500">desde {new Date(f.order.createdAt).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })} · {f.order.itemCount} {f.order.itemCount === 1 ? 'peça' : 'peças'}</span></span>
+                        <b className="tabular-nums">{money(f.owed)}</b>
+                        {!locked && <button onClick={() => pagou(f.order.id, f.order.customer, f.owed)} className="h-10 px-3 rounded-lg bg-emerald-600 text-white text-[13px] font-bold active:scale-95">✅ Pagou</button>}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </Card>
+            )}
+            {vales.length > 0 && (
+              <Card className="mt-3 overflow-hidden border-emerald-200">
+                <button onClick={() => setShowVales(!showVales)} className="w-full flex items-center gap-3 px-3.5 py-3 text-left bg-emerald-50 active:bg-emerald-100">
+                  <span className="text-2xl">🎟️</span>
+                  <span className="flex-1 min-w-0"><b className="block text-emerald-900">Vales das clientes: {money(vales.reduce((s, v) => s + v.cents, 0))}</b>
+                    <span className="block text-[12px] text-emerald-800">{vales.length} {vales.length === 1 ? 'cliente' : 'clientes'} · usa ao fechar a venda (digite o nome dela)</span></span>
+                  <span className={`text-emerald-700 transition ${showVales ? 'rotate-90' : ''}`}>›</span>
+                </button>
+                {showVales && (
+                  <div className="divide-y divide-emerald-100">
+                    {vales.map((v) => <div key={v.customer} className="flex items-center justify-between px-3.5 py-2 text-[14px]"><b className="text-slate-800">{v.customer}</b><b className="tabular-nums">{money(v.cents)}</b></div>)}
+                  </div>
+                )}
+              </Card>
+            )}
+
             <BlockHeader icon="🧾" tint="bg-slate-200" title={`Movimentado ${isTodayLabel(day.date) === 'de hoje' ? 'hoje' : 'no dia'}`}
               subtitle={`${timeline.length} ${timeline.length === 1 ? 'registro' : 'registros'} · do mais novo para o mais antigo`}
               right={<InfoTip title="Movimentado hoje" example={[
@@ -295,6 +374,10 @@ export default function Cash() {
                         <span key={m} className="rounded-full bg-blue-50 text-blue-800 px-2 py-0.5 text-[12px] font-bold">{PAYMENT_EMOJI[m]} {PAYMENT_LABEL[m]}{o.payments && o.payments.length > 1 ? ` ${money(v)}` : ''}</span>
                       ))}
                       {cancelled && <span className="rounded-full bg-red-100 text-red-700 px-2 py-0.5 text-[12px] font-bold">✖️ cancelada</span>}
+                      {!cancelled && o.fiado && ((data.owed.get(o.id) ?? 0) > 0
+                        ? <button onClick={() => pagou(o.id, o.customer, data.owed.get(o.id)!)} className="rounded-full bg-amber-100 text-amber-900 px-2 py-0.5 text-[12px] font-bold active:bg-amber-200">📒 Fiado · deve {money(data.owed.get(o.id)!)} · tocar quando pagar</button>
+                        : <span className="rounded-full bg-emerald-100 text-emerald-800 px-2 py-0.5 text-[12px] font-bold">📒 Fiado · pago ✅</span>)}
+                      {!!o.valeInCents && <span className="rounded-full bg-emerald-50 text-emerald-800 px-2 py-0.5 text-[12px] font-bold">🎟️ vale {money(o.valeInCents)}</span>}
                       {(() => {
                         const px = pixStatus(o);
                         const confirm = () => run(() => confirmPix(o.id), `✅ Pix de ${money(px.kind === 'none' ? 0 : px.cents)} conferido`);
@@ -332,7 +415,7 @@ export default function Cash() {
                                 <span className="flex-1" />
                                 {/* devolver uma parte: só quando sobra peça na venda (devolver tudo = Cancelar venda) */}
                                 {!cancelled && l.quantity > 0 && o.itemCount > 1 && (
-                                  <button aria-label={`Devolver ${pc?.name ?? ''}`} onClick={() => devolver(l.id, pc?.name ?? 'peça', Math.min(l.quantity, o.itemCount - 1), l.unitPriceInCents)}
+                                  <button aria-label={`Devolver ${pc?.name ?? ''}`} onClick={() => devolver(l.id, pc?.name ?? 'peça', Math.min(l.quantity, o.itemCount - 1), l.unitPriceInCents, o.customer)}
                                     className="shrink-0 h-9 px-2.5 rounded-lg bg-white border border-orange-200 text-[12px] font-bold text-orange-700 active:bg-orange-50">↩️ Devolver</button>
                                 )}
                                 {!cancelled && !locked && l.quantity > 0 && (
@@ -345,6 +428,11 @@ export default function Cash() {
                         );
                       })}
                     </div>
+                    {!cancelled && (
+                      <div className="px-3 pt-2">
+                        <button className="w-full min-h-10 rounded-lg bg-green-50 border border-green-200 text-[13px] font-semibold text-green-800 active:bg-green-100" onClick={() => recibo(o.id)}>🧾 Mandar recibo no WhatsApp</button>
+                      </div>
+                    )}
                     {!cancelled && !locked ? (
                       <div className="grid grid-cols-2 gap-2 p-3">
                         <button className="h-10 rounded-lg bg-slate-100 text-[13px] font-semibold text-slate-700 active:bg-slate-200" onClick={() => setFix(o.id)}>✏️ Corrigir valor</button>
@@ -358,7 +446,16 @@ export default function Cash() {
                     ) : <div className="h-3" />}
                   </Card>
                 );
-              })() : t.m.type === 'venda' ? (
+              })() : t.kind === 'linked' ? (
+                <Card key={t.m.id} className="p-3 flex items-center gap-3">
+                  <span className="w-10 h-10 shrink-0 rounded-xl bg-slate-50 flex items-center justify-center text-lg">{t.m.type === 'estorno' ? '↩️' : t.m.description?.startsWith('Fiado') ? '📒' : '💰'}</span>
+                  <span className="flex-1 min-w-0">
+                    <span className="block font-semibold text-slate-800 break-words">{t.m.description ?? CASH_LABEL[t.m.type]}</span>
+                    <span className="block text-xs text-slate-500">{hhmm(t.m.createdAt)} · {PAYMENT_EMOJI[t.m.paymentMethod]} {PAYMENT_LABEL[t.m.paymentMethod]} · venda de outro dia</span>
+                  </span>
+                  <span className={`font-bold tabular-nums ${t.m.type === 'estorno' ? 'text-red-600' : 'text-emerald-600'}`}>{t.m.type === 'estorno' ? '−' : '+'}{money(t.m.amountInCents)}</span>
+                </Card>
+              ) : t.m.type === 'venda' ? (
                 <Card key={t.m.id} className="overflow-hidden">
                   <div className="flex items-center gap-2 px-3 pt-3">
                     <span className="text-lg">🛍️</span>

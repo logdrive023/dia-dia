@@ -111,6 +111,11 @@ export default function Stock() {
                 <span>📋</span><span>Importar</span>
               </button>
               {!locked && (
+                <button onClick={() => setOverlay('contagem')} className="min-h-11 px-3 rounded-xl bg-cyan-50 border border-cyan-200 text-[14px] font-semibold text-cyan-900 active:bg-cyan-100 flex items-center justify-center gap-2">
+                  <span>🔢</span><span>Contar a loja</span>
+                </button>
+              )}
+              {!locked && (
                 <HelpButton icon="❓" label="Como usar" title="Estoque: + e −" example={[
                   ['📥', <>Chegaram 3 Plomo Vermelho → 3× no <b>+</b></>],
                   ['💔', <>Uma peça manchou → 1× no <b>−</b></>],

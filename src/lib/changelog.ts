@@ -3,9 +3,38 @@
  * Ao publicar uma versão: acrescente uma entrada no topo com um id novo.
  */
 /** `version`: o número que aparece em Sobre (a entrada mais nova é a versão do app). Nova entrada = próximo número. */
-export interface ChangeEntry { id: string; version: string; date: string; title: string; items: [string, string][] }
+/** Cada item: [ícone, texto] ou [ícone, texto, 'bug' | 'melhoria'] (sem o terceiro, o app decide pelo texto). */
+export type ChangeItem = [string, string] | [string, string, ChangeKind];
+export type ChangeKind = 'bug' | 'melhoria';
+export interface ChangeEntry { id: string; version: string; date: string; title: string; items: ChangeItem[] }
+
+/**
+ * Correção ou melhoria? Correção = algo que estava errado: ícone 🐛, “Corrigido…” ou “… não … mais …”
+ * (ex.: “O teclado não abre mais sozinho”). O resto é melhoria (coisa nova ou mais clara).
+ */
+export function changeKind(item: ChangeItem): ChangeKind {
+  if (item[2]) return item[2];
+  const [icon, text] = item;
+  return icon === '🐛' || /corrigid/i.test(text) || /\bnão\b.*\bmais\b/i.test(text) ? 'bug' : 'melhoria';
+}
 
 export const CHANGELOG: ChangeEntry[] = [
+  {
+    id: '2026-11-04b', version: '1.8', date: '04/11/2026', title: 'Condicional, fiado, vale, contagem da loja e lucro',
+    items: [
+      ['👜', 'Novo: Condicional (a cliente levou para provar em casa). Na reserva, escolha “Levou para provar” e até quando. A peça sai da venda, mas continua sendo da loja. Depois: “Ficou” vira venda (dá para escolher quantas ficou) e “Voltou” volta à venda'],
+      ['⏰', 'Condicional que passou do prazo aparece em vermelho na lista de reservas'],
+      ['📒', 'Novo: Fiado (sim ou não). Ao fechar a venda, ligue “Fiado”: a peça sai, nada entra no caixa. Quando ela pagar, toque em “Pagou” (Caixa › Fiado a receber): o valor entra no caixa do dia'],
+      ['🎟️', 'Novo: Vale. Ao devolver ou cancelar, escolha “Devolver o dinheiro” ou “Virar vale”. Na próxima compra, digite o nome dela e use o vale. Caixa › Vales mostra quem tem'],
+      ['🔢', 'Novo: Contagem da loja (Estoque › Contar a loja, ou Menu). Digite o que contou em cada cor, veja antes → depois e grave tudo de uma vez. Peças em condicional entram sozinhas'],
+      ['📊', 'Novo: Mais vendidas, paradas e lucro (Menu), em 7, 30 ou 90 dias'],
+      ['💲', 'Novo: Custo da peça (Produtos › cor). Opcional, só para ver o lucro; a venda guarda o custo do dia'],
+      ['🧾', 'Novo: Mandar recibo no WhatsApp em cada venda (Caixa)'],
+      ['🆕', 'Atualizações separadas em 🐛 Correções e ✨ Melhorias; as versões antigas ficam resumidas (toque para abrir)'],
+      ['💰', 'Caixa mostra o dinheiro que entrou ou saiu hoje por venda de outro dia (fiado pago, devolução de venda antiga). Antes entrava na conta, mas não aparecia na lista', 'bug'],
+      ['💾', 'Backup antigo (de antes dos vales) continua abrindo normalmente', 'bug'],
+    ],
+  },
   {
     id: '2026-11-04a', version: '1.7', date: '04/11/2026', title: 'Cor repetida não soma mais peça que não existe',
     items: [
@@ -14,14 +43,13 @@ export const CHANGELOG: ChangeEntry[] = [
       ['➡️', 'Resolver: passar as peças para a cor nova com o mesmo nome ou zerar (eram repetidas). Fica registrado nas Movimentações'],
       ['⚠️', 'Aviso no topo do Estoque quando alguma cor antiga ainda tem peças'],
       ['🗑️', 'Arquivar ou excluir uma cor que ainda tem peças hoje: o app pergunta o que fazer com elas antes'],
-      ['🔁', 'Cor excluída não passa mais para o dia seguinte'],
       ['🧮', 'Total do Estoque igual ao do relatório; zerar cor antiga não conta como “saiu” no relatório'],
       ['🏷️', '“Nome repetido neste grupo” aparece quando duas cores ativas têm o mesmo nome'],
       ['📜', 'Histórico e Movimentações mostram “(cor arquivada)” / “(cor excluída)” ao lado do nome'],
       ['🩺', 'Diagnóstico avisa cor antiga com peças e cor repetida no mesmo grupo'],
       ['🐛', 'Corrigido: “Atualizar” (trazer correções de ontem) zerava a cor cadastrada no mesmo dia (ex.: Dorado › Azul 5 → 0). Cor nova do dia também não aparece mais como “começou diferente do fim de ontem”'],
       ['↩️', 'Novo: Devolver peça (Caixa, em cada peça da venda): levou 3, devolveu 1 → a peça volta ao estoque e o valor dela sai do caixa; o resto da venda continua'],
-      ['📅', 'Cancelar ou devolver venda de um dia encerrado não precisa mais reabrir o dia: a peça e o dinheiro voltam HOJE e o dia encerrado não muda'],
+      ['📅', 'Cancelar ou devolver venda de um dia encerrado não precisa mais reabrir o dia: a peça e o dinheiro voltam HOJE e o dia encerrado não muda', 'melhoria'],
       ['🧮', 'Mensagem e Encerrar o dia mostram a conta do estoque inteira: começou − vendeu + voltou + entrou − saiu ± ajustes = terminou. Novas seções “Saiu sem ser venda” e “Ajustes de contagem”'],
       ['🔗', '“Atualizar” leva a correção pela cadeia de dias (corrigiu anteontem → ontem e hoje acompanham)'],
       ['⚠️', 'Reabrir um dia que já tem dias depois avisa que a mudança só chega neles com “Atualizar” (e que cancelar/devolver não precisa reabrir)'],

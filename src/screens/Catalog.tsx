@@ -508,6 +508,10 @@ function VariantEditor({ id, onClose }: { id: string | null; onClose: () => void
       <NumberField key={'p' + v.id + v.optionalPriceInCents} label="Preço de venda (opcional)" hint="Já vem preenchido na venda. Vazio = digitar na hora." decimal
         value={v.optionalPriceInCents ? money(v.optionalPriceInCents) : ''}
         onSave={(t) => run(() => updateVariant(v.id, { optionalPriceInCents: t === '' ? null : toCents(t) }), 'Salvo')} />
+      {/* custo: só para ver o lucro (Menu › Mais vendidas, paradas e lucro). Não muda preço, estoque nem caixa. */}
+      <NumberField key={'c' + v.id + v.costInCents} label="Custo da peça (opcional)" hint="Quanto você pagou por cada uma. Só serve para mostrar o lucro." decimal
+        value={v.costInCents ? money(v.costInCents) : ''}
+        onSave={(t) => run(() => updateVariant(v.id, { costInCents: t === '' ? null : toCents(t) }), 'Custo salvo')} />
       <NameField key={'d' + v.id} label="Descrição (opcional)" value={v.description ?? ''} allowEmpty onSave={(description) => run(() => updateVariant(v.id, { description }), 'Salvo')} />
       <NameField key={'n' + v.id} label="Observações (opcional)" value={v.notes ?? ''} allowEmpty onSave={(notes) => run(() => updateVariant(v.id, { notes }), 'Salvo')} />
       <Toggle label="Ativa (aparece nas operações)" checked={v.active} onChange={(a) => run(() => setVariantActive(v.id, a))} />

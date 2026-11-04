@@ -21,6 +21,8 @@ export interface Variant {
   id: ID;
   groupId: ID;
   name: string;
+  /** quanto a loja pagou por cada peça (opcional; só para ver o lucro) */
+  costInCents?: number | null;
   description?: string;
   color?: string;
   displayOrder: number;
@@ -143,6 +145,27 @@ export interface Order {
   notes?: string;
   /** quem fez (Configurações › Seu nome); antigos: sem */
   by?: string | null;
+  /** Fiado: a cliente levou e paga depois. Nada entra no caixa na hora; cada pagamento entra no dia em que ela pagar. */
+  fiado?: boolean;
+  /** Parte da venda paga com vale da cliente (não é dinheiro: não entra no caixa). */
+  valeInCents?: number;
+}
+
+/**
+ * Vale (crédito da cliente na loja). Só acrescenta: + quando ela ganha (devolução que virou vale),
+ * − quando usa numa compra. Saldo = soma dos registros com o mesmo nome.
+ */
+export interface Credit {
+  id: ID;
+  customer: string;
+  /** nome normalizado (sem acento/maiúscula), para somar o saldo */
+  customerKey: string;
+  amountInCents: number;
+  orderId?: ID | null;
+  dailyRecordId: ID;
+  createdAt: string;
+  note?: string;
+  by?: string | null;
 }
 
 export interface Payment {
@@ -165,6 +188,8 @@ export interface Sale {
   status: 'ok' | 'cancelled';
   /** peças desta linha que a cliente devolveu (a `quantity` já é o que ficou vendido) */
   returnedQuantity?: number;
+  /** custo de cada peça quando foi vendida (para o lucro); sem = usa o custo atual da cor */
+  costInCents?: number | null;
 }
 
 export type ReservationStatus = 'active' | 'cancelled' | 'converted';
@@ -181,6 +206,10 @@ export interface Reservation {
   status: ReservationStatus;
   /** Venda gerada quando a reserva foi convertida. */
   orderId?: ID | null;
+  /** 'condicional' = a cliente levou para provar em casa (a peça é da loja e conta no estoque, mas está fora). Sem = reserva comum. */
+  kind?: 'reserva' | 'condicional';
+  /** condicional: até quando ela devolve ou paga (aaaa-mm-dd) */
+  dueDate?: string | null;
   createdAt: string;
   updatedAt: string;
   /** quem fez (Configurações › Seu nome); antigos: sem */

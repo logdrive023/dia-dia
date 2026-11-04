@@ -1,6 +1,6 @@
 import Dexie, { type Table } from 'dexie';
 import type {
-  AuditLog, CashMovement, CashRecord, Category, DailyRecord, DailyStockItem, Group,
+  AuditLog, CashMovement, CashRecord, Category, Credit, DailyRecord, DailyStockItem, Group,
   ImportRecord, Order, Reservation, Sale, Setting, StockMovement, Variant,
 } from './types';
 
@@ -20,6 +20,8 @@ export class AppDB extends Dexie {
   auditLogs!: Table<AuditLog, string>;
   /** importações em quantidade (texto colado + o que mudou) */
   imports!: Table<ImportRecord, string>;
+  /** vales das clientes (crédito na loja) */
+  credits!: Table<Credit, string>;
   /** Cópia automática dos dados de antes de receber/restaurar (para "voltar como estava"). Fica fora do backup. */
   safety!: Table<{ id: string; createdAt: string; json: string; summary: string }, string>;
 
@@ -44,13 +46,15 @@ export class AppDB extends Dexie {
     this.version(2).stores({ safety: 'id' });
     // v3: só acrescenta a tabela das importações (nada existente muda; campos novos são opcionais)
     this.version(3).stores({ imports: 'id, createdAt' });
+    // v4: só acrescenta a tabela dos vales (nada existente muda)
+    this.version(4).stores({ credits: 'id, customerKey, orderId, dailyRecordId' });
   }
 
   get allTables() {
     return [
       this.groups, this.variants, this.categories, this.dailyRecords, this.dailyStockItems,
       this.stockMovements, this.orders, this.sales, this.reservations, this.cashRecords,
-      this.cashMovements, this.settings, this.auditLogs, this.imports,
+      this.cashMovements, this.settings, this.auditLogs, this.imports, this.credits,
     ];
   }
 }

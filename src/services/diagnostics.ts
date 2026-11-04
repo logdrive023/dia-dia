@@ -14,10 +14,10 @@ export interface Finding {
  * vínculos quebrados e dias que ficaram diferentes do dia anterior.
  */
 export async function runDiagnostics(): Promise<{ findings: Finding[]; checked: Record<string, number> }> {
-  const [groups, variants, days, items, moves, orders, sales, reservations, cashRecs, cashMoves] = await Promise.all([
+  const [groups, variants, days, items, moves, orders, sales, reservations, cashRecs, cashMoves, credits] = await Promise.all([
     db.groups.toArray(), db.variants.toArray(), db.dailyRecords.orderBy('date').toArray(), db.dailyStockItems.toArray(),
     db.stockMovements.toArray(), db.orders.toArray(), db.sales.toArray(), db.reservations.toArray(),
-    db.cashRecords.toArray(), db.cashMovements.toArray(),
+    db.cashRecords.toArray(), db.cashMovements.toArray(), db.credits.toArray(),
   ]);
   const f: Finding[] = [];
   const gIds = new Set(groups.map((g) => g.id));
@@ -65,12 +65,15 @@ export async function runDiagnostics(): Promise<{ findings: Finding[]; checked: 
     if (total !== o.totalInCents) f.push({ level: 'erro', title: `Total da venda não bate (${when})`, detail: `Venda ${money(o.totalInCents)}, peças somam ${money(total)}.` });
     if (ls.some((l) => l.status !== o.status)) f.push({ level: 'erro', title: `Situação das peças diferente da venda (${when})` });
     const cm = cashBy.get(o.id) ?? [];
-    const net = cm.reduce((s, c) => s + (c.type === 'venda' ? c.amountInCents : c.type === 'estorno' ? -c.amountInCents : 0), 0);
+    const cash = cm.reduce((s, c) => s + (c.type === 'venda' ? c.amountInCents : c.type === 'estorno' ? -c.amountInCents : 0), 0);
+    // pago = dinheiro + vale usado − vale devolvido (venda sem vale: pago = dinheiro)
+    const cr = credits.filter((c) => c.orderId === o.id);
+    const net = cash - cr.filter((c) => c.amountInCents > 0).reduce((s, c) => s + c.amountInCents, 0) - cr.filter((c) => c.amountInCents < 0).reduce((s, c) => s + c.amountInCents, 0);
     const expected = o.status === 'ok' ? o.totalInCents : 0;
-    if (net !== expected)
+    if (o.fiado && o.status === 'ok' ? net < 0 || net > expected : net !== expected)
       f.push({ level: 'erro', title: o.status === 'ok' ? `Valor no caixa diferente da venda (${when})` : `Venda cancelada sem estorno completo no caixa (${when})`,
         detail: `No caixa ${money(net)}, deveria ser ${money(expected)}.` });
-    if (o.payments && o.payments.reduce((s, p) => s + p.amountInCents, 0) !== o.totalInCents && !cm.some((c) => c.description === 'Correção de valor'))
+    if (o.payments && o.payments.reduce((s, p) => s + p.amountInCents, 0) !== (o.valeInCents ? cash : o.totalInCents) && !cm.some((c) => c.description === 'Correção de valor') && !cr.length && o.status === 'ok')
       f.push({ level: 'erro', title: `Pagamento dividido não soma o total (${when})` });
     // baixa no estoque exatamente uma vez por peça: saiu − voltou (devolução/cancelamento) = o que ficou vendido
     const sold = moves.filter((m) => m.orderId === o.id && m.type === 'venda').reduce((s, m) => s - m.quantity, 0);

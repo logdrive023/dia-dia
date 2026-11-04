@@ -11,7 +11,7 @@ const REQUIRED = [
   'sales', 'reservations', 'cashRecords', 'cashMovements', 'settings', 'auditLogs',
 ] as const;
 /** tabelas que vieram depois: backup antigo não tem (vira lista vazia); app antigo ignora */
-const OPTIONAL = ['imports'] as const;
+const OPTIONAL = ['imports', 'credits'] as const;
 const TABLES = [...REQUIRED, ...OPTIONAL] as const;
 type TableName = (typeof TABLES)[number];
 
@@ -61,8 +61,15 @@ export function validateBackup(raw: unknown): BackupFile {
   if (!orig.data || typeof orig.data !== 'object') throw new BackupError('Backup sem dados.');
   // conferência: os dados como vieram; backup antigo conferido de novo já com as tabelas opcionais vazias também vale
   if (orig.checksum && checksum(JSON.stringify(orig.data)) !== orig.checksum) {
-    const without = Object.fromEntries(Object.entries(orig.data).filter(([k, v]) => !((OPTIONAL as readonly string[]).includes(k) && Array.isArray(v) && !v.length)));
-    if (checksum(JSON.stringify(without)) !== orig.checksum) throw new BackupError('Backup corrompido (verificação falhou).');
+    // backup conferido antes de existir alguma tabela opcional: tenta sem cada combinação das opcionais vazias
+    const empty = (OPTIONAL as readonly string[]).filter((k) => Array.isArray(orig.data[k as TableName]) && !orig.data[k as TableName].length);
+    let ok = false;
+    for (let mask = 1; mask < 1 << empty.length && !ok; mask++) {
+      const drop = new Set(empty.filter((_, i) => mask & (1 << i)));
+      const without = Object.fromEntries(Object.entries(orig.data).filter(([k]) => !drop.has(k)));
+      ok = checksum(JSON.stringify(without)) === orig.checksum;
+    }
+    if (!ok) throw new BackupError('Backup corrompido (verificação falhou).');
   }
   // cópia completada (o objeto recebido não muda)
   const b: BackupFile = { ...orig, data: { ...orig.data } };

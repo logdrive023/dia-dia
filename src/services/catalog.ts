@@ -19,7 +19,8 @@ function checkMinVsMeta(v: { minimumStock?: number | null; idealStock?: number |
     throw new UserError(`O estoque mínimo (${v.minimumStock}) não pode ser maior que a meta (${meta}).`);
 }
 
-function validateNumbers(p: { idealStock?: number | null; minimumStock?: number | null; optionalPriceInCents?: number | null }) {
+function validateNumbers(p: { idealStock?: number | null; minimumStock?: number | null; optionalPriceInCents?: number | null; costInCents?: number | null }) {
+  if (p.costInCents !== undefined && p.costInCents !== null && !isCents(p.costInCents)) throw new UserError('Custo inválido.');
   for (const k of ['idealStock', 'minimumStock'] as const) {
     const v = p[k];
     if (v !== undefined && v !== null && !(Number.isInteger(v) && v >= 0 && v <= MAX_QTY)) throw new UserError(k === 'minimumStock' ? 'Estoque mínimo inválido.' : 'Estoque ideal inválido.');
@@ -219,7 +220,7 @@ export async function createVariant(input: {
 }
 
 export async function updateVariant(id: string, patch: Partial<Pick<Variant,
-  'name' | 'description' | 'color' | 'minimumStock' | 'idealStock' | 'optionalPriceInCents' | 'notes' | 'restockOff' | 'size' | 'productType'>>) {
+  'name' | 'description' | 'color' | 'minimumStock' | 'idealStock' | 'optionalPriceInCents' | 'notes' | 'restockOff' | 'size' | 'productType' | 'costInCents'>>) {
   return db.transaction('rw', db.variants, db.auditLogs, async () => {
     const v = await db.variants.get(id);
     if (!v) throw new UserError('Variação não encontrada.');

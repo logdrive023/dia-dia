@@ -1,6 +1,6 @@
 import { db } from '../db/db';
-import type { CashMovement, Order, Payment, PaymentMethod, Reservation, Sale } from '../db/types';
-import { isCents, isQty, MAX_QTY, nowIso, PAYMENTS, uid } from '../lib/util';
+import type { CashMovement, Credit, Order, Payment, PaymentMethod, Reservation, Sale } from '../db/types';
+import { isCents, isQty, MAX_QTY, normalize, nowIso, PAYMENTS, uid } from '../lib/util';
 import { audit } from './audit';
 import { UserError } from './catalog';
 import { applyStockDelta, assertLiveVariant, assertOpen, ensureItem, todayOpenDay } from './days';
@@ -28,8 +28,84 @@ export async function activeReservedByVariant(date: string, exceptIds: string[] 
 
 const SALE_TABLES = () => [
   db.dailyRecords, db.dailyStockItems, db.stockMovements, db.variants, db.groups, db.orders, db.sales,
-  db.cashMovements, db.reservations, db.auditLogs, db.settings,
+  db.cashMovements, db.reservations, db.auditLogs, db.settings, db.credits,
 ];
+
+// ---------------- vale (crédito da cliente) ----------------
+
+const customerKey = (name: string) => normalize(name.trim());
+
+/** Saldo de vale da cliente (pelo nome). */
+export async function creditBalance(customer: string | undefined | null) {
+  const key = customer?.trim() ? customerKey(customer) : '';
+  if (!key) return 0;
+  return (await db.credits.where('customerKey').equals(key).toArray()).reduce((s, c) => s + c.amountInCents, 0);
+}
+
+/** Todas as clientes com vale (saldo > 0), maior primeiro. */
+export async function creditBalances() {
+  const by = new Map<string, { customer: string; cents: number }>();
+  for (const c of await db.credits.toArray()) {
+    const e = by.get(c.customerKey) ?? { customer: c.customer, cents: 0 };
+    e.cents += c.amountInCents; by.set(c.customerKey, e);
+  }
+  return [...by.values()].filter((e) => e.cents > 0).sort((a, b) => b.cents - a.cents);
+}
+
+async function addCredit(customer: string | undefined, cents: number, dailyRecordId: string, orderId: string | null, note: string) {
+  if (!cents) return;
+  if (!customer?.trim()) throw new UserError('Para virar vale, a venda precisa ter o nome da cliente.');
+  const c: Credit = { id: uid(), customer: customer.trim(), customerKey: customerKey(customer), amountInCents: cents, orderId, dailyRecordId, createdAt: nowIso(), note, by: actor() };
+  await db.credits.add(c);
+}
+
+/**
+ * O que a cliente já pagou nesta venda (dinheiro que ficou no caixa + vale usado − vale que ela ganhou de volta).
+ * Venda normal: pago = total. Fiado: pago ≤ total (o resto ela deve).
+ */
+async function paidOf(orderId: string) {
+  const cash = [...(await orderCashByMethod(orderId)).values()].reduce((a, b) => a + b, 0);
+  const cr = await db.credits.where('orderId').equals(orderId).toArray();
+  const used = -cr.filter((c) => c.amountInCents < 0).reduce((s, c) => s + c.amountInCents, 0);
+  const issued = cr.filter((c) => c.amountInCents > 0).reduce((s, c) => s + c.amountInCents, 0);
+  return { cash, used, issued, paid: cash - issued + used };
+}
+
+/** Fiado: quanto a cliente ainda deve desta venda. */
+export async function owedOf(order: Order) {
+  if (!order.fiado || order.status !== 'ok') return 0;
+  return Math.max(0, order.totalInCents - (await paidOf(order.id)).paid);
+}
+
+/** Vendas fiado com saldo devedor (para a lista “Fiado a receber”). */
+export async function openFiado() {
+  const list: { order: Order; owed: number }[] = [];
+  for (const o of await db.orders.filter((x) => !!x.fiado && x.status === 'ok').toArray()) {
+    const owed = await owedOf(o);
+    if (owed > 0) list.push({ order: o, owed });
+  }
+  return list.sort((a, b) => a.order.createdAt.localeCompare(b.order.createdAt));
+}
+
+/**
+ * Devolve `cents` à cliente: primeiro abate o que ela ainda devia (fiado), depois vale (se escolheu) ou dinheiro
+ * (na forma da peça, depois nas outras). O que não couber no dinheiro (venda paga com vale) volta como vale.
+ */
+async function refund(order: Order, cents: number, dayId: string, what: string, how: 'dinheiro' | 'vale', firstMethod?: PaymentMethod) {
+  let rest = cents;
+  if (order.fiado) rest -= Math.min(rest, await owedOf(order));
+  if (rest <= 0) return;
+  if (how === 'vale') { await addCredit(order.customer, rest, dayId, order.id, what); return; }
+  const net = await orderCashByMethod(order.id);
+  for (const m of [...new Set([...(firstMethod ? [firstMethod] : []), order.paymentMethod, ...PAYMENTS])]) {
+    const take = Math.min(net.get(m) ?? 0, rest);
+    if (take <= 0) continue;
+    await db.cashMovements.add({ id: uid(), dailyRecordId: dayId, type: 'estorno', amountInCents: take, paymentMethod: m, relatedOrderId: order.id, createdAt: nowIso(), description: what });
+    rest -= take;
+    if (!rest) return;
+  }
+  if (rest > 0) await addCredit(order.customer, rest, dayId, order.id, `${what} (era vale)`);
+}
 
 function validateLine(l: CartLine) {
   if (!isQty(l.quantity)) throw new UserError(`Quantidade inválida (de 1 a ${MAX_QTY}).`);
@@ -70,17 +146,27 @@ function normalizePayments(total: number, method: PaymentMethod, payments?: Paym
 export async function createOrder(params: {
   orderId: string; dailyRecordId: string; lines: CartLine[]; paymentMethod: PaymentMethod;
   payments?: Payment[]; customer?: string; notes?: string;
+  /** a cliente leva e paga depois (nada entra no caixa agora) */
+  fiado?: boolean;
+  /** quanto do total ela paga com o vale que tem */
+  valeInCents?: number;
 }): Promise<Order> {
   const lines = params.lines.filter((l) => l.quantity !== 0);
   if (!lines.length) throw new UserError('Adicione pelo menos uma peça.');
   lines.forEach(validateLine);
   const total = lines.reduce((s, l) => s + (l.unitPriceInCents ?? 0) * l.quantity, 0);
   if (!isCents(total)) throw new UserError('Total da venda inválido.');
+  const vale = params.valeInCents ?? 0;
+  const who = params.customer?.trim();
+  if ((params.fiado || vale) && !who) throw new UserError(params.fiado ? 'Fiado precisa do nome da cliente.' : 'Para usar vale, diga o nome da cliente.');
+  if (params.fiado && vale) throw new UserError('Fiado e vale na mesma venda não: escolha um.');
+  if (vale && (!isCents(vale) || vale > total)) throw new UserError('Valor do vale inválido.');
   // cada peça com a sua forma: o pagamento é a soma por forma (o dividido manual não se aplica)
   const byLine = lines.some((l) => l.paymentMethod && l.paymentMethod !== params.paymentMethod);
-  const pays = byLine
+  if (byLine && (params.fiado || vale)) throw new UserError('Fiado ou vale: use “Pagou tudo numa forma só”.');
+  const pays = params.fiado ? [] : byLine
     ? normalizePayments(total, params.paymentMethod, paymentsByLine(lines, params.paymentMethod))
-    : normalizePayments(total, params.paymentMethod, params.payments);
+    : normalizePayments(total - vale, params.paymentMethod, params.payments);
   return db.transaction('rw', SALE_TABLES(), async () => {
     const dup = await db.orders.get(params.orderId);
     if (dup) return dup;
@@ -107,13 +193,15 @@ export async function createOrder(params: {
       if (qty > available) throw new UserError(`Só há ${Math.max(0, available)} disponível de ${v.name}.`);
     }
 
+    if (vale && (await creditBalance(who)) < vale) throw new UserError(`${who} não tem esse valor de vale.`);
     const now = nowIso();
-    const main = pays.slice().sort((a, b) => b.amountInCents - a.amountInCents)[0]?.method ?? params.paymentMethod;
+    const main = params.fiado ? 'dinheiro' : pays.slice().sort((a, b) => b.amountInCents - a.amountInCents)[0]?.method ?? params.paymentMethod;
     const order: Order = {
-      id: params.orderId, dailyRecordId: day.id, customer: params.customer?.trim().slice(0, 80) || undefined,
+      id: params.orderId, dailyRecordId: day.id, customer: who?.slice(0, 80) || undefined,
       paymentMethod: main, payments: pays.length > 1 ? pays : undefined, totalInCents: total, ...(byLine ? { payByLine: true } : {}),
       itemCount: lines.reduce((s, l) => s + l.quantity, 0), status: 'ok', cashMovementId: null,
       createdAt: now, notes: params.notes,
+      ...(params.fiado ? { fiado: true } : {}), ...(vale ? { valeInCents: vale } : {}),
     };
     // venda sem valor não gera receita fictícia; dividido = um recebimento por forma
     for (const p of pays) {
@@ -125,10 +213,13 @@ export async function createOrder(params: {
       });
     }
     await db.orders.add({ ...order, by: actor() });
+    if (vale) await addCredit(who, -vale, day.id, order.id, 'Usou na compra');
+    const cost = new Map((await db.variants.bulkGet([...need.keys()])).map((v) => [v?.id, v?.costInCents ?? null]));
     const sales: Sale[] = lines.map((l) => ({
       id: uid(), orderId: order.id, dailyRecordId: day.id, variantId: l.variantId, quantity: l.quantity,
       unitPriceInCents: l.unitPriceInCents, totalInCents: (l.unitPriceInCents ?? 0) * l.quantity,
       paymentMethod: byLine ? l.paymentMethod ?? params.paymentMethod : main, createdAt: now, cashMovementId: order.cashMovementId, status: 'ok',
+      ...(cost.get(l.variantId) != null ? { costInCents: cost.get(l.variantId) } : {}),
     }));
     await db.sales.bulkAdd(sales);
     for (const l of lines)
@@ -153,7 +244,7 @@ async function orderCashByMethod(orderId: string) {
  * Cancela a venda: devolve as peças e estorna o que entrou no caixa. Nada é apagado.
  * `restoreReservations`: se a venda veio de reserva, a reserva volta a valer.
  */
-export async function cancelOrder(orderId: string, opts: { restoreReservations?: boolean } = {}) {
+export async function cancelOrder(orderId: string, opts: { restoreReservations?: boolean; refund?: 'dinheiro' | 'vale' } = {}) {
   return db.transaction('rw', SALE_TABLES(), async () => {
     const order = await db.orders.get(orderId);
     if (!order) throw new UserError('Venda não encontrada.');
@@ -165,12 +256,18 @@ export async function cancelOrder(orderId: string, opts: { restoreReservations?:
       if (s.quantity) await applyStockDelta(day.id, s.variantId, s.quantity, 'cancelamento', { orderId, description: what });
       await db.sales.update(s.id, { status: 'cancelled' });
     }
-    for (const [method, amount] of await orderCashByMethod(orderId))
-      if (amount > 0)
-        await db.cashMovements.add({
-          id: uid(), dailyRecordId: day.id, type: 'estorno', amountInCents: amount,
-          paymentMethod: method, relatedOrderId: orderId, createdAt: nowIso(), description: what,
-        });
+    // devolve tudo o que ela pagou: em vale (se escolheu) ou no dinheiro de cada forma; vale que ela usou volta como vale
+    const { paid, cash } = await paidOf(orderId);
+    if (opts.refund === 'vale') await addCredit(order.customer, paid, day.id, orderId, what);
+    else {
+      for (const [method, amount] of await orderCashByMethod(orderId))
+        if (amount > 0)
+          await db.cashMovements.add({
+            id: uid(), dailyRecordId: day.id, type: 'estorno', amountInCents: amount,
+            paymentMethod: method, relatedOrderId: orderId, createdAt: nowIso(), description: what,
+          });
+      if (paid - cash > 0) await addCredit(order.customer, paid - cash, day.id, orderId, `${what} (vale volta)`);
+    }
     await db.orders.update(orderId, { status: 'cancelled' });
     if (opts.restoreReservations)
       for (const r of await db.reservations.filter((x) => x.orderId === orderId && x.status === 'converted').toArray())
@@ -208,7 +305,7 @@ async function syncPayments(orderId: string) {
  * (na forma em que essa peça foi paga; se não der, nas outras). Venda de dia encerrado: entra hoje.
  * Devolver tudo = Cancelar venda.
  */
-export async function returnSaleItem(saleId: string, quantity: number) {
+export async function returnSaleItem(saleId: string, quantity: number, how: 'dinheiro' | 'vale' = 'dinheiro') {
   return db.transaction('rw', SALE_TABLES(), async () => {
     const s = await db.sales.get(saleId);
     if (!s || s.status !== 'ok') throw new UserError('Venda não encontrada.');
@@ -225,20 +322,7 @@ export async function returnSaleItem(saleId: string, quantity: number) {
       quantity: s.quantity - quantity, totalInCents: (s.unitPriceInCents ?? 0) * (s.quantity - quantity),
       returnedQuantity: (s.returnedQuantity ?? 0) + quantity,
     });
-    if (value > 0) {
-      const net = await orderCashByMethod(order.id);
-      let rest = value;
-      for (const m of [...new Set([s.paymentMethod, order.paymentMethod, ...PAYMENTS])]) {
-        const take = Math.min(net.get(m) ?? 0, rest);
-        if (take <= 0) continue;
-        await db.cashMovements.add({
-          id: uid(), dailyRecordId: day.id, type: 'estorno', amountInCents: take, paymentMethod: m,
-          relatedOrderId: order.id, createdAt: nowIso(), description: what,
-        });
-        rest -= take;
-        if (!rest) break;
-      }
-    }
+    if (value > 0) await refund(order, value, day.id, what, how, s.paymentMethod);
     await db.orders.update(order.id, { totalInCents: order.totalInCents - value, itemCount: order.itemCount - quantity });
     await syncPayments(order.id);
     await audit('order', order.id, 'return_item', { saleId, variantId: s.variantId, quantity }, { dayId: day.id, cents: value });
@@ -275,8 +359,9 @@ export async function correctOrderPrices(orderId: string, prices: Record<string,
     if (!changes.length) return order;
     if (!isCents(total)) throw new UserError('Total inválido.');
     const net = await orderCashByMethod(orderId);
-    const received = [...net.values()].reduce((a, b) => a + b, 0);
-    let diff = total - received;
+    // o que ela já pagou (dinheiro + vale); no fiado, aumentar o valor só aumenta o que ela deve
+    const received = (await paidOf(orderId)).paid;
+    let diff = order.fiado ? Math.min(0, total - received) : total - received;
     const now = nowIso();
     const add = (type: CashMovement['type'], amount: number, method: PaymentMethod) => db.cashMovements.add({
       id: uid(), dailyRecordId: order.dailyRecordId, type, amountInCents: amount, paymentMethod: method,
@@ -305,6 +390,8 @@ export async function correctOrderPrices(orderId: string, prices: Record<string,
       const take = Math.min(net.get(m) ?? 0, -diff);
       if (take > 0) { await add('estorno', take, m); diff += take; }
     }
+    // pagou com vale e o valor baixou além do dinheiro: a diferença volta como vale
+    if (diff < 0) await addCredit(order.customer, -diff, order.dailyRecordId, orderId, 'Correção de valor');
     await db.orders.update(orderId, { totalInCents: total });
     // pagamento dividido: as formas passam a ser o que ficou no caixa (antes o Pix conferido olhava o valor antigo)
     if (order.payments?.length) await syncPayments(orderId);
@@ -315,8 +402,15 @@ export async function correctOrderPrices(orderId: string, prices: Record<string,
 
 // ---------------- reservas ----------------
 
-export async function createReservation(p: { dailyRecordId: string; variantId: string; quantity: number; customer?: string; notes?: string }) {
+export async function createReservation(p: {
+  dailyRecordId: string; variantId: string; quantity: number; customer?: string; notes?: string;
+  /** 'condicional' = levou para provar em casa (precisa do nome e do prazo) */
+  kind?: 'reserva' | 'condicional'; dueDate?: string | null;
+}) {
   if (!isQty(p.quantity)) throw new UserError('Quantidade inválida.');
+  const cond = p.kind === 'condicional';
+  if (cond && !p.customer?.trim()) throw new UserError('Condicional precisa do nome da cliente.');
+  if (cond && (!p.dueDate || !/^\d{4}-\d{2}-\d{2}$/.test(p.dueDate))) throw new UserError('Diga até quando ela devolve ou paga.');
   return db.transaction('rw', SALE_TABLES(), async () => {
     const day = await assertOpen(p.dailyRecordId);
     const pv = await assertLiveVariant(p.variantId);
@@ -329,13 +423,14 @@ export async function createReservation(p: { dailyRecordId: string; variantId: s
     const r: Reservation = {
       id: uid(), dailyRecordId: day.id, date: day.date, variantId: p.variantId, quantity: p.quantity,
       customer: p.customer?.trim().slice(0, 80) || undefined, notes: p.notes?.slice(0, 200), status: 'active', createdAt: now, updatedAt: now,
+      ...(cond ? { kind: 'condicional' as const, dueDate: p.dueDate } : {}),
     };
     await db.reservations.add({ ...r, by: actor() });
     // registro informativo: reserva não muda o estoque físico (quantity 0)
     await db.stockMovements.add({
       id: uid(), dailyRecordId: day.id, variantId: p.variantId, type: 'reserva', quantity: 0,
       previousBalance: item.currentQuantity, newBalance: item.currentQuantity, createdAt: now,
-      description: `Reserva de ${p.quantity}${r.customer ? ' — ' + r.customer : ''}`,
+      description: `${cond ? 'Condicional (levou para provar)' : 'Reserva'} de ${p.quantity}${r.customer ? ' — ' + r.customer : ''}`,
     });
     return r;
   });
@@ -362,12 +457,51 @@ export async function cancelReservation(id: string, dailyRecordId?: string) {
 
 export async function convertReservation(p: {
   reservationId: string; dailyRecordId: string; unitPriceInCents: number | null; paymentMethod: PaymentMethod; orderId: string;
+  /** condicional: quantas ela ficou (as outras voltam para a venda). Sem = todas. */
+  quantity?: number;
+  fiado?: boolean;
 }) {
-  const r = await db.reservations.get(p.reservationId);
-  if (!r || r.status !== 'active') throw new UserError('Reserva não está ativa.');
-  return createOrder({
-    orderId: p.orderId, dailyRecordId: p.dailyRecordId, paymentMethod: p.paymentMethod, customer: r.customer,
-    lines: [{ variantId: r.variantId, quantity: r.quantity, unitPriceInCents: p.unitPriceInCents, reservationId: r.id }],
+  return db.transaction('rw', SALE_TABLES(), async () => {
+    const r = await db.reservations.get(p.reservationId);
+    if (!r || r.status !== 'active') throw new UserError('Reserva não está ativa.');
+    const q = p.quantity ?? r.quantity;
+    if (!Number.isInteger(q) || q < 1 || q > r.quantity) throw new UserError('Quantidade inválida.');
+    if ((await db.orders.get(p.orderId))) return (await db.orders.get(p.orderId))!;
+    if (q < r.quantity) {
+      // ficou com parte: as outras voltam para a venda (registrado nos movimentos do dia)
+      await db.reservations.update(r.id, { quantity: q, updatedAt: nowIso() });
+      const item = await ensureItem(p.dailyRecordId, r.variantId);
+      await db.stockMovements.add({
+        id: uid(), dailyRecordId: p.dailyRecordId, variantId: r.variantId, type: 'reserva', quantity: 0,
+        previousBalance: item.currentQuantity, newBalance: item.currentQuantity, createdAt: nowIso(),
+        description: `${r.kind === 'condicional' ? 'Condicional' : 'Reserva'}${r.customer ? ' — ' + r.customer : ''}: ficou ${q}, ${r.quantity - q} ${r.quantity - q === 1 ? 'voltou' : 'voltaram'} à venda`,
+      });
+    }
+    return createOrder({
+      orderId: p.orderId, dailyRecordId: p.dailyRecordId, paymentMethod: p.paymentMethod, customer: r.customer, fiado: p.fiado,
+      lines: [{ variantId: r.variantId, quantity: q, unitPriceInCents: p.unitPriceInCents, reservationId: r.id }],
+    });
+  });
+}
+
+/**
+ * Fiado pago: a cliente pagou o que devia. Entra TUDO no caixa de hoje, na forma escolhida (sem pagamento em partes).
+ * Tocar de novo não recebe duas vezes (depois de pago, não deve mais nada).
+ */
+export async function receiveFiado(orderId: string, dailyRecordId: string, method: PaymentMethod) {
+  return db.transaction('rw', SALE_TABLES(), async () => {
+    const day = await assertOpen(dailyRecordId);
+    const o = await db.orders.get(orderId);
+    if (!o || !o.fiado || o.status !== 'ok') throw new UserError('Fiado não encontrado.');
+    if (!PAYMENTS.includes(method)) throw new UserError('Forma de pagamento inválida.');
+    const owed = await owedOf(o);
+    if (owed <= 0) return 0;
+    await db.cashMovements.add({
+      id: uid(), dailyRecordId: day.id, type: 'venda', amountInCents: owed, paymentMethod: method, relatedOrderId: o.id,
+      createdAt: nowIso(), description: `Fiado pago${o.customer ? ' — ' + o.customer : ''}`,
+    });
+    await audit('order', o.id, 'fiado_paid', null, { cents: owed, method, dayId: day.id });
+    return owed;
   });
 }
 
@@ -413,16 +547,17 @@ export async function swapSaleItem(saleId: string, newVariantId: string, quantit
 }
 
 /** Quanto da venda foi no Pix (0 = não tem Pix). */
-export function pixAmountOf(o: Pick<Order, 'paymentMethod' | 'payments' | 'totalInCents'>) {
+export function pixAmountOf(o: Pick<Order, 'paymentMethod' | 'payments' | 'totalInCents'> & Partial<Pick<Order, 'fiado' | 'valeInCents'>>) {
+  if (o.fiado) return 0; // fiado: o Pix (se vier) é conferido quando ela pagar
   if (o.payments?.length) return o.payments.filter((p) => p.method === 'pix').reduce((n, p) => n + p.amountInCents, 0);
-  return o.paymentMethod === 'pix' ? o.totalInCents : 0;
+  return o.paymentMethod === 'pix' ? o.totalInCents - (o.valeInCents ?? 0) : 0;
 }
 
 /**
  * Situação do Pix da venda: sem Pix · a conferir · conferido · valor mudou depois de conferido
  * (ex.: conferiu 70 e depois corrigiu para 90 → precisa conferir de novo).
  */
-export function pixStatus(o: Pick<Order, 'paymentMethod' | 'payments' | 'totalInCents' | 'status' | 'pixConfirmedAt' | 'pixConfirmedCents'>):
+export function pixStatus(o: Pick<Order, 'paymentMethod' | 'payments' | 'totalInCents' | 'status' | 'pixConfirmedAt' | 'pixConfirmedCents'> & Partial<Pick<Order, 'fiado' | 'valeInCents'>>):
   { kind: 'none' } | { kind: 'pending'; cents: number } | { kind: 'ok'; cents: number } | { kind: 'changed'; cents: number; was: number } {
   const cents = pixAmountOf(o);
   if (o.status !== 'ok' || !cents) return { kind: 'none' };

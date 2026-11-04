@@ -7,7 +7,7 @@ import { copyText, openWhatsAppApp } from './services/report';
 import { seedIfNeeded } from './db/seed';
 import { autoCloseOldDays, migrateCadastroEntries } from './services/days';
 import { setUpdateState, useUpdateState } from './lib/updateState';
-import { APP_VERSION, CHANGELOG, LATEST_CHANGE } from './lib/changelog';
+import { APP_VERSION, CHANGELOG, LATEST_CHANGE, changeKind, type ChangeEntry } from './lib/changelog';
 import { requestPersist } from './services/storage';
 import { PixSheet } from './components/Pix';
 import { useLiveQuery } from 'dexie-react-hooks';
@@ -18,6 +18,7 @@ import Home from './screens/Home';
 import Stock from './screens/Stock';
 import Sell, { CheckoutSheet } from './screens/Sell';
 import Cash from './screens/Cash';
+import { CountSheet, InsightsSheet } from './screens/Extras';
 /**
  * Tela carregada sob demanda. Se o arquivo não existir mais (o app foi atualizado com ele aberto),
  * recarrega uma vez para pegar a versão nova em vez de cair na tela de erro.
@@ -118,6 +119,8 @@ function Shell() {
         {overlay === 'config' && <SettingsSheet open onClose={close} />}
         {overlay === 'movimentos' && <MovementHistorySheet open onClose={close} />}
         {overlay === 'importar' && <ImportSheet open onClose={close} />}
+        {overlay === 'contagem' && <CountSheet open onClose={close} />}
+        {overlay === 'analise' && <InsightsSheet open onClose={close} />}
         {overlay === 'transferir' && <TransferSheet open onClose={close} />}
         {overlay === 'juntar' && <SyncSheet open onClose={close} />}
       </Suspense>
@@ -223,6 +226,8 @@ function MenuSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
       { icon: '⚡', tint: 'bg-amber-100', title: 'Mostrar meu Pix', desc: 'QR code na tela para a cliente pagar', go: () => setOverlay('pix') },
       { icon: '🗓️', tint: 'bg-indigo-100', title: 'Histórico', desc: 'Dias anteriores e comparar dias', go: () => { setTab('historico'); onClose(); } },
       { icon: '📋', tint: 'bg-lime-100', title: 'Importar mercadoria', desc: 'Colar uma lista com muitos produtos de uma vez', go: () => setOverlay('importar') },
+      { icon: '🔢', tint: 'bg-cyan-100', title: 'Contagem da loja', desc: 'Contar tudo, ver antes → depois e gravar de uma vez', go: () => setOverlay('contagem') },
+      { icon: '📊', tint: 'bg-fuchsia-100', title: 'Mais vendidas, paradas e lucro', desc: 'O que sai, o que está parado e quanto sobrou', go: () => setOverlay('analise') },
       { icon: '📜', tint: 'bg-teal-100', title: 'Histórico de movimentações', desc: 'A vida de cada peça: entradas, vendas, ajustes, quem fez', go: () => openHistory(null) },
     ] },
     { label: 'Seus dados', items: [
@@ -267,28 +272,64 @@ function MenuSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
 /** Menu › Atualizações: o que mudou em cada versão. Abrir marca como visto. */
 function ChangelogSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
   useEffect(() => { if (open) try { localStorage.setItem('changelogSeen', LATEST_CHANGE); } catch { /* ok */ } }, [open]);
+  // a mais nova vem aberta; as antigas ficam resumidas (toque para ver)
+  const [openIds, setOpenIds] = useState<Set<string>>(() => new Set([CHANGELOG[0].id]));
   if (!open) return null;
+  const toggle = (id: string) => setOpenIds((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   return (
     <Sheet open onClose={onClose} title="🆕 Atualizações" tall>
+      <div className="flex gap-2 mb-3 text-[12px]">
+        <span className="rounded-full bg-rose-50 border border-rose-200 text-rose-700 px-2.5 py-1 font-semibold">🐛 Correção = algo que estava errado</span>
+        <span className="rounded-full bg-sky-50 border border-sky-200 text-sky-700 px-2.5 py-1 font-semibold">✨ Melhoria = novo ou mais claro</span>
+      </div>
       <div className="space-y-3">
-        {CHANGELOG.map((e, i) => (
-          <Card key={e.id} className="p-3.5">
-            {/* selo e data numa linha; o título embaixo, com a largura toda (título comprido não espreme o selo) */}
-            <div className="flex items-center gap-2 mb-1">
-              {i === 0 && <span className="shrink-0 whitespace-nowrap rounded-full bg-violet-600 text-white px-2 py-0.5 text-[11px] font-bold">mais nova</span>}
-              <span className="flex-1" />
-              <span className="shrink-0 whitespace-nowrap text-[12px] text-slate-500 tabular-nums">versão {e.version} · {e.date}</span>
-            </div>
-            <div className="font-extrabold text-slate-800 leading-snug break-words mb-1.5">{e.title}</div>
-            <ul className="space-y-1">
-              {e.items.map(([icon, t], j) => (
-                <li key={j} className="flex gap-2 text-[14px] text-slate-700"><span className="shrink-0">{icon}</span><span className="min-w-0">{t}</span></li>
-              ))}
-            </ul>
-          </Card>
-        ))}
+        {CHANGELOG.map((e, i) => <ChangeCard key={e.id} e={e} newest={i === 0} open={openIds.has(e.id)} onToggle={() => toggle(e.id)} />)}
       </div>
     </Sheet>
+  );
+}
+
+/** Uma versão: cabeçalho (versão, data, título, contagem) e, aberta, as correções e as melhorias separadas. */
+function ChangeCard({ e, newest, open, onToggle }: { e: ChangeEntry; newest: boolean; open: boolean; onToggle: () => void }) {
+  const bugs = e.items.filter((it) => changeKind(it) === 'bug');
+  const news = e.items.filter((it) => changeKind(it) === 'melhoria');
+  return (
+    <Card className={`overflow-hidden ${newest ? 'ring-2 ring-violet-200' : ''}`}>
+      <button onClick={onToggle} aria-expanded={open} className="w-full text-left px-3.5 pt-3 pb-2.5 active:bg-slate-50">
+        <div className="flex items-center gap-2 mb-1">
+          <span className={`shrink-0 rounded-lg px-2 py-0.5 text-[12px] font-extrabold tabular-nums ${newest ? 'bg-violet-600 text-white' : 'bg-slate-100 text-slate-700'}`}>v{e.version}</span>
+          {newest && <span className="shrink-0 whitespace-nowrap rounded-full bg-violet-100 text-violet-700 px-2 py-0.5 text-[11px] font-bold">mais nova</span>}
+          <span className="flex-1" />
+          <span className="shrink-0 text-[12px] text-slate-500 tabular-nums">{e.date}</span>
+          <span className={`shrink-0 text-slate-400 transition ${open ? 'rotate-90' : ''}`}>›</span>
+        </div>
+        <div className="font-extrabold text-slate-800 leading-snug break-words">{e.title}</div>
+        <div className="flex flex-wrap gap-1.5 mt-1.5 text-[12px] font-semibold">
+          {bugs.length > 0 && <span className="rounded-full bg-rose-50 text-rose-700 px-2 py-0.5">🐛 {bugs.length} {bugs.length === 1 ? 'correção' : 'correções'}</span>}
+          {news.length > 0 && <span className="rounded-full bg-sky-50 text-sky-700 px-2 py-0.5">✨ {news.length} {news.length === 1 ? 'melhoria' : 'melhorias'}</span>}
+        </div>
+      </button>
+      {open && (
+        <div className="px-3.5 pb-3.5 space-y-3">
+          {bugs.length > 0 && <ChangeList title="🐛 Correções" tone="rose" items={bugs} />}
+          {news.length > 0 && <ChangeList title="✨ Melhorias" tone="sky" items={news} />}
+        </div>
+      )}
+    </Card>
+  );
+}
+
+function ChangeList({ title, tone, items }: { title: string; tone: 'rose' | 'sky'; items: ChangeEntry['items'] }) {
+  const head = tone === 'rose' ? 'text-rose-700 bg-rose-50 border-rose-100' : 'text-sky-700 bg-sky-50 border-sky-100';
+  return (
+    <section className="rounded-xl border border-slate-100 overflow-hidden">
+      <div className={`px-3 py-1.5 text-[13px] font-bold border-b ${head}`}>{title}</div>
+      <ul className="divide-y divide-slate-100">
+        {items.map(([icon, t], j) => (
+          <li key={j} className="flex gap-2.5 px-3 py-2 text-[14px] leading-snug text-slate-700"><span className="shrink-0 w-5 text-center">{icon}</span><span className="min-w-0">{t}</span></li>
+        ))}
+      </ul>
+    </section>
   );
 }
 

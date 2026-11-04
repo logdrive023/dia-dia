@@ -5,9 +5,9 @@ import { db } from '../db/db';
 import type { EntryKind, PaymentMethod, Reservation } from '../db/types';
 import { moveStock } from '../services/days';
 import { EntryReasonPicker, type IncreaseReason } from '../components/EntryReason';
-import { money, normalize, PAYMENT_EMOJI, PAYMENT_LABEL, PAYMENTS, toCents, todayStr, uid } from '../lib/util';
+import { addDays, money, normalize, PAYMENT_EMOJI, PAYMENT_LABEL, PAYMENTS, toCents, todayStr, uid } from '../lib/util';
 import { setForSale } from '../services/catalog';
-import { cancelReservation, confirmPix, convertReservation, createOrder, createReservation, pixAmountOf, type CartLine } from '../services/sales';
+import { cancelReservation, confirmPix, convertReservation, createOrder, createReservation, creditBalance, pixAmountOf, type CartLine } from '../services/sales';
 import { PixQr } from '../components/Pix';
 import { orderLine } from '../services/report';
 import { setSetting, type SellEntry } from '../services/settings';
@@ -285,18 +285,21 @@ export default function Sell() {
                 }).map((r) => (
                   <Card key={r.id} className="p-3 flex items-center gap-2">
                     <div className="flex-1 min-w-0">
-                      <div className="font-semibold text-slate-800 break-words">{r.quantity}× {names.get(r.variantId)}</div>
-                      <div className="text-xs text-slate-500 break-words">{r.customer || <span className="font-semibold text-orange-700">Sem nome</span>}{r.notes ? ` · ${r.notes}` : ''} · desde {r.date.slice(8)}/{r.date.slice(5, 7)}</div>
-                      {/* reserva esquecida prende peça sem ninguém perceber (caso real: reservas de 02/11 ainda ativas dias depois) */}
-                      {daysAgo(r.date) >= 3 && <div className="mt-1 inline-block rounded-full bg-orange-100 text-orange-800 px-2 py-0.5 text-[11px] font-bold">⏳ há {daysAgo(r.date)} dias · ainda vale? Venda ou cancele</div>}
+                      <div className="font-semibold text-slate-800 break-words">{r.kind === 'condicional' && <span className="mr-1 rounded-full bg-pink-100 text-pink-800 px-1.5 py-0.5 text-[11px] font-bold align-middle">👜 condicional</span>}{r.quantity}× {names.get(r.variantId)}</div>
+                      <div className="text-xs text-slate-500 break-words">{r.kind === 'condicional' ? 'na casa de ' : ''}{r.customer || <span className="font-semibold text-orange-700">Sem nome</span>}{r.notes ? ` · ${r.notes}` : ''} · desde {r.date.slice(8)}/{r.date.slice(5, 7)}{r.dueDate ? ` · até ${r.dueDate.slice(8)}/${r.dueDate.slice(5, 7)}` : ''}</div>
+                      {/* condicional vencida / reserva esquecida prende peça sem ninguém perceber */}
+                      {r.kind === 'condicional' && r.dueDate && r.dueDate < todayStr()
+                        ? <div className="mt-1 inline-block rounded-full bg-red-100 text-red-800 px-2 py-0.5 text-[11px] font-bold">⏰ passou do prazo · ficou ou voltou?</div>
+                        : r.kind !== 'condicional' && daysAgo(r.date) >= 3 && <div className="mt-1 inline-block rounded-full bg-orange-100 text-orange-800 px-2 py-0.5 text-[11px] font-bold">⏳ há {daysAgo(r.date)} dias · ainda vale? Venda ou cancele</div>}
                     </div>
                     {!locked && (
                       <>
                         <Button size="sm" variant="soft" onClick={async () => {
-                          if (await confirm({ title: 'Cancelar reserva?', message: 'As peças voltam a ficar disponíveis.', confirm: 'Cancelar reserva', tone: 'danger' }))
-                            run(() => cancelReservation(r.id, day?.id), 'Reserva cancelada');
-                        }}>Cancelar</Button>
-                        <Button size="sm" variant="success" onClick={() => setConvert(r)}>Vender</Button>
+                          const cond = r.kind === 'condicional';
+                          if (await confirm({ title: cond ? 'As peças voltaram?' : 'Cancelar reserva?', message: cond ? 'Voltam a ficar à venda. O estoque não muda (elas sempre foram da loja).' : 'As peças voltam a ficar disponíveis.', confirm: cond ? 'Voltaram' : 'Cancelar reserva', tone: cond ? 'primary' : 'danger' }))
+                            run(() => cancelReservation(r.id, day?.id), cond ? 'Voltaram à venda' : 'Reserva cancelada');
+                        }}>{r.kind === 'condicional' ? 'Voltou' : 'Cancelar'}</Button>
+                        <Button size="sm" variant="success" onClick={() => setConvert(r)}>{r.kind === 'condicional' ? 'Ficou' : 'Vender'}</Button>
                       </>
                     )}
                   </Card>
@@ -404,15 +407,30 @@ function ReserveSheet({ row, onClose }: { row: StockRow | null; onClose: () => v
   const [qty, setQty] = useState(1);
   const [customer, setCustomer] = useState('');
   const [notes, setNotes] = useState('');
+  // condicional = a cliente levou para provar em casa (volta ou paga até a data)
+  const [cond, setCond] = useState(false);
+  const [due, setDue] = useState(() => addDays(todayStr(), 2));
   if (!row) return null;
   const who = customer.trim();
   return (
-    <Sheet open onClose={onClose} title="📌 Guardar para uma cliente"
-      footer={<Button className="w-full !bg-purple-600" size="lg" disabled={busy} onClick={() => wrap(async () => {
-        const r = await run(() => createReservation({ dailyRecordId: row.item.dailyRecordId, variantId: row.variant.id, quantity: qty, customer, notes }),
-          `Reservado${who ? ' para ' + who : ''}`);
-        if (r) { setQty(1); setCustomer(''); setNotes(''); onClose(); }
-      })}>📌 Reservar {qty} {qty === 1 ? 'peça' : 'peças'}{who ? ` para ${who}` : ''}</Button>}>
+    <Sheet open onClose={onClose} title={cond ? '👜 Levou para provar (condicional)' : '📌 Guardar para uma cliente'}
+      footer={<Button className={`w-full ${cond ? '!bg-pink-600' : '!bg-purple-600'}`} size="lg" disabled={busy} onClick={() => wrap(async () => {
+        const r = await run(() => createReservation({ dailyRecordId: row.item.dailyRecordId, variantId: row.variant.id, quantity: qty, customer, notes, ...(cond ? { kind: 'condicional' as const, dueDate: due } : {}) }),
+          cond ? `👜 ${who} levou ${qty} para provar` : `Reservado${who ? ' para ' + who : ''}`);
+        if (r) { setQty(1); setCustomer(''); setNotes(''); setCond(false); onClose(); }
+      })}>{cond ? `👜 ${qty} ${qty === 1 ? 'peça' : 'peças'} para ${who || '…'} provar` : `📌 Reservar ${qty} ${qty === 1 ? 'peça' : 'peças'}${who ? ` para ${who}` : ''}`}</Button>}>
+      <div className="grid grid-cols-2 gap-2 mb-3">
+        <button onClick={() => setCond(false)} className={`min-h-12 rounded-xl border-2 text-[13px] font-bold ${!cond ? 'border-purple-600 bg-purple-50 text-purple-800' : 'border-slate-200 text-slate-600'}`}>📌 Separar<span className="block text-[11px] font-medium">fica na loja</span></button>
+        <button onClick={() => setCond(true)} className={`min-h-12 rounded-xl border-2 text-[13px] font-bold ${cond ? 'border-pink-600 bg-pink-50 text-pink-800' : 'border-slate-200 text-slate-600'}`}>👜 Levou para provar<span className="block text-[11px] font-medium">condicional</span></button>
+      </div>
+      {cond && (
+        <div className="rounded-xl bg-pink-50 border border-pink-200 px-3 py-2.5 mb-3 text-[13px] text-pink-900">
+          A peça sai da venda, mas <b>continua sendo da loja</b> (conta no estoque). Quando ela decidir: <b>Ficou</b> vira venda; <b>Voltou</b> volta à venda.
+          <label className="flex items-center gap-2 mt-2 font-semibold">Devolve ou paga até
+            <input type="date" value={due} min={todayStr()} onChange={(e) => setDue(e.target.value)} className="h-10 px-2 rounded-lg border border-pink-300 bg-white" />
+          </label>
+        </div>
+      )}
       <div className="flex items-center gap-3 mb-3">
         <Swatch color={row.variant.color} size={30} />
         <div className="flex-1">
@@ -519,6 +537,10 @@ export function CheckoutSheet({ open, onClose }: { open: boolean; onClose: () =>
   const [customer, setCustomer] = useState('');
   // cada peça com a sua forma de pagamento (ex.: uma no Pix, outra no dinheiro)
   const [perLine, setPerLine] = useState(false);
+  // fiado = sim ou não (paga depois); vale = usar o crédito que a cliente tem
+  const [fiado, setFiado] = useState(false);
+  const [useVale, setUseVale] = useState(false);
+  const valeBalance = useLiveQuery(() => creditBalance(customer), [customer]) ?? 0;
   const quick = useRecentPrices();
   useEffect(() => { if (open) setPayment(settings.defaultPayment); }, [open, settings.defaultPayment]);
   const info = useLiveQuery(async () => {
@@ -552,16 +574,18 @@ export function CheckoutSheet({ open, onClose }: { open: boolean; onClose: () =>
   const update = (i: number, patch: Partial<(typeof cart)[number]>) =>
     setCart(cart.map((l, j) => (j === i ? { ...l, ...patch } : l)).filter((l) => l.quantity > 0));
 
+  const vale = useVale && !fiado && !perLine ? Math.min(valeBalance, total) : 0;
   const confirm = () => wrap(async () => {
     if (missingPrice && !(await ask({ title: 'Vender sem preço?', tone: 'warning', confirm: 'Vender sem preço',
       message: 'As peças sem preço saem do estoque, mas não entram no caixa nem no relatório de vendas.' }))) return;
-    const o = await run(() => createOrder({ orderId: cartId, dailyRecordId: day.id, lines, paymentMethod: payment, customer }));
+    const o = await run(() => createOrder({ orderId: cartId, dailyRecordId: day.id, lines, paymentMethod: payment, customer, fiado: fiado && !perLine, valeInCents: vale || undefined }));
     if (o) {
       const pix = pixAmountOf(o);
-      if (pix > 0) toast(`⚡ Venda salva · Pix de ${money(pix)}: já caiu?`, 'info',
+      if (o.fiado) toast(`📒 Fiado de ${customer.trim()}: ${money(o.totalInCents)} (entra no caixa quando pagar)`);
+      else if (pix > 0) toast(`⚡ Venda salva · Pix de ${money(pix)}: já caiu?`, 'info',
         { label: '✅ Caiu', fn: () => run(() => confirmPix(o.id), `✅ Pix de ${money(pix)} confirmado`) });
-      else toast(`Venda: ${orderLine(lines, o.totalInCents, o.paymentMethod, o.payments)}`);
-      setPerLine(false);
+      else toast(`Venda: ${orderLine(lines, o.totalInCents, o.paymentMethod, o.payments)}${vale ? ` · 🎟️ vale ${money(vale)}` : ''}`);
+      setPerLine(false); setFiado(false); setUseVale(false);
       resetCart(); setCustomer(''); onClose();
     }
   });
@@ -570,7 +594,7 @@ export function CheckoutSheet({ open, onClose }: { open: boolean; onClose: () =>
     <Sheet open onClose={onClose} title="Fechar venda" tall
       footer={
         <Button variant="success" size="lg" className="w-full text-lg" disabled={!cart.length || busy} onClick={confirm}>
-          ✔ Confirmar · {pieces} {pieces === 1 ? 'peça' : 'peças'} · {money(total, settings.currencySymbol)}
+          ✔ {fiado && !perLine ? '📒 Fiado' : 'Confirmar'} · {pieces} {pieces === 1 ? 'peça' : 'peças'} · {money(total, settings.currencySymbol)}{vale ? ` (vale ${money(vale)})` : ''}
         </Button>
       }>
       {!cart.length && <Empty icon="🛒" title="Carrinho vazio">Toque em “+” nas peças para adicionar.</Empty>}
@@ -626,19 +650,33 @@ export function CheckoutSheet({ open, onClose }: { open: boolean; onClose: () =>
       {missingPrice && <p className="text-xs text-orange-600 mt-2">Peças sem preço contam no estoque, mas não somam no caixa.</p>}
 
       <div className="mt-4 mb-2 font-semibold text-slate-700">Como pagou?</div>
-      {pieces > 1 && settings.paymentMethods.length > 1 && (
+      {/* fiado: sim ou não. Ligado = ela leva e paga depois (nada entra no caixa agora) */}
+      {!perLine && (
+        <Card className="px-3 mb-2">
+          <Toggle checked={fiado} onChange={(on) => { setFiado(on); if (on) setUseVale(false); }} label="📒 Fiado (vai pagar depois)" />
+          {fiado && <p className="text-[12px] text-slate-500 pb-2 -mt-1">Precisa do nome da cliente. O valor entra no caixa no dia em que ela pagar (Caixa › Fiado › Pagou).</p>}
+        </Card>
+      )}
+      {!fiado && pieces > 1 && settings.paymentMethods.length > 1 && (
         <Card className="px-3 mb-2">
           <Toggle checked={!perLine} onChange={(one) => setMode(!one)} label="Pagou tudo numa forma só" />
         </Card>
       )}
-      {perLine ? (
+      {fiado && !perLine ? null : perLine ? (
         <p className="text-[13px] text-slate-600 px-1">👆 Escolha a forma em cada peça acima. O resumo abaixo soma por forma.</p>
       ) : (
         <PaymentPicker value={payment} onChange={setPayment} />
       )}
       {/* escolheu Pix: o QR code já fica na tela para a cliente pagar */}
-      {pixTotal > 0 && <div className="mt-3"><PixQr amount={pixTotal} compact /></div>}
-      <div className="mt-4"><Field label="Cliente (opcional)"><Input value={customer} onChange={(e) => setCustomer(e.target.value)} placeholder="Nome" /></Field></div>
+      {!fiado && pixTotal - vale > 0 && <div className="mt-3"><PixQr amount={pixTotal - (perLine ? 0 : vale)} compact /></div>}
+      <div className="mt-4"><Field label={fiado ? 'Cliente (obrigatório no fiado)' : 'Cliente (opcional)'}><Input value={customer} onChange={(e) => setCustomer(e.target.value)} placeholder="Nome" /></Field></div>
+      {/* a cliente tem vale: dá para usar nesta compra */}
+      {!fiado && !perLine && valeBalance > 0 && (
+        <Card className="px-3 mb-2 border-emerald-200 bg-emerald-50">
+          <Toggle checked={useVale} onChange={setUseVale} label={`🎟️ Usar o vale de ${customer.trim()} (tem ${money(valeBalance)})`} />
+          {useVale && <p className="text-[12px] text-emerald-800 pb-2 -mt-1">Vale paga {money(vale)}{total - vale > 0 ? `; o resto (${money(total - vale)}) no ${PAYMENT_LABEL[payment]}` : ''}.</p>}
+        </Card>
+      )}
       {cart.length > 0 && (
         <SaleSummary total={total} pieces={pieces}
           rows={PAYMENTS.map((m) => {
@@ -658,18 +696,34 @@ function ConvertSheet({ reservation, name, onClose }: { reservation: Reservation
   const [price, setPrice] = useState<number | null>(null);
   const [payment, setPayment] = useState<PaymentMethod>(settings.defaultPayment);
   const [orderId] = useState(uid);
+  const [kept, setKept] = useState<number | null>(null);
+  const [fiado, setFiado] = useState(false);
   const quick = useRecentPrices();
   if (!reservation || !day) return null;
+  const cond = reservation.kind === 'condicional';
+  const q = kept ?? reservation.quantity;
   return (
-    <Sheet open onClose={onClose} title="Converter reserva em venda"
+    <Sheet open onClose={onClose} title={cond ? '👜 Ficou com as peças' : 'Converter reserva em venda'}
       footer={<Button variant="success" size="lg" className="w-full" disabled={busy} onClick={() => wrap(async () => {
-        const o = await run(() => convertReservation({ reservationId: reservation.id, dailyRecordId: day.id, unitPriceInCents: price, paymentMethod: payment, orderId: orderId + reservation.id }), 'Venda registrada');
+        const o = await run(() => convertReservation({ reservationId: reservation.id, dailyRecordId: day.id, unitPriceInCents: price, paymentMethod: payment, orderId: orderId + reservation.id, quantity: q, fiado }), fiado ? '📒 Venda no fiado' : 'Venda registrada');
         if (o) onClose();
-      })}>Confirmar venda · {money((price ?? 0) * reservation.quantity)}</Button>}>
+      })}>Confirmar venda · {q} {q === 1 ? 'peça' : 'peças'} · {money((price ?? 0) * q)}</Button>}>
       <div className="font-bold text-slate-800 mb-1">{reservation.quantity}× {name}</div>
       <div className="text-sm text-slate-500 mb-3">{reservation.customer || 'Sem nome'}</div>
+      {reservation.quantity > 1 && (
+        <div className="flex items-center justify-between mb-3">
+          <span className="font-semibold text-slate-700">Quantas ficou?</span>
+          <Stepper value={q} onChange={setKept} min={1} max={reservation.quantity} />
+        </div>
+      )}
+      {q < reservation.quantity && <p className="text-[13px] text-slate-600 -mt-1 mb-3">{reservation.quantity - q} {reservation.quantity - q === 1 ? 'volta' : 'voltam'} à venda.</p>}
+      {reservation.customer && (
+        <label className="flex items-center gap-2 mb-3 text-[14px] font-semibold text-slate-700">
+          <input type="checkbox" checked={fiado} onChange={(e) => setFiado(e.target.checked)} className="w-5 h-5" /> 📒 Fiado (paga depois)
+        </label>
+      )}
       <div className="mb-4"><div className="font-semibold mb-1.5">Preço por peça</div><PriceInput cents={price} onChange={setPrice} quick={quick} /></div>
-      <PaymentPicker value={payment} onChange={setPayment} />
+      {!fiado && <PaymentPicker value={payment} onChange={setPayment} />}
     </Sheet>
   );
 }

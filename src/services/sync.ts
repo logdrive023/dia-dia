@@ -14,7 +14,7 @@
 import { REPORT_PREFS_AT } from './settings';
 import { db } from '../db/db';
 import type {
-  CashMovement, CashRecord, DailyRecord, DailyStockItem, Group, Order, Reservation, Sale, StockMovement, Variant, ImportRecord,
+  CashMovement, CashRecord, DailyRecord, DailyStockItem, Group, Order, Reservation, Sale, StockMovement, Variant, Credit, ImportRecord,
 } from '../db/types';
 import { normalize, nowIso, uid } from '../lib/util';
 import { buildBackup, summarizeBackup, validateBackup, type BackupFile } from './backup';
@@ -134,6 +134,11 @@ export async function mergeBackup(raw: unknown): Promise<MergeResult> {
     }
 
     // ---- importações (texto colado e o que mudou): entram pelo id, não duplicam
+    // vales: só acrescentam (cada registro é um fato: ganhou ou usou)
+    for (const cr of (d as unknown as { credits?: Rows<Credit> }).credits ?? []) {
+      if (await db.credits.get(cr.id)) continue;
+      await db.credits.add({ ...cr, dailyRecordId: md(cr.dailyRecordId) });
+    }
     for (const im of (d as unknown as { imports?: Rows<ImportRecord> }).imports ?? []) {
       if (await db.imports.get(im.id)) continue;
       await db.imports.add({ ...im, dailyRecordId: md(im.dailyRecordId), lines: im.lines.map((l) => ({ ...l, variantId: mv(l.variantId) })) });
