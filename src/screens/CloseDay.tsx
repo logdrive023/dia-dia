@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { fmtDate, money, PAYMENT_EMOJI, PAYMENT_LABEL, PAYMENTS, toCents } from '../lib/util';
 import { closeDay } from '../services/days';
-import { copyText, notebookReport, sendWhatsApp, shareText, splitForWhatsApp, whatsappReport, whatsappSize } from '../services/report';
+import { copyText, flowText, notebookReport, sendWhatsApp, shareText, splitForWhatsApp, whatsappReport, whatsappSize } from '../services/report';
 import { daySummary } from '../services/summary';
 import { setSetting } from '../services/settings';
 import { useApp } from '../state';
@@ -67,6 +67,8 @@ export default function CloseDaySheet({ open, onClose }: { open: boolean; onClos
             <Card className="p-2.5"><div className="text-[11px] text-slate-500">Entrou</div><div className="text-xl font-extrabold text-blue-600 tabular-nums">{s.enteredUnits}</div><div className="text-[11px] text-slate-500">peças</div></Card>
             <Card className="p-2.5"><div className="text-[11px] text-slate-500">Repor</div><div className="text-xl font-extrabold text-orange-600 tabular-nums">{s.restockUnits}</div><div className="text-[11px] text-slate-500">peças</div></Card>
           </div>
+          {/* a conta do estoque do dia, com tudo (saída sem venda e ajustes também): sempre fecha */}
+          <div className="mt-2 rounded-lg bg-slate-50 border border-slate-200 px-2.5 py-1.5 text-[12px] text-slate-700 break-words">🧮 Estoque: {flowText(s.flow)}</div>
           <div className="grid grid-cols-2 gap-1.5 mt-2">
             {PAYMENTS.filter((p) => settings.paymentMethods.includes(p) || s.cash.salesByMethod[p]).map((p) => (
               <div key={p} className="min-w-0 bg-white rounded-lg border border-slate-200 px-2.5 py-1.5 flex items-center justify-between gap-2">

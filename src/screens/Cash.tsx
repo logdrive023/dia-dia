@@ -4,7 +4,7 @@ import { db } from '../db/db';
 import type { CashMovement, CashType, PaymentMethod, Sale } from '../db/types';
 import { addDays, money, PAYMENT_EMOJI, PAYMENT_LABEL, PAYMENTS, toCents, todayStr } from '../lib/util';
 import { addCashMovement, CASH_IN, CASH_LABEL, removeCashMovement, setCountedBalance, setOpeningBalance, updateNotebookSale } from '../services/cash';
-import { activeReservedByVariant, cancelOrder, confirmPix, correctOrderPrices, pixStatus, reservationsOfOrder, swapSaleItem } from '../services/sales';
+import { activeReservedByVariant, cancelOrder, confirmPix, correctOrderPrices, pixStatus, reservationsOfOrder, returnSaleItem, swapSaleItem } from '../services/sales';
 import { cashStatement, daySummary, loadStockRows } from '../services/summary';
 import { useApp } from '../state';
 import { DayNotices, DayBar, StartDayCard } from '../components/day';
@@ -21,7 +21,7 @@ const MANUAL: { type: ManualType; label: string; icon: string; tone: string; hin
 
 export default function Cash() {
   const { day, settings } = useApp();
-  const { run, confirm } = useUi();
+  const { run, confirm, choose } = useUi();
   const [add, setAdd] = useState<ManualType | null>(null);
   const [editOpening, setEditOpening] = useState(false);
   const [fix, setFix] = useState<string | null>(null);
@@ -48,11 +48,25 @@ export default function Cash() {
   const sym = settings.currencySymbol;
 
   const cancel = async (orderId: string) => {
-    if (!(await confirm({ title: 'Cancelar esta venda?', message: 'As peças voltam ao estoque e o valor sai do caixa. Fica registrado.', confirm: 'Cancelar venda', tone: 'danger' }))) return;
+    if (!(await confirm({ title: 'Cancelar esta venda?', tone: 'danger', confirm: 'Cancelar venda',
+      message: locked
+        ? 'Esta venda é de um dia encerrado: as peças voltam ao estoque de HOJE e o valor sai do caixa de HOJE. O dia encerrado não muda. Fica registrado.'
+        : 'As peças voltam ao estoque e o valor sai do caixa. Fica registrado.' }))) return;
     const res = await reservationsOfOrder(orderId);
     const restore = res.length > 0 && await confirm({ title: 'Esta venda veio de uma reserva',
       message: `Voltar a reservar para ${res.map((r) => r.customer || 'a cliente').join(', ')}?`, confirm: 'Sim, voltar a reservar' });
     run(() => cancelOrder(orderId, { restoreReservations: restore }), 'Venda cancelada');
+  };
+
+  /** Devolver parte da venda: a peça volta ao estoque e o valor dela sai do caixa (dia encerrado: entra hoje). */
+  const devolver = async (saleId: string, name: string, max: number, cents: number | null) => {
+    const opts = Array.from({ length: Math.min(max, 10) }, (_, i) => i + 1);
+    const pick = opts.length === 1 ? '1' : await choose({ title: `Quantas ${name} voltaram?`, options: opts.map((n) => ({ value: String(n), label: `${n} ${n === 1 ? 'peça' : 'peças'}` })) });
+    if (!pick) return;
+    const n = Number(pick);
+    if (!(await confirm({ title: `Devolver ${n} ${name}?`, confirm: 'Devolver', tone: 'warning',
+      message: <>A peça volta ao estoque{cents ? <> e <b>{money(cents * n)}</b> sai do caixa</> : ''}{locked ? <> — <b>hoje</b> (o dia encerrado não muda)</> : ''}. O resto da venda continua. Fica registrado.</> }))) return;
+    run(() => returnSaleItem(saleId, n), `↩️ ${n} ${name} devolvida${n > 1 ? 's' : ''}`);
   };
 
   return (
@@ -308,15 +322,20 @@ export default function Cash() {
                                 <span className="text-slate-300">›</span>
                                 <span className="inline-flex items-center gap-1.5 text-[14px] font-semibold text-slate-800"><Swatch color={pc?.color} size={14} />{pc?.name}</span>
                               </span>
-                              <span className="shrink-0 text-[13px] font-extrabold text-slate-700 tabular-nums">×{l.quantity}</span>
+                              <span className="shrink-0 text-[13px] font-extrabold text-slate-700 tabular-nums">×{l.quantity}{l.returnedQuantity ? <span className="block text-[11px] font-semibold text-orange-700">↩️ {l.returnedQuantity} devolvida{l.returnedQuantity > 1 ? 's' : ''}</span> : null}</span>
                               <span className="shrink-0 min-w-12 text-right text-[13px] font-semibold text-slate-600 tabular-nums">{l.unitPriceInCents === null ? 'sem preço' : money(l.totalInCents)}</span>
                             </div>
                             {/* linha 2: forma de pagamento desta peça e trocar */}
-                            {(o.payByLine || (!cancelled && !locked)) && (
-                              <div className="flex items-center gap-2 mt-1.5 pl-7">
+                            {(o.payByLine || !cancelled) && (
+                              <div className="flex flex-wrap items-center justify-end gap-2 mt-1.5 pl-7">
                                 {o.payByLine && <span className="rounded-full bg-blue-50 text-blue-800 px-2 py-0.5 text-[12px] font-bold">{PAYMENT_EMOJI[l.paymentMethod]} {PAYMENT_LABEL[l.paymentMethod]}</span>}
                                 <span className="flex-1" />
-                                {!cancelled && !locked && (
+                                {/* devolver uma parte: só quando sobra peça na venda (devolver tudo = Cancelar venda) */}
+                                {!cancelled && l.quantity > 0 && o.itemCount > 1 && (
+                                  <button aria-label={`Devolver ${pc?.name ?? ''}`} onClick={() => devolver(l.id, pc?.name ?? 'peça', Math.min(l.quantity, o.itemCount - 1), l.unitPriceInCents)}
+                                    className="shrink-0 h-9 px-2.5 rounded-lg bg-white border border-orange-200 text-[12px] font-bold text-orange-700 active:bg-orange-50">↩️ Devolver</button>
+                                )}
+                                {!cancelled && !locked && l.quantity > 0 && (
                                   <button aria-label={`Trocar peça ${pc?.name ?? ''}`} onClick={() => setSwap(l)}
                                     className="shrink-0 h-9 px-2.5 rounded-lg bg-white border border-slate-200 text-[12px] font-bold text-slate-700 active:bg-slate-100">🔄 Trocar peça</button>
                                 )}
@@ -330,6 +349,11 @@ export default function Cash() {
                       <div className="grid grid-cols-2 gap-2 p-3">
                         <button className="h-10 rounded-lg bg-slate-100 text-[13px] font-semibold text-slate-700 active:bg-slate-200" onClick={() => setFix(o.id)}>✏️ Corrigir valor</button>
                         <button className="h-10 rounded-lg bg-red-50 text-[13px] font-semibold text-red-600 active:bg-red-100" onClick={() => cancel(o.id)}>✖️ Cancelar venda</button>
+                      </div>
+                    ) : !cancelled ? (
+                      /* dia encerrado: cancelar continua possível; a peça e o dinheiro voltam HOJE */
+                      <div className="p-3">
+                        <button className="w-full min-h-10 rounded-lg bg-red-50 text-[13px] font-semibold text-red-600 active:bg-red-100" onClick={() => cancel(o.id)}>✖️ Cancelar venda (volta hoje)</button>
                       </div>
                     ) : <div className="h-3" />}
                   </Card>

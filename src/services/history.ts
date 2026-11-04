@@ -101,9 +101,9 @@ export function movementEvent(m: StockMovement, date: string, undoneIds: Set<str
   const undone = undoneIds.has(m.id);
   switch (m.type) {
     case 'venda':
-      return { ...base, kind: 'venda', text: `Venda de ${n}`, origin: 'sistema', ref: m.orderId ? { type: 'venda', id: m.orderId } : undefined };
+      return { ...base, kind: 'venda', text: m.description?.startsWith('Troca') ? `Troca de peça: ${m.quantity > 0 ? 'voltou' : 'saiu'} ${n}` : `Venda de ${n}`, origin: 'sistema', ref: m.orderId ? { type: 'venda', id: m.orderId } : undefined };
     case 'cancelamento':
-      return { ...base, kind: 'cancelamento', text: `Venda cancelada: ${n} ${n === 1 ? 'voltou' : 'voltaram'}`, origin: 'sistema', ref: m.orderId ? { type: 'venda', id: m.orderId } : undefined };
+      return { ...base, kind: 'cancelamento', text: m.description?.startsWith('Devolução') ? `Devolução: ${n} ${n === 1 ? 'voltou' : 'voltaram'}` : `Venda cancelada: ${n} ${n === 1 ? 'voltou' : 'voltaram'}`, origin: 'sistema', ref: m.orderId ? { type: 'venda', id: m.orderId } : undefined };
     case 'reserva':
       return { ...base, kind: 'reserva', text: m.description || 'Reserva', origin: 'sistema', ref: { type: 'reserva', id: m.id } };
     case 'entrada': {

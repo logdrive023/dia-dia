@@ -187,6 +187,8 @@ export async function loadStockRows(dailyRecordId: string, date: string): Promis
   return rows;
 }
 
+export interface StockFlowSummary { start: number; sold: number; returned: number; entered: number; out: number; adjust: number; end: number }
+
 export interface DaySummary {
   totalUnits: number;
   initialUnits: number;
@@ -198,6 +200,15 @@ export interface DaySummary {
   sales: Sale[];
   soldByVariant: { variant: Variant; group: Group; qty: number }[];
   enteredByVariant: { variant: Variant; group: Group; qty: number }[];
+  /** saída/perda (sem venda), por cor */
+  outByVariant: { variant: Variant; group: Group; qty: number }[];
+  /** ajustes de contagem e desfazimentos (+/−), por cor */
+  adjustByVariant: { variant: Variant; group: Group; qty: number }[];
+  /**
+   * A conta do estoque do dia, só com cores ativas, sempre fechando:
+   * começou − vendidas + voltaram + entrou − saiu ± ajustes = terminou.
+   */
+  flow: StockFlowSummary;
   /** variações para repor (falta peça para o ideal, ou esgotadas) */
   restock: StockRow[];
   /** estoque de agora: todas as cores ativas (sem arquivadas/excluídas), na ordem do catálogo */
@@ -226,8 +237,24 @@ export async function daySummary(dailyRecordId: string, date: string): Promise<D
   const sold = new Map<string, number>();
   for (const s of okSales) sold.set(s.variantId, (sold.get(s.variantId) ?? 0) + s.quantity);
   const entered = new Map<string, number>();
-  let enteredUnits = 0, outUnits = 0, adjustUnits = 0;
-  for (const m of effectiveMovements(movements)) {
+  const outBy = new Map<string, number>();
+  const adjBy = new Map<string, number>();
+  let enteredUnits = 0, outUnits = 0, adjustUnits = 0, flowSold = 0, flowReturned = 0, flowEntered = 0;
+  // desfazimento de um movimento de OUTRO dia (o original não está aqui) continua contando como ajuste de hoje
+  const here = new Set(movements.map((m) => m.id));
+  const orphanUndo = movements.filter((m) => m.reversedMovementId && !here.has(m.reversedMovementId));
+  for (const m of [...effectiveMovements(movements), ...orphanUndo]) {
+    if (live(byVariant.get(m.variantId))) {
+      if (m.type === 'venda') flowSold -= m.quantity;
+      if (m.type === 'cancelamento') flowReturned += m.quantity;
+      if (m.type === 'entrada') flowEntered += m.quantity;
+      if (m.type === 'saida' || m.type === 'perda') outBy.set(m.variantId, (outBy.get(m.variantId) ?? 0) - m.quantity);
+      if (m.type === 'ajuste' || m.type === 'correcao') adjBy.set(m.variantId, (adjBy.get(m.variantId) ?? 0) + m.quantity);
+    }
+    if (m.reversedMovementId && !here.has(m.reversedMovementId)) {
+      if (live(byVariant.get(m.variantId))) adjustUnits += m.quantity;
+      continue;
+    }
     if (m.type === 'entrada' && m.description !== 'Quantidade inicial do cadastro' && live(byVariant.get(m.variantId))) {
       enteredUnits += m.quantity; entered.set(m.variantId, (entered.get(m.variantId) ?? 0) + m.quantity);
     }
@@ -250,6 +277,15 @@ export async function daySummary(dailyRecordId: string, date: string): Promise<D
     orders: okOrders, sales: okSales,
     soldByVariant: toList(sold),
     enteredByVariant: toList(entered),
+    outByVariant: toList(outBy),
+    adjustByVariant: toList(adjBy),
+    flow: {
+      start: liveRows.reduce((s, r) => s + r.item.initialQuantity, 0),
+      sold: flowSold, returned: flowReturned, entered: flowEntered,
+      out: [...outBy.values()].reduce((a, b) => a + b, 0),
+      adjust: [...adjBy.values()].reduce((a, b) => a + b, 0),
+      end: liveRows.reduce((s, r) => s + r.item.currentQuantity, 0),
+    },
     restock: rows.filter((r) => !r.variant.archivedAt && r.variant.active && !r.group.archivedAt && r.group.active && (r.restock > 0 || r.out)),
     stockNow: liveRows.filter((r) => r.variant.active && r.group.active)
       .sort((a, b) => a.group.displayOrder - b.group.displayOrder || a.variant.displayOrder - b.variant.displayOrder),
@@ -276,8 +312,18 @@ export interface SyncGap {
  * Dias são independentes: o estoque inicial é uma cópia feita quando o dia começou.
  * Se o dia anterior foi corrigido depois, isto mostra a diferença para a usuária decidir.
  */
-export async function syncGap(dailyRecordId: string): Promise<SyncGap | null> {
+export async function syncGap(dailyRecordId: string, deep = false): Promise<SyncGap | null> {
   const day = await db.dailyRecords.get(dailyRecordId);
+  if (deep && day) {
+    // olha também os dias anteriores (encerrados) até o último que começou “do zero”: a correção de anteontem
+    // não chegou em ontem → também não chegou em hoje
+    const chain = (await db.dailyRecords.orderBy('date').toArray()).filter((d) => d.date <= day.date);
+    for (let k = chain.length - 1; k > 0 && chain[k].sourceDate; k--) {
+      const g = await syncGap(chain[k].id);
+      if (g) return g;
+    }
+    return null;
+  }
   if (!day || !day.sourceDate) return null; // criado em branco: não compara
   const prev = await db.dailyRecords.where('date').below(day.date).last();
   if (!prev) return null;

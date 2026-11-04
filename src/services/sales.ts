@@ -3,7 +3,8 @@ import type { CashMovement, Order, Payment, PaymentMethod, Reservation, Sale } f
 import { isCents, isQty, MAX_QTY, nowIso, PAYMENTS, uid } from '../lib/util';
 import { audit } from './audit';
 import { UserError } from './catalog';
-import { applyStockDelta, assertOpen, ensureItem } from './days';
+import { applyStockDelta, assertLiveVariant, assertOpen, ensureItem, todayOpenDay } from './days';
+import { fmtDate } from '../lib/util';
 import { addTombstones } from './sync';
 import { actor } from '../lib/actor';
 
@@ -26,7 +27,7 @@ export async function activeReservedByVariant(date: string, exceptIds: string[] 
 }
 
 const SALE_TABLES = () => [
-  db.dailyRecords, db.dailyStockItems, db.stockMovements, db.variants, db.orders, db.sales,
+  db.dailyRecords, db.dailyStockItems, db.stockMovements, db.variants, db.groups, db.orders, db.sales,
   db.cashMovements, db.reservations, db.auditLogs, db.settings,
 ];
 
@@ -97,8 +98,8 @@ export async function createOrder(params: {
     const need = new Map<string, number>();
     for (const l of lines) need.set(l.variantId, (need.get(l.variantId) ?? 0) + l.quantity);
     for (const [variantId, qty] of need) {
-      const v = await db.variants.get(variantId);
-      if (!v) throw new UserError('Uma das peças não existe mais no cadastro.');
+      if (!(await db.variants.get(variantId))) throw new UserError('Uma das peças não existe mais no cadastro.');
+      const v = await assertLiveVariant(variantId);
       if (v.forSale === false && !lines.some((l) => l.variantId === variantId && l.reservationId))
         throw new UserError(`${v.name} está guardada (fora da venda). Coloque à venda no Estoque.`);
       const item = await ensureItem(day.id, variantId);
@@ -157,23 +158,90 @@ export async function cancelOrder(orderId: string, opts: { restoreReservations?:
     const order = await db.orders.get(orderId);
     if (!order) throw new UserError('Venda não encontrada.');
     if (order.status === 'cancelled') return;
-    await assertOpen(order.dailyRecordId);
+    const day = await returnDay(order.dailyRecordId);
+    const what = await returnLabel(order.dailyRecordId, day.id, 'Venda cancelada');
     const sales = await db.sales.where('orderId').equals(orderId).toArray();
     for (const s of sales) {
-      await applyStockDelta(order.dailyRecordId, s.variantId, s.quantity, 'cancelamento', { orderId, description: 'Venda cancelada' });
+      if (s.quantity) await applyStockDelta(day.id, s.variantId, s.quantity, 'cancelamento', { orderId, description: what });
       await db.sales.update(s.id, { status: 'cancelled' });
     }
     for (const [method, amount] of await orderCashByMethod(orderId))
       if (amount > 0)
         await db.cashMovements.add({
-          id: uid(), dailyRecordId: order.dailyRecordId, type: 'estorno', amountInCents: amount,
-          paymentMethod: method, relatedOrderId: orderId, createdAt: nowIso(), description: 'Venda cancelada',
+          id: uid(), dailyRecordId: day.id, type: 'estorno', amountInCents: amount,
+          paymentMethod: method, relatedOrderId: orderId, createdAt: nowIso(), description: what,
         });
     await db.orders.update(orderId, { status: 'cancelled' });
     if (opts.restoreReservations)
       for (const r of await db.reservations.filter((x) => x.orderId === orderId && x.status === 'converted').toArray())
         await db.reservations.update(r.id, { status: 'active', orderId: null, updatedAt: nowIso() });
     await audit('order', orderId, 'cancel', null, { restoreReservations: !!opts.restoreReservations });
+  });
+}
+
+/**
+ * Onde entra a devolução/cancelamento: no dia da venda, se ainda está aberto; senão no dia de HOJE
+ * (a peça e o dinheiro voltam hoje). O dia encerrado não muda — igual ao Desfazer movimento.
+ */
+async function returnDay(orderDayId: string) {
+  const d = await db.dailyRecords.get(orderDayId);
+  if (d && d.status === 'open') return d;
+  const today = await todayOpenDay();
+  if (!today) throw new UserError('Esta venda é de um dia encerrado. Inicie o dia de hoje: a peça e o dinheiro voltam hoje.');
+  return today;
+}
+async function returnLabel(orderDayId: string, dayId: string, base: string) {
+  if (orderDayId === dayId) return base;
+  const d = await db.dailyRecords.get(orderDayId);
+  return `${base} (venda de ${d ? fmtDate(d.date, false) : 'outro dia'})`;
+}
+
+/** `payments` da venda acompanha o que ficou no caixa por forma (depois de corrigir valor ou devolver peça). */
+async function syncPayments(orderId: string) {
+  const net = await orderCashByMethod(orderId);
+  const pays = [...net.entries()].filter(([, v]) => v > 0).map(([method, amountInCents]) => ({ method, amountInCents }));
+  await db.orders.update(orderId, { payments: pays.length > 1 ? pays : undefined });
+}
+
+/**
+ * Devolução de parte da venda (ex.: levou 3, devolveu 1): a peça volta ao estoque e o valor dela sai do caixa
+ * (na forma em que essa peça foi paga; se não der, nas outras). Venda de dia encerrado: entra hoje.
+ * Devolver tudo = Cancelar venda.
+ */
+export async function returnSaleItem(saleId: string, quantity: number) {
+  return db.transaction('rw', SALE_TABLES(), async () => {
+    const s = await db.sales.get(saleId);
+    if (!s || s.status !== 'ok') throw new UserError('Venda não encontrada.');
+    const order = await db.orders.get(s.orderId);
+    if (!order || order.status !== 'ok') throw new UserError('Venda cancelada não tem o que devolver.');
+    if (!Number.isInteger(quantity) || quantity < 1 || quantity > s.quantity) throw new UserError('Quantidade inválida para devolver.');
+    const left = (await db.sales.where('orderId').equals(order.id).toArray()).filter((l) => l.status === 'ok').reduce((n, l) => n + l.quantity, 0) - quantity;
+    if (left <= 0) throw new UserError('É a venda inteira: use “Cancelar venda”.');
+    const day = await returnDay(order.dailyRecordId);
+    const what = await returnLabel(order.dailyRecordId, day.id, `Devolução de ${quantity}`);
+    await applyStockDelta(day.id, s.variantId, quantity, 'cancelamento', { orderId: order.id, description: what });
+    const value = (s.unitPriceInCents ?? 0) * quantity;
+    await db.sales.update(s.id, {
+      quantity: s.quantity - quantity, totalInCents: (s.unitPriceInCents ?? 0) * (s.quantity - quantity),
+      returnedQuantity: (s.returnedQuantity ?? 0) + quantity,
+    });
+    if (value > 0) {
+      const net = await orderCashByMethod(order.id);
+      let rest = value;
+      for (const m of [...new Set([s.paymentMethod, order.paymentMethod, ...PAYMENTS])]) {
+        const take = Math.min(net.get(m) ?? 0, rest);
+        if (take <= 0) continue;
+        await db.cashMovements.add({
+          id: uid(), dailyRecordId: day.id, type: 'estorno', amountInCents: take, paymentMethod: m,
+          relatedOrderId: order.id, createdAt: nowIso(), description: what,
+        });
+        rest -= take;
+        if (!rest) break;
+      }
+    }
+    await db.orders.update(order.id, { totalInCents: order.totalInCents - value, itemCount: order.itemCount - quantity });
+    await syncPayments(order.id);
+    await audit('order', order.id, 'return_item', { saleId, variantId: s.variantId, quantity }, { dayId: day.id, cents: value });
   });
 }
 
@@ -238,6 +306,8 @@ export async function correctOrderPrices(orderId: string, prices: Record<string,
       if (take > 0) { await add('estorno', take, m); diff += take; }
     }
     await db.orders.update(orderId, { totalInCents: total });
+    // pagamento dividido: as formas passam a ser o que ficou no caixa (antes o Pix conferido olhava o valor antigo)
+    if (order.payments?.length) await syncPayments(orderId);
     await audit('order', orderId, 'correct_prices', order.totalInCents, { total, changes });
     return { ...order, totalInCents: total };
   });
@@ -249,8 +319,7 @@ export async function createReservation(p: { dailyRecordId: string; variantId: s
   if (!isQty(p.quantity)) throw new UserError('Quantidade inválida.');
   return db.transaction('rw', SALE_TABLES(), async () => {
     const day = await assertOpen(p.dailyRecordId);
-    const pv = await db.variants.get(p.variantId);
-    if (!pv) throw new UserError('Peça não encontrada.');
+    const pv = await assertLiveVariant(p.variantId);
     if (pv.forSale === false) throw new UserError(`${pv.name} está guardada (fora da venda). Coloque à venda no Estoque.`);
     const item = await ensureItem(day.id, p.variantId);
     const reserved = (await activeReservedByVariant(day.date)).get(p.variantId) ?? 0;
@@ -316,8 +385,9 @@ export async function swapSaleItem(saleId: string, newVariantId: string, quantit
     const qty = quantity ?? s.quantity;
     if (!Number.isInteger(qty) || qty < 1 || qty > s.quantity) throw new UserError('Quantidade inválida para trocar.');
     if (newVariantId === s.variantId) throw new UserError('Escolha uma peça diferente.');
-    const v = await db.variants.get(newVariantId);
-    if (!v || v.archivedAt) throw new UserError('Essa peça não existe mais no cadastro.');
+    if (!(await db.variants.get(newVariantId))) throw new UserError('Essa peça não existe mais no cadastro.');
+    const v = await assertLiveVariant(newVariantId);
+    if (v.forSale === false) throw new UserError(`${v.name} está guardada (fora da venda). Coloque à venda no Estoque.`);
     const item = await ensureItem(day.id, newVariantId);
     const available = item.currentQuantity - ((await activeReservedByVariant(day.date)).get(newVariantId) ?? 0);
     if (qty > available) throw new UserError(`Só há ${Math.max(0, available)} disponível de ${v.name}.`);

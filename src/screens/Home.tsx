@@ -148,6 +148,16 @@ export default function Home() {
         </div>
       )}
 
+      {!settings.userName && (
+        <button onClick={() => setOverlay('config')} className="w-full mt-3 flex items-center gap-3 rounded-2xl bg-blue-50 border border-blue-200 px-3.5 py-3 text-left active:bg-blue-100">
+          <span className="text-2xl">🙋</span>
+          <span className="flex-1 min-w-0 text-[14px] text-blue-900 leading-snug">
+            <b>Coloque seu nome</b>: cada venda e movimento passa a mostrar quem fez (importante com dois celulares). Toque aqui.
+          </span>
+          <span className="text-blue-700 font-bold">›</span>
+        </button>
+      )}
+
       {data && (
         <>
           <SectionTitle right={<button className="text-sm text-blue-600 font-semibold" onClick={() => setOverlay('cadastro')}>Editar</button>}>

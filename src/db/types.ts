@@ -163,6 +163,8 @@ export interface Sale {
   notes?: string;
   cashMovementId?: ID | null;
   status: 'ok' | 'cancelled';
+  /** peças desta linha que a cliente devolveu (a `quantity` já é o que ficou vendido) */
+  returnedQuantity?: number;
 }
 
 export type ReservationStatus = 'active' | 'cancelled' | 'converted';

@@ -401,7 +401,7 @@ export function HelpButton({ icon, label, title, children, example }: {
   return (
     <>
       <button type="button" onClick={() => setOpen(true)}
-        className="flex-1 min-w-0 h-11 px-3 rounded-xl bg-white border border-slate-200 flex items-center gap-2 text-left active:bg-slate-50">
+        className="flex-1 min-w-0 min-h-11 py-1.5 px-3 rounded-xl bg-white border border-slate-200 flex items-center gap-2 text-left active:bg-slate-50">
         <span className="text-lg">{icon}</span>
         <span className="flex-1 break-words text-[14px] font-semibold text-slate-700">{label}</span>
         <span className="w-5 h-5 rounded-full bg-slate-200 text-slate-600 text-[11px] font-bold flex items-center justify-center">i</span>

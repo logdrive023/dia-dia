@@ -308,14 +308,14 @@ function UndoStartBanner() {
 function SyncBanner() {
   const { day } = useApp();
   const { run, confirm } = useUi();
-  const gap = useLiveQuery(() => (day && day.status === 'open' ? syncGap(day.id) : Promise.resolve(null)), [day?.id, day?.status]);
+  const gap = useLiveQuery(() => (day && day.status === 'open' ? syncGap(day.id, true) : Promise.resolve(null)), [day?.id, day?.status]);
   if (!gap || !day) return null;
   return (
     <div className="flex items-center gap-2 bg-amber-50 border border-amber-200 text-amber-900 rounded-xl px-3 py-2 mb-3 text-sm">
       <span className="flex-1">⚠ {fmtDate(gap.prevDate, false)} foi alterado depois que este dia começou ({gap.units} {gap.units === 1 ? 'peça' : 'peças'} de diferença).</span>
       <button className="font-semibold underline whitespace-nowrap" onClick={async () => {
         if (await confirm({ title: 'Atualizar estoque inicial?', confirm: 'Atualizar',
-          message: `O início deste dia passa a ser o saldo final de ${fmtDate(gap.prevDate, false)}. As vendas e movimentos de hoje continuam e o saldo atual muda na mesma diferença.` }))
+          message: `A correção de ${fmtDate(gap.prevDate, false)} passa para os dias seguintes até hoje: cada dia começa com o que o anterior terminou. As vendas e movimentos de cada dia continuam e o saldo muda na mesma diferença. Cor cadastrada no dia não muda.` }))
           run(() => resyncFromPrevious(day.id), 'Estoque atualizado');
       }}>Atualizar</button>
     </div>
@@ -325,12 +325,16 @@ function SyncBanner() {
 function ClosedBanner() {
   const { day } = useApp();
   const { run, confirm } = useUi();
+  const later = useLiveQuery(() => (day ? db.dailyRecords.where('date').above(day.date).count() : Promise.resolve(0)), [day?.date]) ?? 0;
   if (day?.status !== 'closed') return null;
   return (
     <div className="flex items-center gap-2 bg-purple-50 border border-purple-200 text-purple-800 rounded-xl px-3 py-2 mb-3 text-sm">
       <span className="flex-1">🔒 Dia encerrado — só consulta.</span>
       <button className="font-semibold underline" onClick={async () => {
-        if (await confirm({ title: 'Reabrir o dia?', message: 'Você poderá alterar estoque, vendas e caixa deste dia. A reabertura fica registrada.', confirm: 'Reabrir', tone: 'warning' }))
+        if (await confirm({ title: 'Reabrir o dia?', confirm: 'Reabrir', tone: 'warning',
+          message: later
+            ? <>Já existem <b>{later} dia(s) depois deste</b>. O que você mudar aqui só chega neles tocando em <b>Atualizar</b> no dia de hoje.<br /><br />Para <b>cancelar ou devolver uma venda</b>, não precisa reabrir: no Caixa deste dia, “Cancelar venda (volta hoje)” e “Devolver” já lançam hoje. Desfazer movimento também entra hoje.</>
+            : 'Você poderá alterar estoque, vendas e caixa deste dia. A reabertura fica registrada.' }))
           run(() => reopenDay(day.id), 'Dia reaberto');
       }}>Reabrir</button>
     </div>

@@ -5,7 +5,7 @@ import { db } from '../db/db';
 import type { EntryKind, PaymentMethod, Reservation } from '../db/types';
 import { moveStock } from '../services/days';
 import { EntryReasonPicker, type IncreaseReason } from '../components/EntryReason';
-import { money, normalize, PAYMENT_EMOJI, PAYMENT_LABEL, PAYMENTS, toCents, uid } from '../lib/util';
+import { money, normalize, PAYMENT_EMOJI, PAYMENT_LABEL, PAYMENTS, toCents, todayStr, uid } from '../lib/util';
 import { setForSale } from '../services/catalog';
 import { cancelReservation, confirmPix, convertReservation, createOrder, createReservation, pixAmountOf, type CartLine } from '../services/sales';
 import { PixQr } from '../components/Pix';
@@ -228,14 +228,14 @@ export default function Sell() {
                             <button onClick={() => removeOne(r.variant.id)} aria-label={`Tirar 1 ${r.variant.name}`}
                               className="w-11 h-11 rounded-lg bg-slate-100 text-xl font-bold text-slate-700 active:scale-95">−</button>
                             <span className="w-6 text-center font-extrabold text-emerald-700 tabular-nums">{c}</span>
-                            <button disabled={left <= 0} onClick={() => addToCart(r.variant.id, r.variant.optionalPriceInCents ?? lastPrice?.get(r.group.id) ?? null)}
+                            <button disabled={left <= 0} onClick={() => addToCart(r.variant.id, r.variant.optionalPriceInCents ?? lastPrice?.get(`v:${r.variant.id}`) ?? lastPrice?.get(r.group.id) ?? null)}
                               aria-label={`Mais 1 ${r.variant.name}`} className="w-11 h-11 rounded-lg bg-blue-600 text-white text-xl font-bold disabled:opacity-30 active:scale-95">+</button>
                           </div>
                         ) : r.available > 0 ? (
                           <div className="flex items-center gap-1.5">
                             <button onClick={() => setReserveRow(r)} aria-label={`Reservar ${r.variant.name}`}
                               className="w-11 h-11 rounded-xl border border-purple-200 bg-purple-50 text-purple-700 text-lg active:bg-purple-100">📌</button>
-                            <button onClick={() => addToCart(r.variant.id, r.variant.optionalPriceInCents ?? lastPrice?.get(r.group.id) ?? null)}
+                            <button onClick={() => addToCart(r.variant.id, r.variant.optionalPriceInCents ?? lastPrice?.get(`v:${r.variant.id}`) ?? lastPrice?.get(r.group.id) ?? null)}
                               aria-label={`Vender ${r.variant.name}`}
                               className="h-11 px-3.5 rounded-xl bg-blue-600 text-white text-[15px] font-bold shadow-sm shadow-blue-600/30 active:scale-95 transition">+ Vender</button>
                           </div>
@@ -286,7 +286,9 @@ export default function Sell() {
                   <Card key={r.id} className="p-3 flex items-center gap-2">
                     <div className="flex-1 min-w-0">
                       <div className="font-semibold text-slate-800 break-words">{r.quantity}× {names.get(r.variantId)}</div>
-                      <div className="text-xs text-slate-500 break-words">{r.customer || 'Sem nome'}{r.notes ? ` · ${r.notes}` : ''} · desde {r.date.slice(8)}/{r.date.slice(5, 7)}</div>
+                      <div className="text-xs text-slate-500 break-words">{r.customer || <span className="font-semibold text-orange-700">Sem nome</span>}{r.notes ? ` · ${r.notes}` : ''} · desde {r.date.slice(8)}/{r.date.slice(5, 7)}</div>
+                      {/* reserva esquecida prende peça sem ninguém perceber (caso real: reservas de 02/11 ainda ativas dias depois) */}
+                      {daysAgo(r.date) >= 3 && <div className="mt-1 inline-block rounded-full bg-orange-100 text-orange-800 px-2 py-0.5 text-[11px] font-bold">⏳ há {daysAgo(r.date)} dias · ainda vale? Venda ou cancele</div>}
                     </div>
                     {!locked && (
                       <>
@@ -458,14 +460,22 @@ function PaymentPicker({ value, onChange }: { value: PaymentMethod; onChange: (p
 }
 
 /** Último preço vendido em cada grupo (para já vir preenchido na próxima venda). */
+/** Dias desde a data (aaaa-mm-dd) até hoje. */
+function daysAgo(date: string) {
+  return Math.round((new Date(`${todayStr()}T12:00:00`).getTime() - new Date(`${date}T12:00:00`).getTime()) / 86400000);
+}
+
 function useLastPriceByGroup() {
   return useLiveQuery(async () => {
     const [sales, variants] = await Promise.all([db.sales.orderBy('createdAt').reverse().limit(300).toArray(), db.variants.toArray()]);
     const group = new Map(variants.map((v) => [v.id, v.groupId]));
     const out = new Map<string, number>();
+    // chave `v:<cor>` = último preço desta cor; chave do grupo = último do grupo (só quando a cor nunca foi vendida)
     for (const s of sales) {
       const g = group.get(s.variantId);
-      if (g && s.status === 'ok' && s.unitPriceInCents && !out.has(g)) out.set(g, s.unitPriceInCents);
+      if (!(g && s.status === 'ok' && s.unitPriceInCents)) continue;
+      if (!out.has(`v:${s.variantId}`)) out.set(`v:${s.variantId}`, s.unitPriceInCents);
+      if (!out.has(g)) out.set(g, s.unitPriceInCents);
     }
     return out;
   }, []);

@@ -72,10 +72,11 @@ export async function runDiagnostics(): Promise<{ findings: Finding[]; checked: 
         detail: `No caixa ${money(net)}, deveria ser ${money(expected)}.` });
     if (o.payments && o.payments.reduce((s, p) => s + p.amountInCents, 0) !== o.totalInCents && !cm.some((c) => c.description === 'Correção de valor'))
       f.push({ level: 'erro', title: `Pagamento dividido não soma o total (${when})` });
-    // baixa no estoque exatamente uma vez por peça
+    // baixa no estoque exatamente uma vez por peça: saiu − voltou (devolução/cancelamento) = o que ficou vendido
     const sold = moves.filter((m) => m.orderId === o.id && m.type === 'venda').reduce((s, m) => s - m.quantity, 0);
-    const qty = ls.reduce((s, l) => s + l.quantity, 0);
-    if (sold !== qty) f.push({ level: 'erro', title: `Baixa no estoque não bate com a venda (${when})`, detail: `Vendeu ${qty}, baixou ${sold}.` });
+    const back = moves.filter((m) => m.orderId === o.id && m.type === 'cancelamento').reduce((s, m) => s + m.quantity, 0);
+    const qty = o.status === 'ok' ? ls.reduce((s, l) => s + l.quantity, 0) : 0;
+    if (sold - back !== qty) f.push({ level: 'erro', title: `Baixa no estoque não bate com a venda (${when})`, detail: `Ficou vendido ${qty}, o estoque baixou ${sold - back}.` });
   }
 
   // caixa

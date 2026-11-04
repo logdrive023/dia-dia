@@ -75,9 +75,12 @@ export async function mergeBackup(raw: unknown): Promise<MergeResult> {
     for (const v of d.variants) {
       if (tomb.has(v.id)) continue;
       const groupId = gMap.get(v.groupId) ?? v.groupId;
+      const sameName = (x: typeof v) => x.groupId === groupId && normalize(x.name) === normalize(v.name) && (x.size ?? null) === (v.size ?? null);
+      const old = !!(v.archivedAt || v.deletedAt);
       const same = localVariants.find((x) => x.id === v.id)
-        ?? localVariants.find((x) => x.groupId === groupId && normalize(x.name) === normalize(v.name) && !x.archivedAt)
-        ?? localVariants.find((x) => x.groupId === groupId && normalize(x.name) === normalize(v.name));
+        ?? localVariants.find((x) => sameName(x) && !!(x.archivedAt || x.deletedAt) === old)
+        // cor ativa de lá casa com a ativa daqui; cor ANTIGA de lá nunca entra na ativa daqui (vira cor antiga aqui também)
+        ?? (old ? undefined : localVariants.find((x) => sameName(x)));
       if (same) { vMap.set(v.id, same.id); continue; }
       const nv = { ...v, groupId };
       await db.variants.add(nv); localVariants.push(nv); vMap.set(v.id, v.id); res.variants++;

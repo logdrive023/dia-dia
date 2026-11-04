@@ -1,6 +1,6 @@
 import type { PaymentMethod } from '../db/types';
 import { fmtDate, money, PAYMENT_LABEL } from '../lib/util';
-import { cashStatement, type DaySummary } from './summary';
+import { cashStatement, type DaySummary, type StockFlowSummary } from './summary';
 import { setPendingParts } from '../lib/pendingParts';
 import { variantLabel } from './catalog';
 
@@ -151,6 +151,16 @@ export function whatsappReport(date: string, s: DaySummary, opts: Opts = {}) {
   if (s.enteredByVariant.length) L.push(...byGroup(s.enteredByVariant, (x) => `Cor ${variantLabel(x.variant)}: +${x.qty}`, div));
   else L.push('• Nenhuma peça');
 
+  // saiu sem ser venda (saída/perda) e ajustes de contagem: sem isto a conta “começou → terminou” não fechava para quem lê
+  if (s.outByVariant.length) {
+    section(`📤 *Saiu sem ser venda (${plural(s.flow.out, 'peça', 'peças')})*`);
+    L.push(...byGroup(s.outByVariant, (x) => `Cor ${variantLabel(x.variant)}: −${x.qty}`, div));
+  }
+  if (s.adjustByVariant.length) {
+    section(`✏️ *Ajustes de contagem (${signed(s.flow.adjust)})*`);
+    L.push(...byGroup(s.adjustByVariant, (x) => `Cor ${variantLabel(x.variant)}: ${signed(x.qty)}`, div));
+  }
+
   // repor
   const toRestock = s.restock.filter((r) => r.restock > 0);
   // esgotados: todos com 0 peças (o mesmo número do Início), mesmo os que também estão em “repor”
@@ -178,9 +188,26 @@ export function whatsappReport(date: string, s: DaySummary, opts: Opts = {}) {
     section('🧾 *Totais*');
     L.push(`📦 Total no estoque: *${plural(s.totalUnits, 'peça', 'peças')}*`);
     L.push(`🔁 Total para repor: *${plural(s.restockUnits, 'peça', 'peças')}*`);
+    L.push(`🧮 ${flowText(s.flow)}`);
     L.push(`🌅 Começo do dia ${s.initialUnits} → 🌙 final ${s.totalUnits} = *${diff > 0 ? '+' : diff < 0 ? '−' : ''}${Math.abs(diff)}*`);
   }
   return L.join('\n');
+}
+
+const signed = (n: number) => `${n > 0 ? '+' : n < 0 ? '−' : ''}${Math.abs(n)}`;
+
+/**
+ * A conta do estoque em uma linha, só com o que aconteceu (sempre fecha):
+ * “começou 446 − vendeu 8 + entrou 32 − saiu 13 − ajustes 5 = terminou 452”.
+ */
+export function flowText(f: StockFlowSummary) {
+  const parts = [`começou ${f.start}`];
+  if (f.sold) parts.push(`${f.sold > 0 ? '−' : '+'} vendeu ${Math.abs(f.sold)}`);
+  if (f.returned) parts.push(`${f.returned > 0 ? '+' : '−'} voltou ${Math.abs(f.returned)}`);
+  if (f.entered) parts.push(`${f.entered > 0 ? '+' : '−'} entrou ${Math.abs(f.entered)}`);
+  if (f.out) parts.push(`${f.out > 0 ? '−' : '+'} saiu sem venda ${Math.abs(f.out)}`);
+  if (f.adjust) parts.push(`${f.adjust > 0 ? '+' : '−'} ajustes ${Math.abs(f.adjust)}`);
+  return `${parts.join(' ')} = terminou ${f.end}`;
 }
 
 /** Aviso ao lado da cor no “Estoque agora”: esgotado só com 0 peças; peça reservada aparece como reservada. */

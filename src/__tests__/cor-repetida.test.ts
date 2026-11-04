@@ -56,9 +56,10 @@ describe('cor antiga repetida (Poa 7 + Poa 7)', () => {
     expect((await runDiagnostics()).findings.filter((f) => f.level === 'erro')).toEqual([]);
   });
 
-  it('“−” na cor antiga (como foi feito à mão no dia 04) também não infla o “saiu” do relatório', async () => {
+  it('cor antiga não recebe + nem − (nem venda): só “Resolver” mexe nela', async () => {
     const { old, d2 } = await setup();
-    for (let i = 0; i < 7; i++) await moveStock(d2.id, old.id, -1, 'saida');
+    await expect(moveStock(d2.id, old.id, -1, 'saida')).rejects.toThrow('cor antiga');
+    await expect(moveStock(d2.id, old.id, 1, 'entrada')).rejects.toThrow('cor antiga');
     expect((await daySummary(d2.id, d2.date)).outUnits).toBe(0);
   });
 
@@ -77,12 +78,13 @@ describe('cor antiga repetida (Poa 7 + Poa 7)', () => {
     await expect(settleRetiredStock(d2.id, old.id, old.id)).rejects.toThrow('cor ativa');
   });
 
-  it('cor excluída com saldo não passa para o dia seguinte', async () => {
+  it('cor excluída com peças passa para o dia seguinte como cor antiga (fora do total), nunca some sem registro', async () => {
     const { g, old, d2 } = await setup();
     await deleteVariant(old.id);
     await db.dailyRecords.update(d2.id, { status: 'closed' });
     const d3 = await startDay('2026-11-04');
     const rows = await camisa(d3.id, d3.date, g.id);
-    expect(rows.map((r) => [r.variant.name, r.item.currentQuantity])).toEqual([['Poa', 7]]);
+    expect(rows.map((r) => [r.variant.name, r.item.currentQuantity, isOldRow(r)])).toEqual([['Poa', 7, true], ['Poa', 7, false]]);
+    expect(rows.filter((r) => !isOldRow(r)).reduce((s, r) => s + r.item.currentQuantity, 0)).toBe(7);
   });
 });

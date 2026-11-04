@@ -76,12 +76,9 @@ export async function startDay(date: string, mode: 'copy' | 'blank' = 'copy'): P
         }
         push(v.id, q);
       }
-      // variações arquivadas que ainda tinham saldo continuam no dia (não some estoque silenciosamente);
-      // excluída não: "excluir" tira a cor do estoque (a tela pede para passar ou zerar o saldo antes)
-      if (mode === 'copy') {
-        const deleted = new Set((await db.variants.toArray()).filter((v) => v.deletedAt).map((v) => v.id));
-        for (const i of prevItems) if (i.currentQuantity !== 0 && !deleted.has(i.variantId)) push(i.variantId, i.currentQuantity);
-      }
+      // cor antiga (arquivada ou excluída) que ainda tinha peças continua no dia: nunca some estoque sem registro.
+      // Ela fica fora do total, com o aviso “cor antiga ainda tem peças” e o botão Resolver (passar ou zerar).
+      if (mode === 'copy') for (const i of prevItems) if (i.currentQuantity !== 0) push(i.variantId, i.currentQuantity);
       await db.dailyStockItems.bulkAdd(items);
 
       // "Ontem" é calculado sempre a partir do dia anterior (ver cashChain); em branco começa em 0.
@@ -159,7 +156,20 @@ export async function applyStockDelta(
   return mv;
 }
 
-const STOCK_TABLES = () => [db.dailyRecords, db.dailyStockItems, db.stockMovements, db.variants, db.reservations];
+const STOCK_TABLES = () => [db.dailyRecords, db.dailyStockItems, db.stockMovements, db.variants, db.groups, db.reservations];
+
+/**
+ * A cor pode receber venda, entrada, saída, reserva ou troca? Cor antiga (arquivada/excluída, ou grupo arquivado) não:
+ * as peças dela se resolvem pelo “Resolver” do Estoque (passar para a cor certa ou zerar). Regra do serviço, não só da tela.
+ */
+export async function assertLiveVariant(variantId: string) {
+  const v = await db.variants.get(variantId);
+  if (!v) throw new UserError('Peça não encontrada.');
+  const g = await db.groups.get(v.groupId);
+  if (v.deletedAt || v.archivedAt || g?.archivedAt)
+    throw new UserError(`“${v.name}” é uma cor antiga (${v.deletedAt ? 'excluída' : 'arquivada'}). No Estoque, toque em “Resolver” para passar as peças para a cor certa ou zerar.`);
+  return v;
+}
 
 /** Redução que deixaria menos peças físicas do que as reservadas: a tela pergunta antes de seguir. */
 export class ReservedError extends UserError {
@@ -188,7 +198,7 @@ export async function moveStock(dailyRecordId: string, variantId: string, delta:
   if ((type === 'entrada' && delta < 0) || ((type === 'saida' || type === 'perda') && delta > 0)) throw new UserError('Quantidade inválida.');
   return db.transaction('rw', STOCK_TABLES(), async () => {
     const day = await assertOpen(dailyRecordId);
-    if (!(await db.variants.get(variantId))) throw new UserError('Peça não encontrada.');
+    await assertLiveVariant(variantId);
     if (delta < 0 && !opts.allowBelowReserved) {
       const item = await ensureItem(dailyRecordId, variantId);
       await checkReserved(day.date, variantId, item.currentQuantity + delta);
@@ -202,7 +212,7 @@ export async function setStock(dailyRecordId: string, variantId: string, quantit
   if (!Number.isInteger(quantity) || quantity < 0 || quantity > MAX_QTY) throw new UserError('Quantidade inválida.');
   return db.transaction('rw', STOCK_TABLES(), async () => {
     const day = await assertOpen(dailyRecordId);
-    if (!(await db.variants.get(variantId))) throw new UserError('Peça não encontrada.');
+    await assertLiveVariant(variantId);
     const item = await ensureItem(dailyRecordId, variantId);
     const delta = quantity - item.currentQuantity;
     if (delta === 0) return null;
@@ -271,26 +281,40 @@ export async function undoMovement(movementId: string) {
 export async function resyncFromPrevious(dailyRecordId: string) {
   return db.transaction('rw', [db.dailyRecords, db.dailyStockItems, db.auditLogs], async () => {
     const day = await assertOpen(dailyRecordId);
-    const prev = await previousDay(day.date);
-    if (!prev) return 0;
-    const prevItems = await db.dailyStockItems.where('dailyRecordId').equals(prev.id).toArray();
-    const expected = new Map(prevItems.map((i) => [i.variantId, i.currentQuantity]));
-    const changes: { variantId: string; from: number; to: number }[] = [];
-    // só as cores que existiam ontem: cor cadastrada hoje (não estava no dia anterior) começa com a
-    // quantidade do cadastro. Antes ela ia para 0 aqui (caso real: Dorado › Azul 5 → 0 em 03/11).
-    for (const id of expected.keys()) {
-      const item = await ensureItem(day.id, id);
-      const to = expected.get(id)!;
-      const delta = to - item.initialQuantity;
-      if (!delta) continue;
-      if (item.currentQuantity + delta < 0) throw new UserError('A correção deixaria um estoque negativo. Revise as vendas do dia.');
-      await db.dailyStockItems.update(item.id, { initialQuantity: to, currentQuantity: item.currentQuantity + delta });
-      changes.push({ variantId: id, from: item.initialQuantity, to });
+    // a correção anda pela cadeia inteira: se 02/11 foi corrigido, 03/11 (mesmo encerrado) e hoje acompanham.
+    // Para no dia que começou “do zero” (ele não copiou do anterior). Cada dia mantém os próprios movimentos.
+    const all = (await db.dailyRecords.orderBy('date').toArray()).filter((d) => d.date <= day.date);
+    let first = all.length - 1;
+    while (first > 0 && all[first].sourceDate) first--;
+    let total = 0;
+    for (let k = Math.max(first, 1); k < all.length; k++) {
+      if (!all[k].sourceDate) continue;
+      total += await resyncOne(all[k - 1], all[k]);
     }
-    await db.dailyRecords.update(day.id, { sourceDate: prev.date, updatedAt: nowIso() });
-    await audit('day', day.id, 'resync', null, { from: prev.date, changes });
-    return changes.length;
+    return total;
   });
+}
+
+/** Começou de `day` = terminou de `prev`, só para as cores que existiam em `prev` (cor nova do dia fica com o cadastro). */
+async function resyncOne(prev: DailyRecord, day: DailyRecord) {
+  const prevItems = await db.dailyStockItems.where('dailyRecordId').equals(prev.id).toArray();
+  const changes: { variantId: string; from: number; to: number }[] = [];
+  // só as cores que existiam ontem: cor cadastrada hoje (não estava no dia anterior) começa com a
+  // quantidade do cadastro. Antes ela ia para 0 aqui (caso real: Dorado › Azul 5 → 0 em 03/11).
+  for (const p of prevItems) {
+    const item = await ensureItem(day.id, p.variantId);
+    const to = p.currentQuantity;
+    const delta = to - item.initialQuantity;
+    if (!delta) continue;
+    if (item.currentQuantity + delta < 0)
+      throw new UserError(`A correção deixaria um estoque negativo em ${day.date.split('-').reverse().join('/')}. Revise as vendas desse dia.`);
+    await db.dailyStockItems.update(item.id, { initialQuantity: to, currentQuantity: item.currentQuantity + delta });
+    changes.push({ variantId: p.variantId, from: item.initialQuantity, to });
+  }
+  if (!changes.length) return 0;
+  await db.dailyRecords.update(day.id, { sourceDate: prev.date, updatedAt: nowIso() });
+  await audit('day', day.id, 'resync', null, { from: prev.date, changes });
+  return changes.length;
 }
 
 /** Dia começou errado (do zero x continuar)? Enquanto nada foi lançado, dá para desfazer e escolher de novo. */

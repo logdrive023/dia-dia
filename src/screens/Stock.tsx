@@ -102,9 +102,14 @@ export default function Stock() {
                 {outCount > 0 && <button onClick={() => setFilter('sem')} className="rounded-full bg-red-100 text-red-700 px-2.5 py-1 text-[12px] font-bold">🚫 {outCount} esgotado{outCount > 1 ? 's' : ''}</button>}
               </div>
             </div>
-            <div className="flex gap-2 mt-3">
-              <button onClick={() => setShowMoves(true)} className="flex-1 h-11 rounded-xl bg-slate-100 text-[14px] font-semibold text-slate-700 active:bg-slate-200">🧾 Movimentos do dia</button>
-              <button onClick={() => setOverlay('importar')} className="h-11 px-3 rounded-xl bg-lime-100 text-[14px] font-semibold text-lime-900 active:bg-lime-200">📋 Importar</button>
+            {/* celular estreito / letra grande: Movimentos ocupa a linha toda (não quebra “Movimentos / do dia”); os outros dividem a de baixo */}
+            <div className="grid grid-cols-2 gap-2 mt-3">
+              <button onClick={() => setShowMoves(true)} className="col-span-2 min-h-11 px-3 rounded-xl bg-slate-100 text-[14px] font-semibold text-slate-700 active:bg-slate-200 flex items-center justify-center gap-2">
+                <span>🧾</span><span>Movimentos do dia</span>
+              </button>
+              <button onClick={() => setOverlay('importar')} className={`min-h-11 px-3 rounded-xl bg-lime-100 text-[14px] font-semibold text-lime-900 active:bg-lime-200 flex items-center justify-center gap-2 ${locked ? 'col-span-2' : ''}`}>
+                <span>📋</span><span>Importar</span>
+              </button>
               {!locked && (
                 <HelpButton icon="❓" label="Como usar" title="Estoque: + e −" example={[
                   ['📥', <>Chegaram 3 Plomo Vermelho → 3× no <b>+</b></>],
@@ -387,7 +392,7 @@ const MOVE_ICON: Record<MovementType, string> = {
 function moveText(m: StockMovement) {
   const n = Math.abs(m.quantity);
   switch (m.type) {
-    case 'venda': return `Vendeu ${n}`;
+    case 'venda': return m.description?.startsWith('Troca') ? `Troca: ${m.quantity > 0 ? 'voltou' : 'saiu'} ${n}` : `Vendeu ${n}`;
     case 'entrada': return `Entrou ${n}`;
     case 'saida': return `Saiu ${n}`;
     case 'perda': return `Perdeu ${n}`;
