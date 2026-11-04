@@ -11,7 +11,11 @@ import { effectiveMovements, loadStockRows, type StockRow } from '../services/su
 import { useApp } from '../state';
 import { DayNotices, DayBar, StartDayCard } from '../components/day';
 import { StockFlow } from '../components/StockFlow';
+import { useSettleRetired } from '../components/RetiredStock';
 import { Badge, Button, Card, Chip, Empty, Field, HelpButton, InfoTip, Input, Sheet, Swatch, useBusy, useUi } from '../components/ui';
+
+/** Cor antiga: arquivada/excluída (ou grupo arquivado). Não conta no total, não vende e não recebe + (só “Resolver”). */
+export const isOldRow = (r: StockRow) => !!(r.variant.archivedAt || r.variant.deletedAt || r.group.archivedAt);
 
 type Filter = 'todos' | 'com' | 'sem' | 'baixo' | 'vender' | 'ideal' | 'semideal' | 'res';
 const FILTERS: [Filter, string][] = [['todos', 'Todos'], ['baixo', 'Para repor'], ['com', 'Com estoque'], ['sem', 'Sem estoque'], ['res', '🔒 Reservadas'], ['vender', 'Para vender'], ['ideal', '🎯 Com ideal'], ['semideal', 'Sem ideal']];
@@ -37,8 +41,9 @@ export default function Stock() {
     if (!rows) return [];
     const nq = normalize(q);
     const filtered = rows.filter((r) => {
-      if (r.variant.archivedAt || r.group.archivedAt) return r.item.currentQuantity !== 0; // arquivado com saldo continua visível
       if (nq && !normalize(`${r.group.name} ${variantLabel(r.variant)}`).includes(nq)) return false;
+      // cor antiga com peças aparece (separada, para resolver) em Todos e Com estoque; sem peças, some
+      if (isOldRow(r)) return r.item.currentQuantity !== 0 && (filter === 'todos' || filter === 'com');
       if (filter === 'com') return r.item.currentQuantity > 0;
       if (filter === 'sem') return r.item.currentQuantity <= 0;
       if (filter === 'baixo') return r.restock > 0 || r.out;
@@ -48,10 +53,10 @@ export default function Stock() {
       if (filter === 'res') return r.reserved > 0;
       return true;
     });
-    const map = new Map<string, { group: StockRow['group']; rows: StockRow[] }>();
+    const map = new Map<string, { group: StockRow['group']; rows: StockRow[]; old: StockRow[] }>();
     for (const r of filtered) {
-      if (!map.has(r.group.id)) map.set(r.group.id, { group: r.group, rows: [] });
-      map.get(r.group.id)!.rows.push(r);
+      if (!map.has(r.group.id)) map.set(r.group.id, { group: r.group, rows: [], old: [] });
+      map.get(r.group.id)![isOldRow(r) ? 'old' : 'rows'].push(r);
     }
     return [...map.values()];
   }, [rows, q, filter, settings.sellGroups]);
@@ -63,7 +68,16 @@ export default function Stock() {
       { label: 'Desfazer', fn: () => run(() => undoMovement(mv.id)) });
   };
 
-  const total = rows?.reduce((s, r) => s + r.item.currentQuantity, 0) ?? 0;
+  // o total é o mesmo do relatório: só cores ativas (cor antiga repetida não soma peça que não existe)
+  const total = (rows ?? []).filter((r) => !isOldRow(r)).reduce((s, r) => s + r.item.currentQuantity, 0);
+  const oldWithStock = (rows ?? []).filter((r) => isOldRow(r) && r.item.currentQuantity !== 0);
+  const settle = useSettleRetired();
+  // nome repetido entre cores ativas do mesmo grupo (ex.: “Poa” duas vezes): marca as duas
+  const dupNames = useMemo(() => {
+    const seen = new Map<string, number>();
+    for (const r of rows ?? []) if (!isOldRow(r)) { const k = `${r.group.id}|${normalize(variantLabel(r.variant))}`; seen.set(k, (seen.get(k) ?? 0) + 1); }
+    return new Set([...seen].filter(([, n]) => n > 1).map(([k]) => k));
+  }, [rows]);
   const live = (rows ?? []).filter((r) => !r.variant.archivedAt && !r.group.archivedAt && r.variant.active && r.group.active);
   const restockTotal = live.reduce((s, r) => s + r.restock, 0);
   const outCount = live.filter((r) => r.out).length;
@@ -108,6 +122,23 @@ export default function Stock() {
               )}
             </div>
           </Card>
+          {oldWithStock.length > 0 && (
+            <div role="alert" className="mb-3 rounded-2xl border-2 border-amber-300 bg-amber-50 p-3">
+              <div className="font-bold text-amber-900 text-[15px]">⚠️ {oldWithStock.length} {oldWithStock.length === 1 ? 'cor antiga ainda tem' : 'cores antigas ainda têm'} peças</div>
+              <div className="text-[13px] text-amber-900/90 mt-0.5">
+                São cores arquivadas/excluídas (muitas vezes repetidas de uma cor nova com o mesmo nome).
+                Elas <b>não contam no total</b> e não aparecem em Vender. Toque em cada uma para resolver.
+              </div>
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {oldWithStock.map((r) => (
+                  <button key={r.variant.id} onClick={() => settle(r.variant, 'resolver')} disabled={locked}
+                    className="rounded-full bg-white border border-amber-300 px-2.5 py-1 text-[12px] font-semibold text-amber-900 active:bg-amber-100 disabled:opacity-50">
+                    {r.group.name} › {variantLabel(r.variant)}: {r.item.currentQuantity}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
           <div className="sticky top-[calc(64px+env(safe-area-inset-top))] z-10 bg-slate-100 -mx-4 px-4 pt-1 pb-2 mb-1">
             <Input placeholder="🔍 Buscar grupo ou cor..." value={q} onChange={(e) => setQ(e.target.value)} />
             <div className="flex gap-2 overflow-x-auto no-scrollbar mt-2 -mx-4 px-4 pb-1">
@@ -132,7 +163,7 @@ export default function Stock() {
           )}
           {!groups.length && <Empty icon="🔍" title="Nada encontrado">Tente outro filtro ou busca.</Empty>}
           <div className="space-y-2.5">
-            {groups.map(({ group, rows: gr }) => {
+            {groups.map(({ group, rows: gr, old }) => {
               const isOpen = open[group.id] ?? (!!q || filter !== 'todos');
               const sum = gr.reduce((s, r) => s + r.item.currentQuantity, 0);
               const alerts = gr.reduce((s, r) => s + r.restock, 0);
@@ -143,7 +174,7 @@ export default function Stock() {
                     <span className="w-11 h-11 rounded-xl flex items-center justify-center text-xl shrink-0" style={{ background: group.color + '22' }}>{group.icon || '📦'}</span>
                     <span className="flex-1 min-w-0">
                       <span className="block font-bold text-slate-800 break-words text-[16px]">{group.name} {group.archivedAt && <Badge>arquivado</Badge>}</span>
-                      <span className="block text-[11px] text-slate-500 font-semibold mt-0.5">🎨 {gr.length} {gr.length === 1 ? 'cor' : 'cores'}</span>
+                      <span className="block text-[11px] text-slate-500 font-semibold mt-0.5">🎨 {gr.length} {gr.length === 1 ? 'cor' : 'cores'}{old.length > 0 && <span className="text-amber-700"> · ⚠️ {old.length} antiga{old.length > 1 ? 's' : ''} fora do total</span>}</span>
                       <StockFlow size="sm" start={gr.reduce((n, r) => n + r.item.initialQuantity, 0)} now={sum} restock={alerts} />
                     </span>
                     <span className="text-right">
@@ -157,6 +188,7 @@ export default function Stock() {
                       {(() => {
                         const off = gr.filter((r) => r.variant.forSale === false).length;
                         const allOff = off === gr.length;
+                        if (!gr.length) return null;
                         return (
                           <div className="flex items-center gap-2 px-3.5 py-2 bg-slate-50 text-[12px] text-slate-600">
                             <span className="flex-1">{off === 0 ? '🏷️ Todas as cores estão à venda' : allOff ? '🔒 Grupo inteiro guardado (fora da venda)' : `🏷️ ${gr.length - off} à venda · 🔒 ${off} guardada${off > 1 ? 's' : ''}`}</span>
@@ -173,6 +205,9 @@ export default function Stock() {
                             <Swatch color={r.variant.color} size={24} />
                             <span className="min-w-0">
                               <span className="block font-semibold text-slate-800 break-words">{variantLabel(r.variant)}</span>
+                              {dupNames.has(`${r.group.id}|${normalize(variantLabel(r.variant))}`) && (
+                                <span className="inline-block mb-1 rounded-full bg-amber-100 text-amber-800 px-2 py-0.5 text-[10px] font-bold">⚠️ nome repetido neste grupo · confira</span>
+                              )}
                               <StockFlow start={r.item.initialQuantity} now={r.item.currentQuantity} restock={r.restock} out={r.out} reserved={r.reserved} />
                               {r.variant.forSale === false && <span className="inline-block mt-1 rounded-full bg-slate-800 text-white px-2 py-0.5 text-[10px] font-bold">🔒 guardada · fora da venda</span>}
                             </span>
@@ -187,6 +222,24 @@ export default function Stock() {
                             className="w-11 h-11 rounded-xl bg-emerald-50 text-emerald-600 text-xl font-bold disabled:opacity-30 active:scale-95">+</button>
                         </div>
                       ))}
+                      {old.length > 0 && (
+                        <div className="bg-amber-50/70">
+                          <div className="px-3.5 pt-2 pb-1 text-[12px] font-bold text-amber-900">🗄️ Cores antigas · não contam no total nem aparecem em Vender</div>
+                          {old.map((r) => (
+                            <div key={r.variant.id} className="flex items-center gap-3 pl-3.5 pr-2 py-2 border-t border-amber-100">
+                              <Swatch color={r.variant.color} size={24} />
+                              <span className="flex-1 min-w-0">
+                                <span className="block font-semibold text-slate-500 break-words">{variantLabel(r.variant)}</span>
+                                <span className="inline-block rounded-full bg-amber-200 text-amber-900 px-2 py-0.5 text-[11px] font-bold">
+                                  {r.variant.deletedAt ? 'excluída' : 'arquivada'} · {r.item.currentQuantity} {Math.abs(r.item.currentQuantity) === 1 ? 'peça' : 'peças'} fora do total
+                                </span>
+                              </span>
+                              <button disabled={locked} onClick={() => settle(r.variant, 'resolver')} aria-label={`Resolver ${r.variant.name}`}
+                                className="h-11 px-3 rounded-xl bg-amber-500 text-white text-[14px] font-bold disabled:opacity-40 active:scale-95">Resolver</button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   )}
                 </Card>
@@ -445,7 +498,7 @@ function MovesSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
     const gr = new Map(groups.map((x) => [x.id, x]));
     const pieces = new Map<string, Piece>(variants.map((v) => {
       const gg = gr.get(v.groupId);
-      return [v.id, { group: gg?.name ?? '—', icon: gg?.icon ?? '📦', groupColor: gg?.color ?? '#94a3b8', name: v.name, color: v.color }];
+      return [v.id, { group: gg?.name ?? '—', icon: gg?.icon ?? '📦', groupColor: gg?.color ?? '#94a3b8', name: v.name + (v.deletedAt ? ' (cor excluída)' : v.archivedAt ? ' (cor arquivada)' : ''), color: v.color }];
     }));
     return { moves, pieces };
   }, [day?.id, open]);

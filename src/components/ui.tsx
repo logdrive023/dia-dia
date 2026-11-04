@@ -217,11 +217,15 @@ export function Sheet({ open, onClose, title, children, footer, tall }:
 
 type ToastAction = { label: string; fn: () => void };
 type ToastT = { id: number; text: string; tone: 'ok' | 'err' | 'info'; action?: ToastAction };
-type ConfirmReq = { title: string; message?: ReactNode; confirm?: string; tone?: BtnVariant; resolve: (v: boolean) => void };
+type ChoiceOpt = { label: ReactNode; value: string; tone?: BtnVariant };
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type ConfirmReq = { title: string; message?: ReactNode; confirm?: string; tone?: BtnVariant; options?: ChoiceOpt[]; resolve: (v: any) => void };
 
 const UiCtx = createContext<{
   toast: (text: string, tone?: ToastT['tone'], action?: ToastAction) => void;
-  confirm: (o: Omit<ConfirmReq, 'resolve'>) => Promise<boolean>;
+  confirm: (o: Omit<ConfirmReq, 'resolve' | 'options'>) => Promise<boolean>;
+  /** Várias saídas (um botão por opção, um embaixo do outro). Voltar/fora da caixa = null. */
+  choose: (o: { title: string; message?: ReactNode; options: ChoiceOpt[] }) => Promise<string | null>;
   run: <T>(fn: () => Promise<T>, okMsg?: string) => Promise<T | undefined>;
 } | null>(null);
 
@@ -247,7 +251,8 @@ export function UiProvider({ children }: { children: ReactNode }) {
     setToasts((t) => [...t.slice(-2), { id, text, tone, action }]);
     setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), tone === 'err' || action ? 4500 : 2200);
   }, []);
-  const confirm = useCallback((o: Omit<ConfirmReq, 'resolve'>) => new Promise<boolean>((resolve) => setReq({ ...o, resolve })), []);
+  const confirm = useCallback((o: Omit<ConfirmReq, 'resolve' | 'options'>) => new Promise<boolean>((resolve) => setReq({ ...o, resolve })), []);
+  const choose = useCallback((o: { title: string; message?: ReactNode; options: ChoiceOpt[] }) => new Promise<string | null>((resolve) => setReq({ ...o, resolve })), []);
   const run = useCallback(async <T,>(fn: () => Promise<T>, okMsg?: string) => {
     try {
       const r = await fn();
@@ -259,10 +264,11 @@ export function UiProvider({ children }: { children: ReactNode }) {
       return undefined;
     }
   }, [toast]);
-  const close = (v: boolean) => { req?.resolve(v); setReq(null); };
-  useOverlay(!!req, () => close(false));
+  const close = (v: boolean | string | null) => { req?.resolve(v); setReq(null); };
+  const back = () => close(req?.options ? null : false);
+  useOverlay(!!req, back);
   return (
-    <UiCtx.Provider value={{ toast, confirm, run }}>
+    <UiCtx.Provider value={{ toast, confirm, choose, run }}>
       {children}
       <div className="fixed top-[max(env(safe-area-inset-top),12px)] inset-x-0 z-[70] flex flex-col items-center gap-2 pointer-events-none px-4">
         {toasts.map((t) => (
@@ -279,14 +285,23 @@ export function UiProvider({ children }: { children: ReactNode }) {
       </div>
       {req && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-6">
-          <div className="absolute inset-0 bg-slate-900/50 animate-fade" onClick={() => close(false)} />
+          <div className="absolute inset-0 bg-slate-900/50 animate-fade" onClick={back} />
           <div className="relative bg-white rounded-2xl p-5 w-full max-w-sm shadow-2xl animate-pop">
             <div className="text-lg font-bold text-slate-800">{req.title}</div>
             {req.message && <div className="text-slate-600 mt-2 text-[15px]">{req.message}</div>}
-            <div className="flex gap-2 mt-5">
-              <Button variant="soft" className="flex-1" onClick={() => close(false)}>Voltar</Button>
-              <Button variant={req.tone ?? 'primary'} className="flex-1" onClick={() => close(true)}>{req.confirm ?? 'Confirmar'}</Button>
-            </div>
+            {req.options ? (
+              <div className="flex flex-col gap-2 mt-5">
+                {req.options.map((o) => (
+                  <Button key={o.value} variant={o.tone ?? 'outline'} className="w-full !h-auto min-h-12 py-2 text-left" onClick={() => close(o.value)}>{o.label}</Button>
+                ))}
+                <Button variant="soft" className="w-full" onClick={back}>Voltar</Button>
+              </div>
+            ) : (
+              <div className="flex gap-2 mt-5">
+                <Button variant="soft" className="flex-1" onClick={back}>Voltar</Button>
+                <Button variant={req.tone ?? 'primary'} className="flex-1" onClick={() => close(true)}>{req.confirm ?? 'Confirmar'}</Button>
+              </div>
+            )}
           </div>
         </div>
       )}

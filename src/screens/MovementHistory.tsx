@@ -116,7 +116,7 @@ function AllEvents({ onPick }: { onPick: (variantId: string) => void }) {
               <div className="space-y-1.5">
                 {evs.map((e) => {
                   const v = vOf.get(e.variantId);
-                  return <EventRow key={e.id} e={e} product={v ? `${gOf.get(v.groupId)?.name ?? ''} › ${variantLabel(v)}` : 'peça'} color={v?.color} onProduct={() => onPick(e.variantId)} />;
+                  return <EventRow key={e.id} e={e} product={v ? `${gOf.get(v.groupId)?.name ?? ''} › ${variantLabel(v)}${v.deletedAt ? ' (cor excluída)' : v.archivedAt ? ' (cor arquivada)' : ''}` : 'peça'} color={v?.color} onProduct={() => onPick(e.variantId)} />;
                 })}
               </div>
             </div>
@@ -186,7 +186,7 @@ function ProductTimeline({ variantId, onBack }: { variantId: string; onBack: () 
       <Card className="p-3 mb-3 flex items-center gap-3">
         <Swatch color={data.variant?.color} size={30} />
         <div className="flex-1 min-w-0">
-          <div className="font-bold text-slate-800 text-[17px] break-words">{data.group?.name} › {data.variant ? variantLabel(data.variant) : ''}</div>
+          <div className="font-bold text-slate-800 text-[17px] break-words">{data.group?.name} › {data.variant ? variantLabel(data.variant) : ''}{data.variant?.deletedAt ? ' (cor excluída)' : data.variant?.archivedAt ? ' (cor arquivada)' : ''}</div>
           <div className="text-[12px] text-slate-500">
             {data.days.length} dia{data.days.length === 1 ? '' : 's'} com registro
             {data.variant?.deletedAt ? ' · excluída (histórico guardado)' : data.variant?.archivedAt ? ' · arquivada' : ''}

@@ -7,6 +7,21 @@ export interface ChangeEntry { id: string; version: string; date: string; title:
 
 export const CHANGELOG: ChangeEntry[] = [
   {
+    id: '2026-11-04a', version: '1.7', date: '04/11/2026', title: 'Cor repetida não soma mais peça que não existe',
+    items: [
+      ['🐛', 'Corrigido: cor arquivada ou excluída que ainda tinha peças aparecia no Estoque igual à cor nova e somava no total (ex.: Poa 7 + Poa 7 = 14, quando só existiam 7)'],
+      ['🗄️', 'No Estoque, cor antiga com peças fica separada no fim do grupo, em amarelo, “fora do total”, sem + e −, com o botão Resolver'],
+      ['➡️', 'Resolver: passar as peças para a cor nova com o mesmo nome ou zerar (eram repetidas). Fica registrado nas Movimentações'],
+      ['⚠️', 'Aviso no topo do Estoque quando alguma cor antiga ainda tem peças'],
+      ['🗑️', 'Arquivar ou excluir uma cor que ainda tem peças hoje: o app pergunta o que fazer com elas antes'],
+      ['🔁', 'Cor excluída não passa mais para o dia seguinte'],
+      ['🧮', 'Total do Estoque igual ao do relatório; zerar cor antiga não conta como “saiu” no relatório'],
+      ['🏷️', '“Nome repetido neste grupo” aparece quando duas cores ativas têm o mesmo nome'],
+      ['📜', 'Histórico e Movimentações mostram “(cor arquivada)” / “(cor excluída)” ao lado do nome'],
+      ['🩺', 'Diagnóstico avisa cor antiga com peças e cor repetida no mesmo grupo'],
+    ],
+  },
+  {
     id: '2026-11-03a', version: '1.6', date: '03/11/2026', title: 'Histórico de movimentações, importação e cadastro mais claro',
     items: [
       ['📜', 'Novo: Histórico de movimentações (Menu e Configurações). A vida de cada peça desde o cadastro: começou, entrou, vendeu, reservou, ajustou, quem fez e quanto tem agora'],

@@ -102,6 +102,24 @@ export async function runDiagnostics(): Promise<{ findings: Finding[]; checked: 
   if (openPast.length) f.push({ level: 'aviso', title: `${openPast.length} dia(s) passado(s) ainda aberto(s)`, detail: openPast.map((d) => fmtDate(d.date, false)).join(', ') });
   const future = days.filter((d) => d.date > today);
   if (future.length) f.push({ level: 'aviso', title: `Dia(s) no futuro registrado(s)`, detail: future.map((d) => fmtDate(d.date, false)).join(', ') });
+  // cor antiga (arquivada/excluída) com peças no dia aberto: é como “Poa 7 + Poa 7 = 14” quando só existiam 7
+  const gArchived = new Set(groups.filter((g) => g.archivedAt).map((g) => g.id));
+  for (const d of days.filter((x) => x.status === 'open')) {
+    for (const i of items.filter((x) => x.dailyRecordId === d.id && x.currentQuantity !== 0)) {
+      const v = vMap.get(i.variantId);
+      if (v && (v.archivedAt || v.deletedAt || gArchived.has(v.groupId)))
+        f.push({ level: 'aviso', title: `Cor antiga com peças: ${name(v.id)} (${i.currentQuantity}) em ${dName(d.id)}`,
+          detail: 'Não conta no total. No Estoque, toque em “Resolver” para passar as peças para a cor certa ou zerar.' });
+    }
+  }
+  // nome repetido entre cores ativas do mesmo grupo
+  const seen = new Map<string, string[]>();
+  for (const v of variants) if (!v.archivedAt && !v.deletedAt) {
+    const k = `${v.groupId}|${v.name.trim().toLowerCase()}|${(v.size ?? '').toLowerCase()}`;
+    seen.set(k, [...(seen.get(k) ?? []), v.id]);
+  }
+  for (const ids of seen.values()) if (ids.length > 1)
+    f.push({ level: 'aviso', title: `Cor repetida no mesmo grupo: ${name(ids[0])} (${ids.length}×)`, detail: 'Confira se não está contando a mesma peça duas vezes.' });
   const last = await getSetting('lastBackupAt');
   if (days.length && !last) f.push({ level: 'aviso', title: 'Nenhum backup feito ainda' });
 

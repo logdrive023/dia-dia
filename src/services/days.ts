@@ -76,8 +76,12 @@ export async function startDay(date: string, mode: 'copy' | 'blank' = 'copy'): P
         }
         push(v.id, q);
       }
-      // variações arquivadas que ainda tinham saldo continuam no dia (não some estoque silenciosamente)
-      if (mode === 'copy') for (const i of prevItems) if (i.currentQuantity !== 0) push(i.variantId, i.currentQuantity);
+      // variações arquivadas que ainda tinham saldo continuam no dia (não some estoque silenciosamente);
+      // excluída não: "excluir" tira a cor do estoque (a tela pede para passar ou zerar o saldo antes)
+      if (mode === 'copy') {
+        const deleted = new Set((await db.variants.toArray()).filter((v) => v.deletedAt).map((v) => v.id));
+        for (const i of prevItems) if (i.currentQuantity !== 0 && !deleted.has(i.variantId)) push(i.variantId, i.currentQuantity);
+      }
       await db.dailyStockItems.bulkAdd(items);
 
       // "Ontem" é calculado sempre a partir do dia anterior (ver cashChain); em branco começa em 0.
@@ -206,6 +210,30 @@ export async function setStock(dailyRecordId: string, variantId: string, quantit
     // subiu porque chegou mercadoria: é entrada (nova ou reposição), não ajuste
     if (delta > 0 && opts.entryKind) return applyStockDelta(dailyRecordId, variantId, delta, 'entrada', { entryKind: opts.entryKind, description: description === 'Ajuste manual' ? undefined : description });
     return applyStockDelta(dailyRecordId, variantId, delta, 'ajuste', { description });
+  });
+}
+
+/**
+ * Cor antiga (arquivada/excluída) que ainda tem peças no dia: passa o saldo para outra cor
+ * (a "nova" com o mesmo nome, por exemplo) ou zera. Fica registrado como ajuste nas duas cores.
+ */
+export async function settleRetiredStock(dailyRecordId: string, variantId: string, toVariantId: string | null) {
+  return db.transaction('rw', STOCK_TABLES(), async () => {
+    await assertOpen(dailyRecordId);
+    const v = await db.variants.get(variantId);
+    if (!v) throw new UserError('Peça não encontrada.');
+    const item = await ensureItem(dailyRecordId, variantId);
+    const n = item.currentQuantity;
+    if (n === 0) return 0;
+    if (toVariantId) {
+      const to = await db.variants.get(toVariantId);
+      if (!to || to.archivedAt || to.id === variantId) throw new UserError('Escolha uma cor ativa para receber as peças.');
+      await applyStockDelta(dailyRecordId, variantId, -n, 'ajuste', { description: `Passou ${n} para “${to.name}” (cor antiga)` });
+      await applyStockDelta(dailyRecordId, toVariantId, n, 'ajuste', { description: `Veio ${n} de “${v.name}” (cor antiga)` });
+    } else {
+      await applyStockDelta(dailyRecordId, variantId, -n, 'ajuste', { description: `Cor antiga zerada: ${n} não existiam (estavam repetidas)` });
+    }
+    return n;
   });
 }
 

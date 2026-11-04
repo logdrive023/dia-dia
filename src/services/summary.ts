@@ -231,6 +231,8 @@ export async function daySummary(dailyRecordId: string, date: string): Promise<D
     if (m.type === 'entrada' && m.description !== 'Quantidade inicial do cadastro' && live(byVariant.get(m.variantId))) {
       enteredUnits += m.quantity; entered.set(m.variantId, (entered.get(m.variantId) ?? 0) + m.quantity);
     }
+    // cor antiga (arquivada/excluída) não conta: zerar uma cor repetida não é "saiu" nem ajuste do estoque real
+    if (!live(byVariant.get(m.variantId))) continue;
     if (m.type === 'saida' || m.type === 'perda') outUnits += -m.quantity;
     if (m.type === 'ajuste' || m.type === 'correcao') adjustUnits += m.quantity;
   }

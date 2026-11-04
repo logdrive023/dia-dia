@@ -10,6 +10,7 @@ import {
 } from '../services/catalog';
 import { setStock } from '../services/days';
 import { EntryReasonPicker, type IncreaseReason } from '../components/EntryReason';
+import { useSettleRetired } from '../components/RetiredStock';
 import { restockOf } from '../services/summary';
 import { setSetting } from '../services/settings';
 import { useApp } from '../state';
@@ -274,6 +275,7 @@ function QuickAdd({ kind, origin, onClose, groups, onCreatedGroup }: { kind: 'gr
 function GroupEditor({ id, onClose }: { id: string | null; onClose: () => void }) {
   const { settings } = useApp();
   const { run, confirm, toast } = useUi();
+  const settle = useSettleRetired();
   const [editVar, setEditVar] = useState<string | null>(null);
   const [newVar, setNewVar] = useState('');
   const [newQty, setNewQty] = useState('');
@@ -292,6 +294,7 @@ function GroupEditor({ id, onClose }: { id: string | null; onClose: () => void }
   const excluirCor = async (v: Variant) => {
     if (!(await confirm({ title: `Excluir ${v.name}?`, tone: 'danger', confirm: 'Excluir',
       message: 'Some do cadastro, do estoque e do relatório. O histórico dela (movimentos e vendas) continua guardado.' }))) return;
+    if (!(await settle(v, 'excluir'))) return;
     const r = await run(() => deleteVariant(v.id));
     if (r) toast(`🗑️ ${v.name} excluída (o histórico fica guardado)`);
   };
@@ -407,6 +410,7 @@ function GroupEditor({ id, onClose }: { id: string | null; onClose: () => void }
 function VariantEditor({ id, onClose }: { id: string | null; onClose: () => void }) {
   const { run, confirm, toast } = useUi();
   const { day, openHistory, settings } = useApp();
+  const settle = useSettleRetired();
   const [dest, setDest] = useState('');
   const [qtyText, setQtyText] = useState<string | null>(null);
   const [reason, setReason] = useState<IncreaseReason | null>(null);
@@ -524,11 +528,13 @@ function VariantEditor({ id, onClose }: { id: string | null; onClose: () => void
 
       <div className="grid grid-cols-2 gap-2 mt-5">
         <Button variant="soft" onClick={async () => {
+          if (!v.archivedAt && !(await settle(v, 'arquivar'))) return;
           await run(() => archiveVariant(v.id, !v.archivedAt), v.archivedAt ? 'Reativada' : 'Arquivada'); onClose();
         }}>{v.archivedAt ? 'Reativar' : '🗄️ Arquivar'}</Button>
         <Button variant="soft" className="!text-red-600" onClick={async () => {
           if (!(await confirm({ title: `Excluir ${v.name}?`, confirm: 'Excluir', tone: 'danger',
             message: 'Some do cadastro, do estoque e do relatório. O histórico dela (movimentos e vendas) continua guardado.' }))) return;
+          if (!(await settle(v, 'excluir'))) return;
           const r = await run(() => deleteVariant(v.id));
           if (r) { toast(`🗑️ ${v.name} excluída (o histórico fica guardado)`); onClose(); }
         }}>🗑️ Excluir</Button>
