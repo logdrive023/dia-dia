@@ -17,14 +17,40 @@ export async function requestPersist(): Promise<{ supported: boolean; persisted:
   }
 }
 
-/** Situação do armazenamento: protegido? quanto usa? a gravação funciona? */
+const TIMEOUT = Symbol('timeout');
+/** Espera no máximo `ms`; se não respondeu, devolve TIMEOUT (a operação original continua sozinha). */
+function withTimeout<T>(p: Promise<T>, ms: number): Promise<T | typeof TIMEOUT> {
+  return new Promise((resolve, reject) => {
+    const t = setTimeout(() => resolve(TIMEOUT), ms);
+    p.then((v) => { clearTimeout(t); resolve(v); }, (e) => { clearTimeout(t); reject(e); });
+  });
+}
+
+/** Situação do armazenamento: protegido? quanto usa? a gravação funciona? (nunca fica preso em “Conferindo…”) */
 export async function storageStatus() {
   const st = typeof navigator !== 'undefined' ? navigator.storage : undefined;
   let persisted = false, usage: number | null = null, quota: number | null = null;
-  try { persisted = !!(await st?.persisted?.()); } catch { /* sem suporte */ }
-  try { const e = await st?.estimate?.(); usage = e?.usage ?? null; quota = e?.quota ?? null; } catch { /* sem suporte */ }
-  return { supported: !!st?.persist, persisted, usage, quota, writeOk: await writeTest() };
+  try { const p = await withTimeout(Promise.resolve(st?.persisted?.()), 3000); persisted = p !== TIMEOUT && !!p; } catch { /* sem suporte */ }
+  try {
+    const e = await withTimeout(Promise.resolve(st?.estimate?.()), 3000);
+    if (e !== TIMEOUT) { usage = e?.usage ?? null; quota = e?.quota ?? null; }
+  } catch { /* sem suporte */ }
+  const w = await dbResponds();
+  return { supported: !!st?.persist, persisted, usage, quota, writeOk: w === 'ok', busy: w === 'busy' };
 }
+
+/**
+ * O banco está respondendo? 'busy' = a gravação ficou esperando: outra janela do app (o app instalado
+ * e uma aba do Chrome, ou uma janela antiga em segundo plano) está segurando os dados.
+ */
+export async function dbResponds(ms = 4000): Promise<'ok' | 'busy' | 'fail'> {
+  const r = await withTimeout(writeTest(), ms);
+  return r === TIMEOUT ? 'busy' : r ? 'ok' : 'fail';
+}
+
+export const BUSY_MESSAGE =
+  'O app está aberto em outra janela que está segurando os dados (por exemplo, o app instalado e também uma aba do Chrome). ' +
+  'Feche todas as janelas do app (botão de janelas abertas do celular → arrastar para fechar) e abra só uma. Nada foi apagado.';
 
 /** Grava, lê de volta e apaga um registro de teste: confirma que o celular está salvando de verdade. */
 export async function writeTest() {

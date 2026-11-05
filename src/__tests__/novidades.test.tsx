@@ -5,7 +5,8 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import App from '../App';
 import { seedIfNeeded } from '../db/seed';
 import { AppDB, db, useDatabase } from '../db/db';
-import { requestPersist, storageStatus, writeTest } from '../services/storage';
+import { dbResponds, requestPersist, storageStatus, writeTest } from '../services/storage';
+import { RESET_WAIT } from '../screens/Settings';
 import { CHANGELOG, LATEST_CHANGE } from '../lib/changelog';
 import { buildBackup, encodeTextBackup } from '../services/backup';
 import { setUpdateState } from '../lib/updateState';
@@ -43,6 +44,7 @@ describe('armazenamento permanente', () => {
     vi.stubGlobal('navigator', { ...navigator, storage: undefined });
     expect(await requestPersist()).toEqual({ supported: false, persisted: false });
     expect(await writeTest()).toBe(true);
+    expect(await dbResponds()).toBe('ok'); // banco livre: responde (não fica “esperando”)
     expect(await db.settings.filter((s) => s.key.startsWith('teste-gravacao')).count()).toBe(0); // não deixa lixo
   });
 });
@@ -90,8 +92,19 @@ describe('recomeçar com venda aberta (bug do carrinho)', () => {
     await waitFor(() => expect(navBtn().textContent).toContain('2'));
     click(screen.getByRole('button', { name: /Abrir menu/ }));
     click(await screen.findByRole('button', { name: /Configurações/ }));
+    // aviso bem claro e botão travado: com 10 s, não dá para apagar na hora; Voltar não apaga nada
+    RESET_WAIT.seconds = 10;
+    click(await screen.findByRole('button', { name: /Reiniciar tudo do 0/ }));
+    expect(await screen.findByText(/ATENÇÃO: VAI APAGAR TUDO/)).toBeTruthy();
+    const wait = screen.getByRole('button', { name: /Aguarde 10s/ });
+    expect((wait as HTMLButtonElement).disabled).toBe(true);
+    click(wait);
+    click(within(screen.getByRole('alertdialog')).getByRole('button', { name: /Voltar/ }));
+    expect(await db.variants.count()).toBeGreaterThan(0);
+    RESET_WAIT.seconds = 0;
     click(await screen.findByRole('button', { name: /Reiniciar tudo do 0/ }));
     click(await screen.findByRole('button', { name: /Sim, apagar tudo/ }));
+    RESET_WAIT.seconds = 10;
     await waitFor(async () => expect(await db.variants.count()).toBe(0));
     await waitFor(() => expect(navBtn().textContent).not.toMatch(/\d/)); // sem o "2"
     expect(screen.queryByRole('button', { name: /Fechar venda/ })).toBeNull();

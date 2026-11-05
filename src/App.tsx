@@ -477,8 +477,10 @@ export function Recovery({ error }: { error?: string }) {
       <div className="text-4xl mb-2">🛠️</div>
       <h1 className="text-xl font-bold">{updated ? 'O app foi atualizado' : error ? 'Não foi possível abrir os dados' : 'O app está demorando para abrir'}</h1>
       <p className="text-sm mt-2">
-        Seus dados continuam guardados neste aparelho. Feche outras abas do app e toque em <b>Tentar de novo</b>.
-        Se continuar, toque em <b>Atualizar o app</b> (não apaga nada).
+        Seus dados continuam guardados neste aparelho.
+        {!error && <> O mais comum: o app está aberto <b>em outra janela</b> que está segurando os dados (o app instalado e também uma aba do Chrome, ou uma janela antiga em segundo plano).
+          Feche <b>todas</b> as janelas do app (botão de janelas abertas do celular → arrastar para fechar) e abra só uma. Quando a outra fechar, este abre sozinho.</>}
+        {' '}Depois toque em <b>Tentar de novo</b>. Se continuar, toque em <b>Atualizar o app</b> (não apaga nada).
       </p>
       {updated && <p className="text-sm mt-2 text-blue-700 font-semibold">Saiu uma versão nova. Toque em <b>Atualizar o app</b> para abrir a versão nova — seus dados ficam guardados.</p>}
       {error && !updated && <p className="text-xs text-red-600 mt-2 break-words">Detalhe: {error}</p>}

@@ -4,7 +4,7 @@ import { money, PAYMENT_EMOJI, PAYMENT_LABEL, PAYMENTS, toCents } from '../lib/u
 import type { PaymentMethod } from '../db/types';
 import { setSetting } from '../services/settings';
 import { resetToInitialData, resetToZero } from '../services/backup';
-import { requestPersist, storageStatus } from '../services/storage';
+import { BUSY_MESSAGE, dbResponds, requestPersist, storageStatus } from '../services/storage';
 import { useApp } from '../state';
 import { Button, Card, InfoTip, Input, Sheet, Toggle, useUi } from '../components/ui';
 
@@ -307,25 +307,88 @@ function Diagnostics() {
   );
 }
 
+/** Segundos que o botão de apagar fica travado (dá tempo de ler o aviso). Os testes de tela usam 0. */
+export const RESET_WAIT = { seconds: 10 };
+
+/**
+ * Aviso antes de apagar tudo: bem vermelho, diz o que some e trava o botão por alguns segundos
+ * (evita apagar com um toque sem querer). Voltar ou tocar fora = não apaga nada.
+ */
+function DangerConfirm({ zero, onCancel, onConfirm }: { zero: boolean; onCancel: () => void; onConfirm: () => void }) {
+  const [left, setLeft] = useState(RESET_WAIT.seconds);
+  useEffect(() => {
+    if (left <= 0) return;
+    const t = setTimeout(() => setLeft((s) => s - 1), 1000);
+    return () => clearTimeout(t);
+  }, [left]);
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center p-5">
+      <div className="absolute inset-0 bg-slate-900/60" onClick={onCancel} />
+      <div role="alertdialog" aria-label={zero ? 'Reiniciar tudo do 0?' : 'Voltar aos dados iniciais?'}
+        className="relative bg-white rounded-2xl w-full max-w-sm shadow-2xl overflow-hidden border-2 border-red-500">
+        <div className="bg-red-600 text-white px-5 py-3 text-center">
+          <div className="text-3xl">⚠️</div>
+          <div className="text-lg font-extrabold">ATENÇÃO: VAI APAGAR TUDO</div>
+        </div>
+        <div className="p-5 text-[15px] text-slate-700 space-y-2">
+          <p className="font-bold text-slate-900">{zero ? 'Reiniciar tudo do 0?' : 'Voltar aos dados iniciais?'}</p>
+          <p>Isso <b className="text-red-700">APAGA deste celular</b>:</p>
+          <ul className="list-disc pl-5 space-y-0.5">
+            <li>todas as <b>vendas</b> e o <b>caixa</b></li>
+            <li>todos os <b>dias</b> e o <b>histórico</b></li>
+            <li>{zero ? <>todos os <b>grupos e peças</b> (o app fica vazio)</> : <>o <b>estoque</b> volta para a lista oficial de 30/10</>}</li>
+          </ul>
+          <p className="text-[13px] text-slate-500">O app guarda uma cópia antes (Backup › voltar como estava), mas faça um backup se não tiver certeza.</p>
+        </div>
+        <div className="flex gap-2 px-5 pb-5">
+          <Button variant="soft" className="flex-1" onClick={onCancel}>Voltar</Button>
+          <Button variant="danger" className="flex-1" disabled={left > 0} onClick={onConfirm}>
+            {left > 0 ? `Aguarde ${left}s…` : zero ? 'Sim, apagar tudo' : 'Sim, voltar aos iniciais'}
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** Tela de carregamento enquanto apaga: deixa claro que está apagando e que não deve fechar o app. */
+function Deleting() {
+  return (
+    <div role="status" className="fixed inset-0 z-[80] bg-white/95 flex flex-col items-center justify-center gap-4 p-6 text-center">
+      <div className="w-14 h-14 rounded-full border-4 border-red-200 border-t-red-600 animate-spin" />
+      <div className="text-lg font-bold text-red-700">Apagando os dados…</div>
+      <div className="text-sm text-slate-600">Não feche o app. Ele abre de novo sozinho quando terminar.</div>
+    </div>
+  );
+}
+
 /** Duas formas de recomeçar: com os dados iniciais oficiais ou do zero (app vazio). */
 function ResetButtons() {
   const { run, confirm } = useUi();
   const { resetCart } = useApp();
+  const [asking, setAsking] = useState<null | ((ok: boolean) => void)>(null);
+  const [askZero, setAskZero] = useState(true);
+  const [deleting, setDeleting] = useState(false);
+  const ask = (zero: boolean) => new Promise<boolean>((resolve) => { setAskZero(zero); setAsking(() => resolve); });
+  const answer = (ok: boolean) => { asking?.(ok); setAsking(null); };
   const go = async (kind: 'inicial' | 'zero') => {
     const zero = kind === 'zero';
-    if (!(await confirm({
-      title: zero ? 'Reiniciar tudo do 0?' : 'Voltar aos dados iniciais?', tone: 'danger',
-      confirm: zero ? 'Sim, apagar tudo' : 'Sim, voltar aos iniciais',
-      message: zero
-        ? 'O app fica vazio: sem grupos, sem peças, sem dias e caixa em 0. O app guarda uma cópia antes (dá para voltar em Backup).'
-        : 'Volta o estoque da lista oficial e os cadernos de 30/10 e 31/10. Tudo o que foi lançado é apagado. O app guarda uma cópia antes (dá para voltar em Backup).',
-    }))) return;
+    if (!(await ask(zero))) return;
+    // Antes de apagar, confere se o banco responde. Se outra janela do app estiver segurando os dados, o apagar
+    // ficaria esperando e poderia acontecer sozinho mais tarde. Então não apaga nada e explica o que fazer.
+    if ((await dbResponds()) === 'busy') {
+      await confirm({ title: 'Não foi possível apagar agora', message: BUSY_MESSAGE, confirm: 'Entendi' });
+      return;
+    }
     // as funções não devolvem nada: devolve true para saber que deu certo (antes não recarregava e o carrinho ficava na tela)
+    setDeleting(true);
     const ok = await run(async () => { await (zero ? resetToZero() : resetToInitialData()); return true; }, zero ? 'Pronto! App zerado.' : 'Pronto! Dados iniciais carregados.');
-    if (ok) { resetCart(); setTimeout(() => location.reload(), 600); }
+    if (ok) { resetCart(); setTimeout(() => location.reload(), 600); } else setDeleting(false);
   };
   return (
     <div className="space-y-2">
+      {asking && <DangerConfirm zero={askZero} onCancel={() => answer(false)} onConfirm={() => answer(true)} />}
+      {deleting && <Deleting />}
       <button onClick={() => go('inicial')} className="w-full flex items-center gap-3 rounded-xl border-2 border-blue-200 bg-blue-50 px-3 py-3 text-left active:bg-blue-100">
         <span className="w-10 h-10 rounded-xl bg-blue-100 flex items-center justify-center text-xl shrink-0">📒</span>
         <span className="flex-1 min-w-0">
@@ -358,8 +421,11 @@ function StorageBox() {
         {st.persisted ? '🛡️ Protegido: o navegador não apaga os dados' : st.supported ? '⚠️ Ainda não protegido: o navegador pode apagar se faltar espaço' : '⚠️ Este navegador não permite proteger: faça backup com frequência'}
       </div>
       <div className={`rounded-xl px-3 py-2 text-[13px] ${st.writeOk ? 'bg-slate-50 text-slate-700' : 'bg-red-50 text-red-700 font-semibold'}`}>
-        {st.writeOk ? '✅ Teste de gravação: salvando normalmente' : '❌ Teste de gravação falhou: o celular não está salvando (saia da aba anônima / libere espaço)'}
+        {st.writeOk ? '✅ Teste de gravação: salvando normalmente'
+          : st.busy ? `⏳ A gravação ficou esperando. ${BUSY_MESSAGE}`
+          : '❌ Teste de gravação falhou: o celular não está salvando (saia da aba anônima / libere espaço)'}
       </div>
+      {st.busy && <Button variant="outline" className="w-full" onClick={() => setTick((t) => t + 1)}>Conferir de novo</Button>}
       <div className="text-[12px] text-slate-500">Usando {mb(st.usage)}{st.quota ? ` de ${mb(st.quota)} disponíveis` : ''}</div>
       {!st.persisted && st.supported && (
         <Button variant="outline" className="w-full" onClick={() => run(async () => { await requestPersist(); setTick((t) => t + 1); })}>🛡️ Proteger agora</Button>
