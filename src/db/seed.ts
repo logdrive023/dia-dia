@@ -72,8 +72,7 @@ export const VARIANT_COLOR: Record<string, string> = {
 };
 
 /**
- * Dados padrão do app: o celular principal (02/11 a 04/11/2026) junto com o Samsung (12/11/2026), já mesclados:
- * cadastro, estoque, vendas e caixa. O 12/11 continua do 04/11 (a contagem feita no Samsung vale).
+ * Dados padrão do app: o backup do celular principal (02/11 a 04/11/2026: cadastro, estoque, vendas e caixa).
  * Celular novo (app vazio) e “Voltar aos dados iniciais” começam daqui. Os identificadores são os mesmos do
  * celular principal, então juntar um celular novo com ele não duplica nada.
  * Fica num arquivo à parte (carregado só quando precisa), para não pesar a abertura do app.
