@@ -20,9 +20,9 @@ export function changeKind(item: ChangeItem): ChangeKind {
 
 export const CHANGELOG: ChangeEntry[] = [
   {
-    id: '2026-11-12a', version: '1.9', date: '12/11/2026', title: 'Celular novo já começa com os dados do principal',
+    id: '2026-11-12a', version: '1.9', date: '12/11/2026', title: 'Celular novo já começa com tudo até 12/11',
     items: [
-      ['📱', 'Celular novo (app vazio) já abre com os dados do celular principal até 04/11: cadastro, estoque, vendas e caixa. Juntar com o principal não duplica nada'],
+      ['📱', 'Celular novo (app vazio) já abre com tudo de 02/11 a 12/11 (celular principal + Samsung, mesclados): cadastro, estoque, vendas e caixa. Juntar com o principal ou com o Samsung não duplica nada'],
       ['📒', '“Voltar aos dados iniciais” agora volta para esses mesmos dados'],
     ],
   },
