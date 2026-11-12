@@ -608,9 +608,11 @@ describe('dados iniciais oficiais (caderno 30/10 e 31/10)', () => {
     const d = await startDay('2026-10-20');
     await addCashMovement({ dailyRecordId: d.id, type: 'entrada', amountInCents: 1000 });
     await resetToInitialData();
-    expect(await db.dailyRecords.count()).toBe(0);
-    expect(await db.variants.count()).toBe(51);
-    expect((await getSetting('sellGroups')).length).toBe(4);
+    // dados padrão: o celular principal de 02/11 a 04/11
+    expect(await db.dailyRecords.count()).toBe(3);
+    expect(await db.variants.count()).toBe(96);
+    expect((await getSetting('sellGroups')).length).toBe(8);
+    expect(await db.dailyRecords.where('date').equals('2026-10-20').count()).toBe(0);
     await undoLastRestore();
     expect(await db.dailyRecords.count()).toBe(1);
   });

@@ -20,6 +20,13 @@ export function changeKind(item: ChangeItem): ChangeKind {
 
 export const CHANGELOG: ChangeEntry[] = [
   {
+    id: '2026-11-12a', version: '1.9', date: '12/11/2026', title: 'Celular novo já começa com os dados do principal',
+    items: [
+      ['📱', 'Celular novo (app vazio) já abre com os dados do celular principal até 04/11: cadastro, estoque, vendas e caixa. Juntar com o principal não duplica nada'],
+      ['📒', '“Voltar aos dados iniciais” agora volta para esses mesmos dados'],
+    ],
+  },
+  {
     id: '2026-11-04b', version: '1.8', date: '04/11/2026', title: 'Condicional, fiado, vale, contagem da loja e lucro',
     items: [
       ['👜', 'Novo: Condicional (a cliente levou para provar em casa). Na reserva, escolha “Levou para provar” e até quando. A peça sai da venda, mas continua sendo da loja. Depois: “Ficou” vira venda (dá para escolher quantas ficou) e “Voltou” volta à venda'],

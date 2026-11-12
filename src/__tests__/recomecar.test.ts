@@ -6,7 +6,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { AppDB, db, useDatabase } from '../db/db';
-import { seedIfNeeded, SEED_DATA } from '../db/seed';
+import { prepareFirstRun, seedIfNeeded } from '../db/seed';
 import { uid } from '../lib/util';
 import { startDay } from '../services/days';
 import { createOrder } from '../services/sales';
@@ -16,15 +16,15 @@ import { computeCash, loadStockRows } from '../services/summary';
 import { resetToInitialData, resetToZero, undoLastRestore } from '../services/backup';
 import { getAllSettings } from '../services/settings';
 import { runDiagnostics } from '../services/diagnostics';
+import { mergeBackup } from '../services/sync';
 
 function rng(seed: number) {
   return () => { seed |= 0; seed = (seed + 0x6d2b79f5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
 }
 const CYCLES = Number((globalThis as { process?: { env: Record<string, string | undefined> } }).process?.env.RECOMECAR ?? 80);
-const VARIANTS = SEED_DATA.reduce((n, g) => n + g.variants.length, 0);
 
 /** O app abrindo de novo (depois do botão a página recarrega e roda o carregamento inicial). */
-const reopen = () => seedIfNeeded();
+const reopen = () => prepareFirstRun();
 const counts = async () => ({
   groups: await db.groups.count(), variants: await db.variants.count(), days: await db.dailyRecords.count(),
   orders: await db.orders.count(), cash: await db.cashMovements.count(), moves: await db.stockMovements.count(),
@@ -40,15 +40,19 @@ async function expectZero(where: string) {
   expect([c.opening, c.accumulated, c.cashOnHand, (await loadStockRows(d.id, d.date)).length], `${where}: dia vazio`).toEqual([0, 0, 0, 0]);
 }
 
+/** Dados padrão = celular principal de 02/11 a 04/11 (src/db/defaultData.json). */
 async function expectInitial(where: string) {
   const n = await counts();
-  expect([n.groups, n.variants, n.days, n.orders, n.cash], `${where}: dados iniciais`).toEqual([SEED_DATA.length, VARIANTS, 0, 0, 0]);
-  const d = await startDay('2026-10-31');
+  expect([n.groups, n.variants, n.days, n.orders, n.cash], `${where}: dados padrão`).toEqual([8, 96, 3, 47, 58]);
+  // o próximo dia continua de 04/11: caixa acumulado e estoque que sobrou
+  const d = await startDay('2026-11-05');
+  expect(d.sourceDate, `${where}: continua de 04/11`).toBe('2026-11-04');
   const c = await computeCash(d.id);
-  expect([c.opening, c.cashToday, c.pagamentos, c.cashOnHand], `${where}: caixa do caderno`).toEqual([147480, 88500, 30000, 123000]);
+  expect(c.opening, `${where}: caixa de 04/11`).toBe(1017323);
   const rows = await loadStockRows(d.id, d.date);
-  expect(rows.reduce((s, r) => s + r.item.currentQuantity, 0), `${where}: estoque da lista`).toBe(238);
-  expect((await getAllSettings()).sellGroups.length, `${where}: grupos para vender`).toBe(4);
+  expect(rows.reduce((s, r) => s + r.item.currentQuantity, 0), `${where}: estoque de 04/11`).toBe(415);
+  expect((await getAllSettings()).sellGroups.length, `${where}: grupos para vender`).toBe(8);
+  expect((await runDiagnostics()).findings.filter((f) => f.level === 'erro'), `${where}: diagnóstico`).toEqual([]);
 }
 
 describe('Recomeçar', () => {
@@ -77,7 +81,19 @@ describe('Recomeçar', () => {
     void d; void before;
   });
 
-  it('Voltar aos dados iniciais depois de zerar traz a lista oficial e os cadernos', async () => {
+  it('celular novo (app vazio) abre com os dados padrão; reabrir não carrega de novo', async () => {
+    useDatabase(new AppDB(`novo-${Math.random()}`));
+    expect(await prepareFirstRun()).toBe(true);
+    expect(await prepareFirstRun()).toBe(false);
+    // juntar com o celular principal (mesmos identificadores) não duplica nada
+    const before = await counts();
+    const { default: text } = await import('../db/defaultData.json?raw');
+    await mergeBackup(JSON.parse(text));
+    expect(await counts()).toEqual(before);
+    await expectInitial('celular novo');
+  });
+
+  it('Voltar aos dados iniciais depois de zerar traz os dados padrão (celular principal até 04/11)', async () => {
     useDatabase(new AppDB(`ini-${Math.random()}`));
     await seedIfNeeded();
     await resetToZero(); await reopen();

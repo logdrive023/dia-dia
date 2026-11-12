@@ -265,7 +265,7 @@ export default function SettingsSheet({ open, onClose }: { open: boolean; onClos
 
       <Section icon="🔄" title="Recomeçar" tip={
         <InfoTip title="Recomeçar" example={[
-          ['📒', <><b>Voltar aos dados iniciais:</b> estoque da lista oficial (238 peças) e os cadernos de 30/10 e 31/10</>],
+          ['📒', <><b>Voltar aos dados iniciais:</b> os dados do celular principal de 02/11 a 04/11 (cadastro, estoque, vendas e caixa)</>],
           ['🧹', <><b>Reiniciar tudo do 0:</b> app vazio, sem grupos, sem peças, sem dias, caixa em 0</>],
           ['↩️', 'Nos dois, o app guarda uma cópia antes (Menu › Backup › Voltar como estava)'],
         ]}>Escolha uma das duas. Tudo o que foi lançado neste celular é apagado.</InfoTip>}>
@@ -336,7 +336,7 @@ function DangerConfirm({ zero, onCancel, onConfirm }: { zero: boolean; onCancel:
           <ul className="list-disc pl-5 space-y-0.5">
             <li>todas as <b>vendas</b> e o <b>caixa</b></li>
             <li>todos os <b>dias</b> e o <b>histórico</b></li>
-            <li>{zero ? <>todos os <b>grupos e peças</b> (o app fica vazio)</> : <>o <b>estoque</b> volta para a lista oficial de 30/10</>}</li>
+            <li>{zero ? <>todos os <b>grupos e peças</b> (o app fica vazio)</> : <>tudo volta para os dados do celular principal de 02/11 a 04/11</>}</li>
           </ul>
           <p className="text-[13px] text-slate-500">O app guarda uma cópia antes (Backup › voltar como estava), mas faça um backup se não tiver certeza.</p>
         </div>
@@ -393,7 +393,7 @@ function ResetButtons() {
         <span className="w-10 h-10 rounded-xl bg-blue-100 flex items-center justify-center text-xl shrink-0">📒</span>
         <span className="flex-1 min-w-0">
           <span className="block text-[15px] font-bold text-blue-900">Voltar aos dados iniciais</span>
-          <span className="block text-[12px] text-slate-600 break-words">Estoque da lista oficial + cadernos de 30/10 e 31/10</span>
+          <span className="block text-[12px] text-slate-600 break-words">Celular principal de 02/11 a 04/11</span>
         </span>
       </button>
       <button onClick={() => go('zero')} className="w-full flex items-center gap-3 rounded-xl border-2 border-red-200 bg-red-50 px-3 py-3 text-left active:bg-red-100">

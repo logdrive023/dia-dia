@@ -308,13 +308,13 @@ export function readFileText(f: Blob): Promise<string> {
 }
 
 /**
- * Apaga tudo e volta aos dados iniciais oficiais (estoque da lista, à venda, caixa do caderno).
+ * Apaga tudo e volta aos dados padrão (o celular principal até 04/11: cadastro, estoque, vendas e caixa).
  * Antes guarda uma cópia: dá para “voltar como estava”.
  */
 export async function resetToInitialData() {
-  const { seedIfNeeded } = await import('../db/seed');
+  const { loadDefaultData } = await import('../db/seed');
   await saveSafetyAndClear();
-  await seedIfNeeded();
+  await loadDefaultData();
 }
 
 /**

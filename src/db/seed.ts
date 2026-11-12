@@ -72,6 +72,26 @@ export const VARIANT_COLOR: Record<string, string> = {
 };
 
 /**
+ * Dados padrão do app: o backup do celular principal (02/11 a 04/11/2026: cadastro, estoque, vendas e caixa).
+ * Celular novo (app vazio) e “Voltar aos dados iniciais” começam daqui. Os identificadores são os mesmos do
+ * celular principal, então juntar um celular novo com ele não duplica nada.
+ * Fica num arquivo à parte (carregado só quando precisa), para não pesar a abertura do app.
+ */
+export async function loadDefaultData() {
+  const [{ default: text }, { restoreBackup }] = await Promise.all([import('./defaultData.json?raw'), import('../services/backup')]);
+  await restoreBackup(JSON.parse(text), { keepSafety: false });
+}
+
+/** Ao abrir o app: celular novo (nada gravado e nunca preparado) recebe os dados padrão. */
+export async function prepareFirstRun(): Promise<boolean> {
+  const empty = !(await db.settings.where('key').equals('seedDone').first()) && !(await db.groups.count())
+    && !(await db.dailyRecords.count()) && !(await db.auditLogs.count());
+  if (empty) await loadDefaultData();
+  await seedIfNeeded();
+  return empty;
+}
+
+/**
  * Lista oficial: nem tudo que está no estoque está à venda. À venda ficam só os grupos de "Para vender"
  * (Azul, Plomo, Lila e Broche Rey quando for cadastrado); os outros ficam guardados no estoque.
  */

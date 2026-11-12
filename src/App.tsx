@@ -4,7 +4,7 @@ import { useRegisterSW } from 'virtual:pwa-register/react';
 import { applyUpdate } from './lib/applyUpdate';
 import { setPendingParts, usePendingParts } from './lib/pendingParts';
 import { copyText, openWhatsAppApp } from './services/report';
-import { seedIfNeeded } from './db/seed';
+import { prepareFirstRun } from './db/seed';
 import { autoCloseOldDays, migrateCadastroEntries } from './services/days';
 import { setUpdateState, useUpdateState } from './lib/updateState';
 import { APP_VERSION, CHANGELOG, LATEST_CHANGE, changeKind, type ChangeEntry } from './lib/changelog';
@@ -438,7 +438,7 @@ export default function App() {
     // nunca ficar preso no "Carregando": se o banco não abrir a tempo, mostra o que fazer
     const timer = setTimeout(() => { if (!done) setState('slow'); }, BOOT_TIMEOUT_MS);
     db.open()
-      .then(() => seedIfNeeded())
+      .then(() => prepareFirstRun()) // celular novo: começa com os dados padrão
       .then(() => migrateCadastroEntries()) // conserta o “entrou” antigo do cadastro
       .then(() => autoCloseOldDays()) // dia de ontem que ficou aberto: encerra sozinho
       .then(() => { done = true; clearTimeout(timer); setState('ready'); })
